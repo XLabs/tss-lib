@@ -8,6 +8,9 @@ package tss
 
 import (
 	"fmt"
+
+	"github.com/yossigi/tss-lib/v2/common"
+	"google.golang.org/protobuf/proto"
 )
 
 // fundamental is an error that has a message and a stack, but no caller.
@@ -18,14 +21,14 @@ type Error struct {
 	victim   *PartyID
 	culprits []*PartyID
 
-	trackingId []byte // optional.
+	trackingId *common.TrackingID // optional.
 }
 
 func NewError(err error, task string, round int, victim *PartyID, culprits ...*PartyID) *Error {
 	return &Error{cause: err, task: task, round: round, victim: victim, culprits: culprits}
 }
-func NewTrackableError(err error, task string, round int, victim *PartyID, trackingId []byte, culprits ...*PartyID) *Error {
-	return &Error{cause: err, task: task, round: round, victim: victim, culprits: culprits, trackingId: trackingId}
+func NewTrackableError(err error, task string, round int, victim *PartyID, trackingId *common.TrackingID, culprits ...*PartyID) *Error {
+	return &Error{cause: err, task: task, round: round, victim: victim, culprits: culprits, trackingId: proto.Clone(trackingId).(*common.TrackingID)}
 }
 
 func (err *Error) Unwrap() error { return err.cause }
@@ -52,4 +55,4 @@ func (err *Error) Error() string {
 		err.task, err.victim, err.round, err.cause.Error())
 }
 
-func (err *Error) TrackingId() []byte { return err.trackingId }
+func (err *Error) TrackingId() *common.TrackingID { return err.trackingId }

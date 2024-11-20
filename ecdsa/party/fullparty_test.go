@@ -2,7 +2,6 @@ package party
 
 import (
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,13 +90,7 @@ func (st *signerTester) run(t *testing.T) {
 
 	parties, _ := createFullParties(a, st.participants, st.threshold, st.keygenLocation)
 
-	digestSet := make(map[Digest]bool)
-	for i := 0; i < st.numSignatures; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
-		hash := Digest{}
-		copy(hash[:], d)
-		digestSet[hash] = false
-	}
+	digestSet := createDigests(st.numSignatures)
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*1000),
@@ -113,7 +107,11 @@ func (st *signerTester) run(t *testing.T) {
 
 	for digest := range digestSet {
 		for _, party := range parties {
-			fpSign(a, party, digest)
+			fpSign(a, party, SigningTask{
+				Digest:       digest,
+				Faulties:     nil,
+				AuxilaryData: nil,
+			})
 		}
 	}
 
@@ -143,11 +141,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -168,21 +162,27 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		n.run(a)
 	}()
 
+	var trackingId *common.TrackingID
 	for i := 0; i < len(parties)-1; i++ {
-		fpSign(a, parties[i], hash)
+		info := fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
+		trackingId = info.TrackingID
 	}
 
 	<-donechan
 	impl := parties[len(parties)-1].(*Impl)
 
 	// test:
-	impl.signingHandler.mtx.Lock()
-	singleSigner, ok := impl.signingHandler.digestToSigner[string(hash[:])]
+	v, ok := impl.signingHandler.trackingIDToSigner.Load(trackingId.ToString())
 	a.True(ok)
+
+	singleSigner, ok := v.(*singleSigner)
+	a.True(ok)
+
 	// unless request to sign something, LocalParty should remain nil.
 	a.Nil(singleSigner.localParty)
 	a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
-	parties[len(parties)-1].(*Impl).signingHandler.mtx.Unlock()
 
 	for _, party := range parties {
 		party.Stop()
@@ -190,26 +190,19 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 }
 
-func fpSign(a *assert.Assertions, p FullParty, hash Digest) {
-	err := p.AsyncRequestNewSignature(hash)
-	if errors.Is(err, ErrNotInSigningCommittee) {
-		return
-	}
-
+func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
+	// TODO
+	info, err := p.AsyncRequestNewSignature(st)
 	a.NoError(err)
+
+	return info
 }
 func TestMultipleRequestToSignSameThing(t *testing.T) {
 	a := assert.New(t)
 
 	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	for i := 0; i < 1; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
-		hash := Digest{}
-		copy(hash[:], d)
-		digestSet[hash] = false
-	}
+	digestSet, _ := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*1000),
@@ -217,7 +210,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
+		Timeout:         time.Second * 30 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
@@ -228,7 +221,9 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			go func(digest Digest) {
 				for _, party := range parties {
-					fpSign(a, party, digest)
+					fpSign(a, party, SigningTask{
+						Digest: digest,
+					})
 				}
 			}(digest)
 		}
@@ -263,11 +258,7 @@ func testLateParties(t *testing.T, numLate int) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -289,14 +280,18 @@ func testLateParties(t *testing.T, numLate int) {
 	}()
 
 	for i := 0; i < len(parties)-numLate; i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	<-donechan
 	a.False(n.verifiedAllSignatures())
 
 	for i := len(parties) - numLate; i < len(parties); i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	n.Timeout = time.Second * 20
@@ -312,6 +307,15 @@ func testLateParties(t *testing.T, numLate int) {
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+func createSingleDigest() (map[Digest]bool, Digest) {
+	digestSet := make(map[Digest]bool)
+	d := crypto.Keccak256([]byte("hello, world"))
+	hash := Digest{}
+	copy(hash[:], d)
+	digestSet[hash] = false
+	return digestSet, hash
 }
 
 func TestCleanup(t *testing.T) {
@@ -333,20 +337,29 @@ func TestCleanup(t *testing.T) {
 	}
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
-	fpSign(a, p1, digest)
+	fpSign(a, p1, SigningTask{
+		Digest: digest,
+	})
 
-	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.digestToSigner, 1, "expected 1 signer ")
-	p1.signingHandler.mtx.Unlock()
+	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 1, "expected 1 signer ")
+
 	<-time.After(maxTTL * 2)
 
-	p1.signingHandler.mtx.Lock()
-	a.Lenf(p1.signingHandler.digestToSigner, 0, "expected 0 signers ")
-	p1.signingHandler.mtx.Unlock()
+	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 0, "expected 0 signers ")
 
 	for _, party := range parties {
 		party.Stop()
 	}
+}
+
+func getLen(m *sync.Map) int {
+	l := 0
+	m.Range(func(_, _ interface{}) bool {
+		l++
+		return true
+	})
+
+	return l
 }
 
 type networkSimulator struct {
@@ -402,7 +415,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 				return
 			}
 
-			a.NoError(err)
+			a.NoErrorf(err, "unexpected error: %v, digest %v", err.Cause(), err.TrackingId())
 			a.FailNow("unexpected error")
 
 		// simulating the network:
@@ -551,11 +564,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 
 	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
-	hash := Digest{}
-	copy(hash[:], d)
-	digestSet[hash] = false
+	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
 		outchan:         make(chan tss.Message, len(parties)*20),
@@ -600,7 +609,9 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	)
 
 	for i := 0; i < len(parties); i++ {
-		fpSign(a, parties[i], hash)
+		fpSign(a, parties[i], SigningTask{
+			Digest: hash,
+		})
 	}
 
 	donechan := make(chan struct{})
@@ -652,7 +663,9 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	for digest := range digestSet {
 		go func(digest Digest) {
 			for _, party := range parties {
-				fpSign(a, party, digest)
+				fpSign(a, party, SigningTask{
+					Digest: digest,
+				})
 			}
 		}(digest)
 	}
@@ -668,6 +681,119 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	<-donechan
 	a.True(n.verifiedAllSignatures())
 
+	for _, party := range parties {
+		party.Stop()
+	}
+}
+
+func createDigests(numDigests int) map[Digest]bool {
+	digestSet := make(map[Digest]bool)
+	for i := 0; i < numDigests; i++ {
+		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		hash := Digest{}
+		copy(hash[:], d)
+		digestSet[hash] = false
+	}
+	return digestSet
+}
+
+func TestChangingCommittee(t *testing.T) {
+	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation) // threshold =2 means we need 3 in comittee to sign
+
+	digestSet, hash := createSingleDigest()
+	fmt.Println("old digest:", hash)
+
+	n := networkSimulator{
+		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
+		sigchan:         make(chan *common.SignatureData, len(parties)),
+		errchan:         make(chan *tss.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 120 * time.Duration(len(digestSet)),
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
+
+	barrier := make(chan struct{})
+	go func() {
+		wg := sync.WaitGroup{}
+		for _, party := range parties {
+			wg.Add(1)
+			p := party
+			go func() {
+				defer wg.Done()
+				fpSign(a, p, SigningTask{
+					Digest: hash,
+				})
+			}()
+		}
+		wg.Wait()
+		close(barrier)
+	}()
+
+	go func() {
+		<-barrier
+		for nremoved := 1; nremoved < 5; nremoved++ {
+			fmt.Println("changing comittee, starting signing process again.")
+
+			time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
+			faulties := make([]*tss.PartyID, nremoved)
+			for i := 0; i < nremoved; i++ {
+				faulties[i] = parties[i].(*Impl).partyID
+			}
+			faultiesMap := map[Digest]bool{}
+			for _, pid := range faulties {
+				faultiesMap[pidToDigest(pid.MessageWrapper_PartyID)] = true
+			}
+
+			var prevFaulties []*tss.PartyID
+			if len(faulties)-1 > 0 {
+				prevFaulties = faulties[:len(faulties)-1]
+			}
+			for _, p_ := range parties {
+				p := p_.(*Impl)
+
+				// Dropping ongoing sig to ensure the state of prev sig is `unset`.
+				trackid := p.createTrackingID(SigningTask{
+					Digest:   hash,
+					Faulties: prevFaulties, // prev round faulties.
+				})
+				p.signingHandler.trackingIDToSigner.Delete(trackid.ToString()) // ensures signature is not created.
+
+				// shuffle the order of the parties when telling them to replace the comittee.
+				// (Ensures different ordered faulties array does not affect the signprotocol)
+				seedPerParty := pidToDigest(p.partyID.MessageWrapper_PartyID)
+
+				shuffledFaulties, err := shuffleParties(seedPerParty[:], faulties)
+				a.NoError(err)
+
+				info, err := p.AsyncRequestNewSignature(SigningTask{
+					Digest:       hash,
+					Faulties:     shuffledFaulties,
+					AuxilaryData: []byte{},
+				})
+				a.NoError(err)
+
+				for _, pid := range info.SigningCommittee {
+					a.NotContains(faultiesMap, pidToDigest(pid.MessageWrapper_PartyID))
+				}
+			}
+		}
+	}()
+
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	<-donechan
+	a.True(n.verifiedAllSignatures())
 	for _, party := range parties {
 		party.Stop()
 	}

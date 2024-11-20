@@ -14,6 +14,7 @@ import (
 
 	"github.com/yossigi/tss-lib/v2/common"
 	"github.com/yossigi/tss-lib/v2/tss"
+	"google.golang.org/protobuf/proto"
 )
 
 func (round *finalization) Start() *tss.Error {
@@ -80,8 +81,7 @@ func (round *finalization) Start() *tss.Error {
 		return round.WrapError(fmt.Errorf("signature verification failed"))
 	}
 
-	round.data.TrackingId = make([]byte, len(round.temp.trackingID)) // for debugging
-	copy(round.data.TrackingId, round.temp.trackingID)
+	round.data.TrackingId = proto.Clone(round.temp.trackingID).(*common.TrackingID)
 
 	round.sendSignature()
 

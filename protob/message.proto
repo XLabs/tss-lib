@@ -9,6 +9,7 @@ package binance.tsslib;
 option go_package = "./tss";
 
 import "google/protobuf/any.proto";
+import "protob/signature.proto";
 
 /*
  * Wrapper for TSS messages, often read by the transport layer and not itself sent over the wire
@@ -41,5 +42,5 @@ message MessageWrapper {
   google.protobuf.Any message = 10;
 
   // Used to differentiate between simultaneous signing protocol runs.
-  optional bytes trackingID = 11;
+  optional TrackingID trackingID = 11;
 }

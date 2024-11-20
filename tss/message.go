@@ -9,6 +9,7 @@ package tss
 import (
 	"fmt"
 
+	"github.com/yossigi/tss-lib/v2/common"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -80,7 +81,7 @@ var (
 
 // NewMessageWrapper constructs a MessageWrapper from routing metadata and content
 // digest is an additional parameter
-func NewMessageWrapper(routing MessageRouting, content MessageContent, trackingID ...byte) *MessageWrapper {
+func NewMessageWrapper(routing MessageRouting, content MessageContent, trackingID ...*common.TrackingID) *MessageWrapper {
 	// marshal the content to the ProtoBuf Any type
 	any, _ := anypb.New(content)
 	// convert given PartyIDs to the wire format
@@ -91,15 +92,21 @@ func NewMessageWrapper(routing MessageRouting, content MessageContent, trackingI
 			to[i] = routing.To[i].MessageWrapper_PartyID
 		}
 	}
-	return &MessageWrapper{
+
+	m := &MessageWrapper{
 		IsBroadcast:             routing.IsBroadcast,
 		IsToOldCommittee:        routing.IsToOldCommittee,
 		IsToOldAndNewCommittees: routing.IsToOldAndNewCommittees,
 		From:                    routing.From.MessageWrapper_PartyID,
 		To:                      to,
 		Message:                 any,
-		TrackingID:              trackingID,
 	}
+
+	if len(trackingID) > 0 {
+		m.TrackingID = trackingID[0]
+	}
+
+	return m
 }
 
 // ----- //

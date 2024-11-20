@@ -35,6 +35,18 @@ type Parameters struct {
 
 type Digest [32]byte
 
+type SigningTask struct {
+	Digest       Digest
+	Faulties     []*tss.PartyID // Can be nil
+	AuxilaryData []byte         // can be nil
+}
+
+type SigningInfo struct {
+	SigningCommittee tss.SortedPartyIDs
+	TrackingID       *common.TrackingID
+	IsSigner         bool
+}
+
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
 	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
@@ -49,13 +61,16 @@ type FullParty interface {
 	// AsyncRequestNewSignature begins the signing protocol over the given digest.
 	// The signature protocol will not begin until Start() is called, even if this FullParty received
 	// messages over the network.
-	AsyncRequestNewSignature(Digest) error
+	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
 	Update(tss.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() *ecdsa.PublicKey
+
+	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
+	GetSigningInfo(s SigningTask) (*SigningInfo, error)
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -73,13 +88,13 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 	}
 
 	pctx := tss.NewPeerContext(tss.SortPartyIDs(p.PartyIDs))
+
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
-		ctx:         ctx,
-		cancelFunc:  cancelF,
-		partyID:     p.Self,
-		peerContext: pctx,
-		parameters:  tss.NewParameters(tss.S256(), pctx, p.Self, len(p.PartyIDs), p.Threshold),
+		ctx:        ctx,
+		cancelFunc: cancelF,
+		partyID:    p.Self,
+		parameters: tss.NewParameters(tss.S256(), pctx, p.Self, len(p.PartyIDs), p.Threshold),
 
 		keygenHandler: &KeygenHandler{
 			StoragePath:       p.WorkDir,
@@ -91,9 +106,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		},
 
 		signingHandler: &signingHandler{
-			mtx:              sync.Mutex{},
-			digestToSigner:   map[string]*singleSigner{},
-			sigPartReadyChan: nil, // set up during Start()
+			trackingIDToSigner: sync.Map{},
+			sigPartReadyChan:   nil, // set up during Start()
 		},
 
 		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.PartyIDs)),
@@ -106,6 +120,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 		loadDistributionSeed: p.LoadDistributionSeed,
 	}
+
 	return imp, nil
 }
 

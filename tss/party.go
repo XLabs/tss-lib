@@ -168,15 +168,20 @@ func BaseUpdate(p Party, msg ParsedMessage, task string) (ok bool, err *Error) {
 			return r(false, err)
 		}
 		if p.round().CanProceed() {
+			var trackid *common.TrackingID
+			if msg != nil && msg.WireMsg() != nil {
+				trackid = msg.WireMsg().TrackingID
+			}
+
 			if p.advance(); p.round() != nil {
 				if err := p.round().Start(); err != nil {
 					return r(false, err)
 				}
 				rndNum := p.round().RoundNumber()
-				common.Logger.Infof("party %s: %s round %d started", p.round().Params().PartyID(), task, rndNum)
+				common.Logger.Infof("party %s: %s round %d started (tracking id: %v)", p.round().Params().PartyID(), task, rndNum, trackid.ToString())
 			} else {
 				// finished! the round implementation will have sent the data through the `end` channel.
-				common.Logger.Infof("party %s: %s finished!", p.PartyID(), task)
+				common.Logger.Infof("party %s: %s finished! (tracking id: %v)", p.PartyID(), task, trackid.ToString())
 			}
 			p.unlock()                      // recursive so can't defer after return
 			return BaseUpdate(p, msg, task) // re-run round update or finish)

@@ -17,6 +17,7 @@ import (
 	"github.com/yossigi/tss-lib/v2/crypto/mta"
 	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
 	"github.com/yossigi/tss-lib/v2/tss"
+	"google.golang.org/protobuf/proto"
 )
 
 // Implements Party
@@ -57,7 +58,7 @@ type (
 		localMessageStore
 
 		// used to track the session of the current running protocol.
-		trackingID []byte
+		trackingID *common.TrackingID
 
 		// temp data (thrown away after sign) / round 1
 		w,
@@ -105,7 +106,7 @@ type (
 
 func NewLocalParty(
 	msg *big.Int,
-	trackingID []byte,
+	trackingID *common.TrackingID,
 	params *tss.Parameters,
 	key keygen.LocalPartySaveData,
 	out chan<- tss.Message,
@@ -117,7 +118,7 @@ func NewLocalParty(
 // NewLocalPartyWithKDD returns a party with key derivation delta for HD support
 func NewLocalPartyWithKDD(
 	msg *big.Int,
-	trackingID []byte,
+	trackingID *common.TrackingID,
 	params *tss.Parameters,
 	key keygen.LocalPartySaveData,
 	keyDerivationDelta *big.Int,
@@ -163,8 +164,8 @@ func NewLocalPartyWithKDD(
 	p.temp.pi2jis = make([]*mta.ProofBobWC, partyCount)
 	p.temp.vs = make([]*big.Int, partyCount)
 
-	p.temp.trackingID = make([]byte, len(trackingID))
-	copy(p.temp.trackingID, trackingID)
+	p.temp.trackingID = proto.Clone(trackingID).(*common.TrackingID)
+
 	return p
 }
 
