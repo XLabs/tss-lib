@@ -17,7 +17,7 @@ import (
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func TestFlattenECPoints(t *testing.T) {

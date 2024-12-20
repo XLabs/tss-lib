@@ -10,12 +10,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/crypto/commitments"
-	"github.com/yossigi/tss-lib/v2/crypto/vss"
-	"github.com/yossigi/tss-lib/v2/eddsa/keygen"
-	"github.com/yossigi/tss-lib/v2/eddsa/signing"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/crypto/commitments"
+	"github.com/xlabs/tss-lib/v2/crypto/vss"
+	"github.com/xlabs/tss-lib/v2/eddsa/keygen"
+	"github.com/xlabs/tss-lib/v2/eddsa/signing"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // round 1 represents round 1 of the keygen part of the EDDSA TSS spec

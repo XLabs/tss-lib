@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/common"
 )
 
 func TestRejectionSample(t *testing.T) {

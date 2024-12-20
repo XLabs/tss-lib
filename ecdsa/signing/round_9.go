@@ -9,8 +9,8 @@ package signing
 import (
 	"errors"
 
-	"github.com/yossigi/tss-lib/v2/crypto/commitments"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/crypto/commitments"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func (round *round9) Start() *tss.Error {

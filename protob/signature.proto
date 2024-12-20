@@ -7,7 +7,7 @@
 syntax = "proto3";
 
 package binance.tsslib;
-option go_package = "github.com/yossigi/tss-lib/v2/common";
+option go_package = "github.com/xlabs/tss-lib/v2/common";
 
 
 // TrackingID is used to track the specific session when multiple sessions are running in parallel.

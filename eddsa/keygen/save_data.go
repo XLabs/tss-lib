@@ -10,8 +10,8 @@ import (
 	"encoding/hex"
 	"math/big"
 
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 type (

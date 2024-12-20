@@ -17,8 +17,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/yossigi/tss-lib/v2/test"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/test"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (

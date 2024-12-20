@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/yossigi/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/common"
 )
 
 // PrepareForSigning(), Fig. 7

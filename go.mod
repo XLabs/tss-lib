@@ -1,4 +1,4 @@
-module github.com/yossigi/tss-lib/v2
+module github.com/xlabs/tss-lib/v2
 
 go 1.21
 

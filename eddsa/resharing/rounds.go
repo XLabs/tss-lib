@@ -7,8 +7,8 @@
 package resharing
 
 import (
-	"github.com/yossigi/tss-lib/v2/eddsa/keygen"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/eddsa/keygen"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (

@@ -13,7 +13,7 @@
 package tss
 
 import (
-	common "github.com/yossigi/tss-lib/v2/common"
+	common "github.com/xlabs/tss-lib/v2/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
