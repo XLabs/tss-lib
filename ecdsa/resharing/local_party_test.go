@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package resharing_test
+package resharing
 
 import (
 	"crypto/ecdsa"
@@ -176,7 +176,7 @@ signing:
 
 	for j, signPID := range signPIDs {
 		params := tss.NewParameters(tss.S256(), signP2pCtx, signPID, len(signPIDs), newThreshold)
-		P := signing.NewLocalParty(big.NewInt(42), params, signKeys[j], signOutCh, signEndCh).(*signing.LocalParty)
+		P := signing.NewLocalParty(big.NewInt(42), nil, params, signKeys[j], signOutCh, signEndCh).(*signing.LocalParty)
 		signParties = append(signParties, P)
 		go func(P *signing.LocalParty) {
 			if err := P.Start(); err != nil {

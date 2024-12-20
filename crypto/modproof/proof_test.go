@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/xlabs/tss-lib/v2/crypto/modproof"
 	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
 )
 
@@ -23,11 +24,11 @@ func TestMod(test *testing.T) {
 
 	P, Q, N := preParams.PaillierSK.P, preParams.PaillierSK.Q, preParams.PaillierSK.N
 
-	proof, err := NewProof(Session, N, P, Q, rand.Reader)
+	proof, err := modproof.NewProof(Session, N, P, Q, rand.Reader)
 	assert.NoError(test, err)
 
 	proofBzs := proof.Bytes()
-	proof, err = NewProofFromBytes(proofBzs[:])
+	proof, err = modproof.NewProofFromBytes(proofBzs[:])
 	assert.NoError(test, err)
 
 	ok := proof.Verify(Session, N)

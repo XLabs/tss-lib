@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package facproof_test
+package facproof
 
 import (
 	"crypto/rand"
