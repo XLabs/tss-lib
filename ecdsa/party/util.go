@@ -3,9 +3,9 @@ package party
 import (
 	"encoding/binary"
 
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
-	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
+	"github.com/xlabs/tss-lib/v2/ecdsa/signing"
+	"github.com/xlabs/tss-lib/v2/tss"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
 )

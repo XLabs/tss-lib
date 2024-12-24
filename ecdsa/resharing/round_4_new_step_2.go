@@ -12,16 +12,16 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/yossigi/tss-lib/v2/crypto/facproof"
+	"github.com/xlabs/tss-lib/v2/crypto/facproof"
 
 	errors2 "github.com/pkg/errors"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/crypto/commitments"
-	"github.com/yossigi/tss-lib/v2/crypto/vss"
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/crypto/commitments"
+	"github.com/xlabs/tss-lib/v2/crypto/vss"
+	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func (round *round4) Start() *tss.Error {

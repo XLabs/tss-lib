@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package resharing_test
+package resharing
 
 import (
 	"crypto/ecdsa"
@@ -17,12 +17,12 @@ import (
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
-	"github.com/yossigi/tss-lib/v2/ecdsa/signing"
-	"github.com/yossigi/tss-lib/v2/test"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
+	"github.com/xlabs/tss-lib/v2/ecdsa/signing"
+	"github.com/xlabs/tss-lib/v2/test"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (
@@ -176,7 +176,7 @@ signing:
 
 	for j, signPID := range signPIDs {
 		params := tss.NewParameters(tss.S256(), signP2pCtx, signPID, len(signPIDs), newThreshold)
-		P := signing.NewLocalParty(big.NewInt(42), params, signKeys[j], signOutCh, signEndCh).(*signing.LocalParty)
+		P := signing.NewLocalParty(big.NewInt(42), nil, params, signKeys[j], signOutCh, signEndCh).(*signing.LocalParty)
 		signParties = append(signParties, P)
 		go func(P *signing.LocalParty) {
 			if err := P.Start(); err != nil {

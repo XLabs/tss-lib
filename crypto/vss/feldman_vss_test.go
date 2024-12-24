@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package vss_test
+package vss
 
 import (
 	"crypto/rand"
@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func TestCheckIndexesDup(t *testing.T) {

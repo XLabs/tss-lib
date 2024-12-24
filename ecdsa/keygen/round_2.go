@@ -12,11 +12,11 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/yossigi/tss-lib/v2/crypto/facproof"
-	"github.com/yossigi/tss-lib/v2/crypto/modproof"
+	"github.com/xlabs/tss-lib/v2/crypto/facproof"
+	"github.com/xlabs/tss-lib/v2/crypto/modproof"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (

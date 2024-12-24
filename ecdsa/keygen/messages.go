@@ -9,15 +9,15 @@ package keygen
 import (
 	"math/big"
 
-	"github.com/yossigi/tss-lib/v2/crypto/facproof"
-	"github.com/yossigi/tss-lib/v2/crypto/modproof"
+	"github.com/xlabs/tss-lib/v2/crypto/facproof"
+	"github.com/xlabs/tss-lib/v2/crypto/modproof"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	cmt "github.com/yossigi/tss-lib/v2/crypto/commitments"
-	"github.com/yossigi/tss-lib/v2/crypto/dlnproof"
-	"github.com/yossigi/tss-lib/v2/crypto/paillier"
-	"github.com/yossigi/tss-lib/v2/crypto/vss"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	cmt "github.com/xlabs/tss-lib/v2/crypto/commitments"
+	"github.com/xlabs/tss-lib/v2/crypto/dlnproof"
+	"github.com/xlabs/tss-lib/v2/crypto/paillier"
+	"github.com/xlabs/tss-lib/v2/crypto/vss"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // These messages were generated from Protocol Buffers definitions into ecdsa-keygen.pb.go

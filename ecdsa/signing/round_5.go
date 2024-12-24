@@ -12,10 +12,10 @@ import (
 
 	errors2 "github.com/pkg/errors"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/crypto/commitments"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/crypto/commitments"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func (round *round5) Start() *tss.Error {

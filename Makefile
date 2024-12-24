@@ -8,11 +8,11 @@ all: protob test
 
 protob:
 	@echo "--> Building Protocol Buffers"
-	@for protocol in message signature ecdsa-keygen ecdsa-signing ecdsa-resharing eddsa-keygen eddsa-signing eddsa-resharing; do \
+	@for protocol in message signature ecdsa-keygen ecdsa-signing ecdsa-resharing; do \
 		echo "Generating $$protocol.pb.go" ; \
 		protoc --go_out=. ./protob/$$protocol.proto ; \
 	done
-	mv ./github.com/yossigi/tss-lib/v2/common/signature.pb.go ./common
+	mv ./github.com/xlabs/tss-lib/v2/common/signature.pb.go ./common
 	rm -rf ./github.com
 
 build: protob

@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/crypto"
 )
 
 // PrepareForSigning(), GG18Spec (11) Fig. 14

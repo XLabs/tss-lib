@@ -13,7 +13,7 @@ Permissively MIT Licensed.
 Note! This is a library for developers. You may find a TSS tool that you can use with the Binance Chain CLI [here](https://docs.binance.org/tss.html).
 
 ## Introduction
-This is an implementation of multi-party {t,n}-threshold ECDSA (Elliptic Curve Digital Signature Algorithm) based on Gennaro and Goldfeder CCS 2018 [1] and EdDSA (Edwards-curve Digital Signature Algorithm) following a similar approach.
+This is an implementation of multi-party {t,n}-threshold ECDSA (Elliptic Curve Digital Signature Algorithm) based on Gennaro and Goldfeder CCS 2018 [1].
 
 This library includes three protocols:
 
@@ -25,8 +25,6 @@ This library includes three protocols:
 
 ## Rationale
 ECDSA is used extensively for crypto-currencies such as Bitcoin, Ethereum (secp256k1 curve), NEO (NIST P-256 curve) and many more. 
-
-EdDSA is used extensively for crypto-currencies such as Cardano, Aeternity, Stellar Lumens and many more.
 
 For such currencies this technique may be used to create crypto wallets where multiple parties must collaborate to sign transactions. See [MultiSig Use Cases](https://en.bitcoin.it/wiki/Multisignature#Multisignature_Applications)
 
@@ -60,8 +58,6 @@ ctx := tss.NewPeerContext(parties)
 // Select an elliptic curve
 // use ECDSA
 curve := tss.S256()
-// or use EdDSA
-// curve := tss.Edwards()
 
 params := tss.NewParameters(curve, ctx, thisParty, len(parties), threshold)
 

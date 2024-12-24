@@ -4,7 +4,7 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-package crypto_test
+package crypto
 
 import (
 	"encoding/hex"
@@ -17,7 +17,7 @@ import (
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 func TestFlattenECPoints(t *testing.T) {

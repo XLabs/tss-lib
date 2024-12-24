@@ -23,11 +23,11 @@ import (
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
-	"github.com/yossigi/tss-lib/v2/common"
-	utils "github.com/yossigi/tss-lib/v2/ecdsa/ethereum"
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
-	"github.com/yossigi/tss-lib/v2/test"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	utils "github.com/xlabs/tss-lib/v2/ecdsa/ethereum"
+	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
+	"github.com/xlabs/tss-lib/v2/test"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (

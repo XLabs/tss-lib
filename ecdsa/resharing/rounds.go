@@ -10,10 +10,10 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/yossigi/tss-lib/v2/common"
-	"github.com/yossigi/tss-lib/v2/crypto"
-	"github.com/yossigi/tss-lib/v2/ecdsa/keygen"
-	"github.com/yossigi/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/crypto"
+	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 const (
