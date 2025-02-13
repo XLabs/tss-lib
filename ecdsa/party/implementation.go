@@ -65,6 +65,8 @@ type singleSigner struct {
 
 	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
 	state signerState
+
+	sync.Once
 }
 
 // signingHandler handles all signers in the FullParty.
@@ -265,7 +267,7 @@ func (p *Impl) initCryptopool() {
 		}
 	}
 
-	for i := 0; i < runtime.NumCPU(); i++ {
+	for i := 0; i < runtime.NumCPU()*2; i++ {
 		go p.cryptoWorker()
 	}
 }
@@ -288,38 +290,53 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	trackid := p.createTrackingID(s)
 
+	// fast lock.
 	signer, err := p.getOrCreateSingleSigner(trackid)
 	if err != nil {
 		return nil, err
 	}
 
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	if err := p.unsafeSetLocalParty(signer); err != nil {
+	info, err := p.GetSigningInfo(s)
+	if err != nil {
 		return nil, err
 	}
 
-	info := &SigningInfo{
-		SigningCommittee: signer.committee,
-		TrackingID:       signer.trackingId,
-		IsSigner:         isInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee)),
-	}
+	asyncTask := func() {
+		// long lock for a single TSS task (not the entire FullParty).
+		signer.mtx.Lock()
+		defer signer.mtx.Unlock()
 
-	if signer.state != set {
-		return info, nil // might've changed before we got the lock. (due to the fault-tolerance)
-	}
+		// this task is cryptographically heavy.
+		if err := p.unsafeSetLocalParty(signer); err != nil {
+			tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, trackid)
+			p.reportError(tsserr)
+			return
+		}
 
-	for _, msgArr := range signer.messageBuffer {
-		for _, message := range msgArr {
-			ok, err := signer.unsafeFeedLocalParty(message)
-			if !ok {
-				p.reportError(err)
+		if signer.state != set {
+			return // not in committee, or, any other reason
+		}
+
+		for _, msgArr := range signer.messageBuffer {
+			for _, message := range msgArr {
+				ok, err := signer.unsafeFeedLocalParty(message)
+				if !ok {
+					p.reportError(err)
+				}
 			}
 		}
 	}
 
-	return info, nil
+	select {
+	case <-p.ctx.Done():
+		// failed to pass this signer to the crypto worker.
+		// unlocking it to avoid deadlocks.
+		signer.mtx.Unlock()
+
+		return nil, p.ctx.Err()
+	case p.cryptoWorkChan <- asyncTask:
+		return info, nil
+	}
 }
 
 // The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
