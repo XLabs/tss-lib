@@ -65,6 +65,8 @@ type singleSigner struct {
 
 	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
 	state signerState
+
+	sync.Once
 }
 
 // signingHandler handles all signers in the FullParty.
@@ -91,6 +93,7 @@ type Impl struct {
 	signingHandler *signingHandler
 
 	incomingMessagesChannel chan tss.ParsedMessage
+	startSignerTaskChan     chan *singleSigner
 
 	errorChannel           chan<- *tss.Error
 	outChan                chan tss.Message
@@ -217,10 +220,15 @@ func (p *Impl) worker() {
 			default:
 				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.partyID, message.GetFrom())
 			}
+
+		case signer := <-p.startSignerTaskChan:
+			p.startSigner(signer)
+
 		case o := <-p.keygenHandler.ProtocolEndOutput:
 			if err := p.keygenHandler.storeKeygenData(o); err != nil {
 				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.partyID, nil)
 			}
+
 		case <-p.ctx.Done():
 			return
 		}
@@ -236,7 +244,8 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	p.signatureOutputChannel = signatureOutputChannel
 	p.outChan = outChannel
 
-	for i := 0; i < runtime.NumCPU(); i++ {
+	// since the worker needs to contend for locks, we can add more than the number of CPUs.
+	for i := 0; i < runtime.NumCPU()*2; i++ {
 		go p.worker()
 	}
 
@@ -288,28 +297,52 @@ func (p *Impl) Stop() {
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	trackid := p.createTrackingID(s)
 
+	// fast lock.
 	signer, err := p.getOrCreateSingleSigner(trackid)
 	if err != nil {
 		return nil, err
 	}
 
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	if err := p.unsafeSetLocalParty(signer); err != nil {
+	info, err := p.GetSigningInfo(s)
+	if err != nil {
 		return nil, err
 	}
 
-	info := &SigningInfo{
-		SigningCommittee: signer.committee,
-		TrackingID:       signer.trackingId,
-		IsSigner:         isInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee)),
+	select {
+	case <-p.ctx.Done():
+		return nil, p.ctx.Err()
+
+	case p.startSignerTaskChan <- signer:
+	}
+
+	return info, nil
+}
+
+func (p *Impl) startSigner(signer *singleSigner) {
+	if signer == nil {
+		return
+	}
+
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
+	// The following method initiates the localParty (if it’s a committee
+	//  member). Starting the localParty will involve computationally
+	// intensive cryptographic operations.
+	if err := p.unsafeSetLocalParty(signer); err != nil {
+		tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, signer.trackingId)
+		p.reportError(tsserr)
+
+		return
 	}
 
 	if signer.state != set {
-		return info, nil // might've changed before we got the lock. (due to the fault-tolerance)
+		return // not in committee, or, any other reason
 	}
 
+	// If the single signer had received all messages from the committee,
+	// the following loop would involve significant cryptographic computations.
+	// Conversely, if the single signer hadn’t received all messages, the loop would be relatively light.
 	for _, msgArr := range signer.messageBuffer {
 		for _, message := range msgArr {
 			ok, err := signer.unsafeFeedLocalParty(message)
@@ -318,8 +351,6 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 			}
 		}
 	}
-
-	return info, nil
 }
 
 // The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
