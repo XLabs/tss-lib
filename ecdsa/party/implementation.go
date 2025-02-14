@@ -306,7 +306,9 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 		signer.mtx.Lock()
 		defer signer.mtx.Unlock()
 
-		// this task is cryptographically heavy.
+		// The following method initiates the localParty (if it’s a committee
+		//  member). Starting the localParty will involve computationally
+		// intensive cryptographic operations.
 		if err := p.unsafeSetLocalParty(signer); err != nil {
 			tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, trackid)
 			p.reportError(tsserr)
@@ -317,6 +319,9 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 			return // not in committee, or, any other reason
 		}
 
+		// If the single signer had received all messages from the committee,
+		// the following loop would involve significant cryptographic computations.
+		// Conversely, if the single signer hadn’t received all messages, the loop would be relatively light.
 		for _, msgArr := range signer.messageBuffer {
 			for _, message := range msgArr {
 				ok, err := signer.unsafeFeedLocalParty(message)
@@ -329,10 +334,6 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 
 	select {
 	case <-p.ctx.Done():
-		// failed to pass this signer to the crypto worker.
-		// unlocking it to avoid deadlocks.
-		signer.mtx.Unlock()
-
 		return nil, p.ctx.Err()
 	case p.cryptoWorkChan <- asyncTask:
 		return info, nil
