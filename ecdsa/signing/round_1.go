@@ -101,7 +101,9 @@ func (round *round1) Start() *tss.Error {
 
 		}(j, Pj)
 
-		round.AsyncWorkComputation(asyncTask)
+		if err := round.runAsyncTask(asyncTask); err != nil {
+			return round.WrapError(err)
+		}
 	}
 
 	wg.Wait()
