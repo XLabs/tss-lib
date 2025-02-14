@@ -93,6 +93,7 @@ type Impl struct {
 	signingHandler *signingHandler
 
 	incomingMessagesChannel chan tss.ParsedMessage
+	startSignerTaskChan     chan *singleSigner
 
 	errorChannel           chan<- *tss.Error
 	outChan                chan tss.Message
@@ -219,10 +220,15 @@ func (p *Impl) worker() {
 			default:
 				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.partyID, message.GetFrom())
 			}
+
+		case signer := <-p.startSignerTaskChan:
+			p.startSigner(signer)
+
 		case o := <-p.keygenHandler.ProtocolEndOutput:
 			if err := p.keygenHandler.storeKeygenData(o); err != nil {
 				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.partyID, nil)
 			}
+
 		case <-p.ctx.Done():
 			return
 		}
@@ -238,7 +244,8 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	p.signatureOutputChannel = signatureOutputChannel
 	p.outChan = outChannel
 
-	for i := 0; i < runtime.NumCPU(); i++ {
+	// since the worker needs to contend for locks, we can add more than the number of CPUs.
+	for i := 0; i < runtime.NumCPU()*2; i++ {
 		go p.worker()
 	}
 
@@ -267,7 +274,7 @@ func (p *Impl) initCryptopool() {
 		}
 	}
 
-	for i := 0; i < runtime.NumCPU()*2; i++ {
+	for i := 0; i < runtime.NumCPU(); i++ {
 		go p.cryptoWorker()
 	}
 }
@@ -301,42 +308,48 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 		return nil, err
 	}
 
-	asyncTask := func() {
-		// long lock for a single TSS task (not the entire FullParty).
-		signer.mtx.Lock()
-		defer signer.mtx.Unlock()
-
-		// The following method initiates the localParty (if it’s a committee
-		//  member). Starting the localParty will involve computationally
-		// intensive cryptographic operations.
-		if err := p.unsafeSetLocalParty(signer); err != nil {
-			tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, trackid)
-			p.reportError(tsserr)
-			return
-		}
-
-		if signer.state != set {
-			return // not in committee, or, any other reason
-		}
-
-		// If the single signer had received all messages from the committee,
-		// the following loop would involve significant cryptographic computations.
-		// Conversely, if the single signer hadn’t received all messages, the loop would be relatively light.
-		for _, msgArr := range signer.messageBuffer {
-			for _, message := range msgArr {
-				ok, err := signer.unsafeFeedLocalParty(message)
-				if !ok {
-					p.reportError(err)
-				}
-			}
-		}
-	}
-
 	select {
 	case <-p.ctx.Done():
 		return nil, p.ctx.Err()
-	case p.cryptoWorkChan <- asyncTask:
-		return info, nil
+
+	case p.startSignerTaskChan <- signer:
+	}
+
+	return info, nil
+}
+
+func (p *Impl) startSigner(signer *singleSigner) {
+	if signer == nil {
+		return
+	}
+
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
+	// The following method initiates the localParty (if it’s a committee
+	//  member). Starting the localParty will involve computationally
+	// intensive cryptographic operations.
+	if err := p.unsafeSetLocalParty(signer); err != nil {
+		tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, signer.trackingId)
+		p.reportError(tsserr)
+
+		return
+	}
+
+	if signer.state != set {
+		return // not in committee, or, any other reason
+	}
+
+	// If the single signer had received all messages from the committee,
+	// the following loop would involve significant cryptographic computations.
+	// Conversely, if the single signer hadn’t received all messages, the loop would be relatively light.
+	for _, msgArr := range signer.messageBuffer {
+		for _, message := range msgArr {
+			ok, err := signer.unsafeFeedLocalParty(message)
+			if !ok {
+				p.reportError(err)
+			}
+		}
 	}
 }
 

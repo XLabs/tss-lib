@@ -111,6 +111,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		},
 
 		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.PartyIDs)),
+		startSignerTaskChan:     make(chan *singleSigner),
 
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
