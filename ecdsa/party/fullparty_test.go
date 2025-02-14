@@ -632,7 +632,6 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 		party.Stop()
 	}
 
-	time.Sleep(time.Second * 3)
 	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
 
 	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
