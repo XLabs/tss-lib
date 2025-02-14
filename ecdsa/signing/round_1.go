@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/crypto"
@@ -26,6 +27,11 @@ func newRound1(params *tss.Parameters, key *keygen.LocalPartySaveData, data *com
 	return &round1{
 		&base{params, key, data, temp, out, end, make([]bool, len(params.Parties().IDs())), false, 1},
 	}
+}
+
+type result[T any] struct {
+	msg T
+	err *tss.Error
 }
 
 func (round *round1) Start() *tss.Error {
@@ -64,18 +70,49 @@ func (round *round1) Start() *tss.Error {
 	i := round.PartyID().Index
 	round.ok[i] = true
 
+	numParallel := round.Parties().IDs().Len() - 1 // -1 for self
+
+	wg := sync.WaitGroup{}
+	wg.Add(numParallel)
+
+	msgs := make(chan result[tss.ParsedMessage], numParallel)
+
 	for j, Pj := range round.Parties().IDs() {
 		if j == i {
 			continue
 		}
-		cA, pi, err := mta.AliceInit(round.Params().EC(), round.key.PaillierPKs[i], k, round.key.NTildej[j], round.key.H1j[j], round.key.H2j[j], round.Rand())
-		if err != nil {
-			return round.WrapError(fmt.Errorf("failed to init mta: %v", err))
-		}
-		r1msg1 := NewSignRound1Message1(Pj, round.PartyID(), cA, pi, round.temp.trackingID)
-		round.temp.cis[j] = cA
 
-		if err := round.sendMessage(r1msg1); err != nil {
+		asyncTask := func(j int, Pj *tss.PartyID) func() {
+			return func() {
+				defer wg.Done()
+
+				cA, pi, err := mta.AliceInit(round.Params().EC(), round.key.PaillierPKs[i], k, round.key.NTildej[j], round.key.H1j[j], round.key.H2j[j], round.Rand())
+				if err != nil {
+					msgs <- result[tss.ParsedMessage]{nil, round.WrapError(fmt.Errorf("failed to init mta: %v", err))}
+
+					return
+				}
+
+				r1msg1 := NewSignRound1Message1(Pj, round.PartyID(), cA, pi, round.temp.trackingID)
+				round.temp.cis[j] = cA
+
+				msgs <- result[tss.ParsedMessage]{r1msg1, nil}
+			}
+
+		}(j, Pj)
+
+		round.AsyncWorkComputation(asyncTask)
+	}
+
+	wg.Wait()
+	close(msgs)
+
+	for r1msg1 := range msgs {
+		if r1msg1.err != nil {
+			return r1msg1.err
+		}
+
+		if err := round.sendMessage(r1msg1.msg); err != nil {
 			return err
 		}
 	}

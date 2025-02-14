@@ -623,10 +623,14 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	// stopping everyone to close the threadpools.
 	<-chanReceivedAsyncTask
 	for _, party := range parties {
-		party.Stop()
+		party.(*Impl).cancelFunc()
 	}
 	close(barrier)
 	<-donechan
+
+	for _, party := range parties {
+		party.Stop()
+	}
 
 	time.Sleep(time.Second * 3)
 	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
