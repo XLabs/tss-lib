@@ -603,7 +603,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	}
 
 	a.Equal(
-		len(parties)*(runtime.NumCPU()*3+1)+goroutinesstart,
+		len(parties)*(numCryptoWorker+numHandlerWorkers+1)+goroutinesstart,
 		runtime.NumGoroutine(),
 		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
 	)

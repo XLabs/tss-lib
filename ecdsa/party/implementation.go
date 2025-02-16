@@ -242,7 +242,7 @@ func (p *Impl) worker() {
 }
 
 var (
-	numCryptoWorker   = runtime.NumCPU()
+	numCryptoWorker   = runtime.NumCPU() + 1 // plus one to ensure more workers than CPUs in case of blocking on blocking on memory access.
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
