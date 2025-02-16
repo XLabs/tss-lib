@@ -101,6 +101,8 @@ type Impl struct {
 	cryptoWorkChan         chan func()
 	maxTTl                 time.Duration
 	loadDistributionSeed   []byte
+
+	workersWg sync.WaitGroup
 }
 
 func hash(msg []byte) Digest {
@@ -108,6 +110,8 @@ func hash(msg []byte) Digest {
 }
 
 func (p *Impl) cleanupWorker() {
+	defer p.workersWg.Done()
+
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -209,6 +213,8 @@ func (k *KeygenHandler) getSavedParams() *keygen.LocalPartySaveData {
 
 // The worker serves as messages courier to all "localParty" instances.
 func (p *Impl) worker() {
+	defer p.workersWg.Done()
+
 	for {
 		select {
 		case message := <-p.incomingMessagesChannel:
@@ -235,6 +241,11 @@ func (p *Impl) worker() {
 	}
 }
 
+var (
+	numCryptoWorker   = runtime.NumCPU() + 1 // plus one to ensure more workers than CPUs in case of blocking on blocking on memory access.
+	numHandlerWorkers = runtime.NumCPU() * 2
+)
+
 func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error {
 	if outChannel == nil || signatureOutputChannel == nil || errChannel == nil {
 		return errors.New("nil channel passed to Start()")
@@ -244,8 +255,9 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	p.signatureOutputChannel = signatureOutputChannel
 	p.outChan = outChannel
 
+	p.workersWg.Add(numCryptoWorker + numHandlerWorkers + 1) // +1 for cleanup worker.
 	// since the worker needs to contend for locks, we can add more than the number of CPUs.
-	for i := 0; i < runtime.NumCPU()*2; i++ {
+	for i := 0; i < numHandlerWorkers; i++ {
 		go p.worker()
 	}
 
@@ -274,12 +286,14 @@ func (p *Impl) initCryptopool() {
 		}
 	}
 
-	for i := 0; i < runtime.NumCPU(); i++ {
+	for i := 0; i < numCryptoWorker; i++ {
 		go p.cryptoWorker()
 	}
 }
 
 func (p *Impl) cryptoWorker() {
+	defer p.workersWg.Done()
+
 	for {
 		select {
 		case f := <-p.cryptoWorkChan:
@@ -292,6 +306,8 @@ func (p *Impl) cryptoWorker() {
 
 func (p *Impl) Stop() {
 	p.cancelFunc()
+
+	p.workersWg.Wait()
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {

@@ -603,7 +603,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	}
 
 	a.Equal(
-		len(parties)*(runtime.NumCPU()*3+1)+goroutinesstart,
+		len(parties)*(numCryptoWorker+numHandlerWorkers+1)+goroutinesstart,
 		runtime.NumGoroutine(),
 		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
 	)
@@ -623,12 +623,15 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	// stopping everyone to close the threadpools.
 	<-chanReceivedAsyncTask
 	for _, party := range parties {
-		party.Stop()
+		party.(*Impl).cancelFunc()
 	}
 	close(barrier)
 	<-donechan
 
-	time.Sleep(time.Second * 3)
+	for _, party := range parties {
+		party.Stop()
+	}
+
 	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
 
 	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
