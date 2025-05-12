@@ -1,6 +1,7 @@
 package round
 
 import (
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/hash"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
@@ -19,6 +20,8 @@ type Info struct {
 	Threshold int
 	// Group returns the group used for this protocol execution.
 	Group curve.Curve
+
+	TrackingID *common.TrackingID
 }
 
 // Session represents the current execution of a round-based protocol.

@@ -87,7 +87,12 @@ func (r *round1) Finalize(out chan<- *round.Message) (round.Session, error) {
 	E_i := e_i.ActOnBase() // eiG
 
 	// Broadcast the commitments
-	if err = r.BroadcastMessage(out, &broadcast2{D_i: D_i, E_i: E_i}); err != nil {
+	b, err := NewBroadcast2(D_i, E_i)
+	if err != nil {
+		return r, err
+	}
+
+	if err = r.BroadcastMessage(out, b); err != nil {
 		return r, err
 	}
 

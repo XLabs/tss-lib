@@ -43,4 +43,5 @@ message MessageWrapper {
 
   // Used to differentiate between simultaneous signing protocol runs.
   optional TrackingID trackingID = 11;
+  string Protocol  = 12; // defines the protocol type.
 }

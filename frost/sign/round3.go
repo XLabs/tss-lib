@@ -44,14 +44,18 @@ type broadcast3 struct {
 // StoreBroadcastMessage implements round.BroadcastRound.
 func (r *round3) StoreBroadcastMessage(msg round.Message) error {
 	from := msg.From
-	body, ok := msg.Content.(*broadcast3)
+	body, ok := msg.Content.(*Broadcast3)
 	if !ok || body == nil {
 		return round.ErrInvalidContent
 	}
 
-	// check nil
-	if body.Z_i == nil {
-		return round.ErrNilFields
+	if !body.ValidateBasic() {
+		return round.ErrInvalidContent
+	}
+
+	Zi := r.Group().NewScalar()
+	if err := Zi.UnmarshalBinary(body.Zi); err != nil {
+		return fmt.Errorf("failed to unmarshal zᵢ: %w", err)
 	}
 
 	// These steps come from Figure 3 of the Frost paper.
@@ -75,7 +79,7 @@ func (r *round3) StoreBroadcastMessage(msg round.Message) error {
 	// 	return fmt.Errorf("failed to verify response from %v", from)
 	// }
 
-	r.z[from] = body.Z_i
+	r.z[from] = Zi
 
 	return nil
 }
@@ -141,8 +145,10 @@ func (broadcast3) RoundNumber() round.Number { return 3 }
 
 // BroadcastContent implements round.BroadcastRound.
 func (r *round3) BroadcastContent() round.BroadcastContent {
-	return &broadcast3{
-		Z_i: r.Group().NewScalar(),
+	s, _ := r.Group().NewScalar().MarshalBinary()
+
+	return &Broadcast3{
+		Zi: s,
 	}
 }
 

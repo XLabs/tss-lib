@@ -1,0 +1,16 @@
+syntax = "proto3";
+package binance.tsslib;
+option go_package = "frost/sign";
+
+/*
+ * round1 message.
+ */
+message Broadcast2 {
+    bytes Di = 1;
+    bytes Ei = 2;
+}
+
+
+message Broadcast3 {
+    bytes Zi = 1;
+}

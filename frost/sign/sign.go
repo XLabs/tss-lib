@@ -3,6 +3,7 @@ package sign
 import (
 	"fmt"
 
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
@@ -17,7 +18,7 @@ const (
 	protocolRounds round.Number = 3
 )
 
-func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, messageHash []byte) protocol.StartFunc {
+func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, messageHash []byte, tid *common.TrackingID) protocol.StartFunc {
 	return func(sessionID []byte) (round.Session, error) {
 		info := round.Info{
 			FinalRoundNumber: protocolRounds,
@@ -25,6 +26,7 @@ func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, me
 			PartyIDs:         signers,
 			Threshold:        result.Threshold,
 			Group:            result.PublicKey.Curve(),
+			TrackingID:       tid,
 		}
 		if taproot {
 			info.ProtocolID = protocolIDTaproot

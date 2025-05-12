@@ -1,0 +1,50 @@
+// Copyright © 2019 Binance
+//
+// This file is part of Binance. The full Binance copyright notice, including
+// terms governing use, modification, and redistribution, is contained in the
+// file LICENSE at the root of the source code distribution tree.
+
+syntax = "proto3";
+package binance.tsslib.ecdsa.keygen;
+option go_package = "frost/keygen";
+
+/*
+ * Represents Frost's keygen message 1.
+ */
+message Broadcast2{
+    // This message should be reliably broadcasted.
+    
+    // Phi_i is the commitment to the polynomial that this participant generated.
+    // has a specific type to be unmarshalled into.:
+    bytes Phii = 1; 
+
+    // has a specific type to be unmarshalled into.
+    // Sigma_i is the Schnorr proof of knowledge of the participant's secret.
+    bytes Sigmai = 2;
+
+    // Commitment = H(cᵢ, uᵢ)
+    // is byte slice.
+    bytes Commitment = 3; 
+}
+
+
+
+message Broadcast3 {
+    // this messages doesn't need a reliable broadcast.
+
+	// C_l is contribution to the chaining key for this party.
+    // is a byte slice.
+	bytes Cl = 1;
+
+	// Decommitment = uᵢ decommitment bytes
+    // is a byte slice.
+	bytes Decommitment = 2;
+}
+
+message Message3 {
+    // Private message between peers.
+
+    // F_li is the secret share sent from party l to this party.
+    // Should be unmarshalled into a specific type.
+    bytes F_li = 1; 
+}

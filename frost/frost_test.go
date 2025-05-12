@@ -55,7 +55,7 @@ func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte
 	cTaproot := r.(*TaprootConfig)
 	require.True(t, bytes.Equal(c0Taproot.PublicKey, cTaproot.PublicKey))
 
-	h, err = protocol.NewMultiHandler(Sign(c, ids, message), nil)
+	h, err = protocol.NewMultiHandler(Sign(c, ids, message, nil), nil)
 	require.NoError(t, err)
 	test.HandlerLoop(c.ID, h, n)
 
@@ -65,7 +65,7 @@ func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte
 	signature := signResult.(Signature)
 	assert.NoError(t, signature.Verify(c.PublicKey, message))
 
-	h, err = protocol.NewMultiHandler(SignTaproot(cTaproot, ids, message), nil)
+	h, err = protocol.NewMultiHandler(SignTaproot(cTaproot, ids, message, nil), nil)
 	require.NoError(t, err)
 
 	test.HandlerLoop(c.ID, h, n)

@@ -1,12 +1,15 @@
 package round
 
 import (
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // Content represents the message, either broadcast or P2P returned by a round
 // during finalization.
 type Content interface {
+	tss.MessageContent
 	RoundNumber() Number
 }
 
@@ -30,7 +33,8 @@ func (ReliableBroadcastContent) Reliable() bool { return true }
 func (NormalBroadcastContent) Reliable() bool   { return false }
 
 type Message struct {
-	From, To  party.ID
-	Broadcast bool
-	Content   Content
+	From, To   party.ID
+	Broadcast  bool
+	Content    Content
+	TrackingID *common.TrackingID
 }

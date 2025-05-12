@@ -36,19 +36,22 @@ type round2 struct {
 	E map[party.ID]curve.Point
 }
 
-type broadcast2 struct {
-	round.ReliableBroadcastContent
-	// D_i is the first commitment produced by the sender of this message.
-	D_i curve.Point
-	// E_i is the second commitment produced by the sender of this message.
-	E_i curve.Point
-}
-
 // StoreBroadcastMessage implements round.BroadcastRound.
 func (r *round2) StoreBroadcastMessage(msg round.Message) error {
-	body, ok := msg.Content.(*broadcast2)
+	body, ok := msg.Content.(*Broadcast2)
 	if !ok || body == nil {
 		return round.ErrInvalidContent
+	}
+
+	Di := r.Group().NewPoint()
+	Ei := r.Group().NewPoint()
+
+	if err := Di.UnmarshalBinary(body.Di); err != nil {
+		return fmt.Errorf("failed to unmarshal Dᵢ: %w", err)
+	}
+
+	if err := Ei.UnmarshalBinary(body.Ei); err != nil {
+		return fmt.Errorf("failed to unmarshal Eᵢ: %w", err)
 	}
 
 	// This section roughly follows Figure 3.
@@ -64,12 +67,12 @@ func (r *round2) StoreBroadcastMessage(msg round.Message) error {
 	//
 	// We also receive each Dₗ, Eₗ from the participant l directly, instead of
 	// an entire bundle from a signing authority.
-	if body.D_i.IsIdentity() || body.E_i.IsIdentity() {
+	if Di.IsIdentity() || Ei.IsIdentity() {
 		return fmt.Errorf("nonce commitment is the identity point")
 	}
 
-	r.D[msg.From] = body.D_i
-	r.E[msg.From] = body.E_i
+	r.D[msg.From] = Di
+	r.E[msg.From] = Ei
 
 	return nil
 }
@@ -174,8 +177,12 @@ func (r *round2) Finalize(out chan<- *round.Message) (round.Session, error) {
 	// TODO: Securely delete the nonces.
 
 	// Broadcast our response
-	err := r.BroadcastMessage(out, &broadcast3{Z_i: z_i})
+	b, err := NewBroadcast3(z_i)
 	if err != nil {
+		return r, err
+	}
+
+	if err := r.BroadcastMessage(out, b); err != nil {
 		return r, err
 	}
 
@@ -192,15 +199,10 @@ func (r *round2) Finalize(out chan<- *round.Message) (round.Session, error) {
 // MessageContent implements round.Round.
 func (round2) MessageContent() round.Content { return nil }
 
-// RoundNumber implements round.Content.
-func (broadcast2) RoundNumber() round.Number { return 2 }
-
 // BroadcastContent implements round.BroadcastRound.
 func (r *round2) BroadcastContent() round.BroadcastContent {
-	return &broadcast2{
-		D_i: r.Group().NewPoint(),
-		E_i: r.Group().NewPoint(),
-	}
+	b, _ := NewBroadcast2(r.Group().NewPoint(), r.Group().NewPoint())
+	return b
 }
 
 // Number implements round.Round.
