@@ -1,0 +1,1 @@
+Taken from and edited by jonathanmweiss to support signatures via ecrecover on ethereum.
