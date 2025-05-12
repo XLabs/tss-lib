@@ -14,7 +14,7 @@ import (
 
 type Parameters struct {
 	// for simplicity of testing:
-	SavedSecrets *keygen.LocalPartySaveData
+	SavedSecrets *keygen.LocalPartySaveData // maybe store this in a file
 
 	PartyIDs []*tss.PartyID
 	Self     *tss.PartyID
