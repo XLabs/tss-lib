@@ -38,3 +38,14 @@ type Message struct {
 	Content    Content
 	TrackingID *common.TrackingID
 }
+
+func (m *Message) ToParsed() tss.ParsedMessage {
+	meta := tss.MessageRouting{
+		From:        m.From.ToTssPartyID(),
+		To:          []*tss.PartyID{m.To.ToTssPartyID()},
+		IsBroadcast: m.Broadcast,
+	}
+
+	msg := tss.NewMessageWrapper(meta, m.Content, m.TrackingID)
+	return tss.NewMessage(meta, m.Content, msg)
+}

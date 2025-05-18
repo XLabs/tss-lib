@@ -7,6 +7,7 @@ import (
 	"github.com/cronokirby/saferith"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // ID represents a unique identifier for a participant in our scheme.
@@ -17,6 +18,15 @@ import (
 //
 // This ID is used as an interpolation point of a polynomial sharing of the secret key.
 type ID string
+
+func (id ID) ToTssPartyID() *tss.PartyID {
+	return &tss.PartyID{
+		MessageWrapper_PartyID: &tss.MessageWrapper_PartyID{
+			Id:  string(id),
+			Key: []byte(id),
+		},
+	}
+}
 
 // Scalar converts this ID into a scalar.
 //
