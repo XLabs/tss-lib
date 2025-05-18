@@ -140,9 +140,10 @@ func (h *Helper) UpdateHashState(value hash.WriterToWithDomain) {
 // An error is returned if the message cannot be sent to the out channel.
 func (h *Helper) BroadcastMessage(out chan<- *Message, broadcastContent Content) error {
 	msg := &Message{
-		From:      h.info.SelfID,
-		Broadcast: true,
-		Content:   broadcastContent,
+		From:       h.info.SelfID,
+		Broadcast:  true,
+		Content:    broadcastContent,
+		TrackingID: h.info.TrackingID,
 	}
 	select {
 	case out <- msg:
@@ -158,10 +159,13 @@ func (h *Helper) BroadcastMessage(out chan<- *Message, broadcastContent Content)
 // `out` is expected to be a buffered channel with enough capacity to store all messages.
 func (h *Helper) SendMessage(out chan<- *Message, content Content, to party.ID) error {
 	msg := &Message{
-		From:    h.info.SelfID,
-		To:      to,
-		Content: content,
+		From:       h.info.SelfID,
+		To:         to,
+		Content:    content,
+		Broadcast:  false,
+		TrackingID: h.info.TrackingID,
 	}
+
 	select {
 	case out <- msg:
 		return nil

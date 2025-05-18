@@ -8,12 +8,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
 	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
 	"github.com/xlabs/tss-lib/v2/frost/internal/test"
 )
+
+var testTrackid = &common.TrackingID{
+	Digest:       []byte{1, 2, 3, 4},
+	PartiesState: nil,
+	AuxilaryData: nil,
+}
 
 func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte, n *test.Network, wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -55,7 +62,7 @@ func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte
 	cTaproot := r.(*TaprootConfig)
 	require.True(t, bytes.Equal(c0Taproot.PublicKey, cTaproot.PublicKey))
 
-	h, err = protocol.NewMultiHandler(Sign(c, ids, message, nil), nil)
+	h, err = protocol.NewMultiHandler(Sign(c, ids, message), nil)
 	require.NoError(t, err)
 	test.HandlerLoop(c.ID, h, n)
 
@@ -65,7 +72,7 @@ func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte
 	signature := signResult.(Signature)
 	assert.NoError(t, signature.Verify(c.PublicKey, message))
 
-	h, err = protocol.NewMultiHandler(SignTaproot(cTaproot, ids, message, nil), nil)
+	h, err = protocol.NewMultiHandler(SignTaproot(cTaproot, ids, message), nil)
 	require.NoError(t, err)
 
 	test.HandlerLoop(c.ID, h, n)

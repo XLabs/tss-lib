@@ -18,7 +18,7 @@ const (
 	protocolRounds round.Number = 3
 )
 
-func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, messageHash []byte, tid *common.TrackingID) protocol.StartFunc {
+func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, messageHash []byte) protocol.StartFunc {
 	return func(sessionID []byte) (round.Session, error) {
 		info := round.Info{
 			FinalRoundNumber: protocolRounds,
@@ -26,8 +26,14 @@ func StartSignCommon(taproot bool, result *keygen.Config, signers []party.ID, me
 			PartyIDs:         signers,
 			Threshold:        result.Threshold,
 			Group:            result.PublicKey.Curve(),
-			TrackingID:       tid,
+			ProtocolID:       protocolID,
+			TrackingID:       &common.TrackingID{},
 		}
+
+		if err := info.TrackingID.FromString(string(sessionID)); err != nil {
+			return nil, fmt.Errorf("sign.StartSign: %w", err)
+		}
+
 		if taproot {
 			info.ProtocolID = protocolIDTaproot
 		} else {

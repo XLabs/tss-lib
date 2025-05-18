@@ -1,7 +1,6 @@
 package frost
 
 import (
-	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
@@ -103,8 +102,8 @@ func RefreshTaproot(config *TaprootConfig, participants []party.ID) protocol.Sta
 // Instead, each participant independently verifies and broadcasts items as necessary.
 //
 // Differences stemming from this change are commented throughout the protocol.
-func Sign(config *Config, signers []party.ID, messageHash []byte, tid *common.TrackingID) protocol.StartFunc {
-	return sign.StartSignCommon(false, config, signers, messageHash, tid)
+func Sign(config *Config, signers []party.ID, messageHash []byte) protocol.StartFunc {
+	return sign.StartSignCommon(false, config, signers, messageHash)
 }
 
 // SignTaproot is like Sign, but will generate a Taproot / BIP-340 compatible signature.
@@ -112,7 +111,7 @@ func Sign(config *Config, signers []party.ID, messageHash []byte, tid *common.Tr
 // This needs to result of a Taproot compatible key generation phase, naturally.
 //
 // See: https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki
-func SignTaproot(config *TaprootConfig, signers []party.ID, messageHash []byte, tid *common.TrackingID) protocol.StartFunc {
+func SignTaproot(config *TaprootConfig, signers []party.ID, messageHash []byte) protocol.StartFunc {
 	publicKey, err := curve.Secp256k1{}.LiftX(config.PublicKey)
 	if err != nil {
 		return func([]byte) (round.Session, error) {
@@ -131,5 +130,5 @@ func SignTaproot(config *TaprootConfig, signers []party.ID, messageHash []byte, 
 		VerificationShares: party.NewPointMap(genericVerificationShares),
 	}
 
-	return sign.StartSignCommon(true, normalResult, signers, messageHash, tid)
+	return sign.StartSignCommon(true, normalResult, signers, messageHash)
 }

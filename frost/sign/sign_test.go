@@ -10,6 +10,7 @@ import (
 	"github.com/cronokirby/saferith"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/eth"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/polynomial"
@@ -21,6 +22,10 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/test"
 	"github.com/xlabs/tss-lib/v2/frost/keygen"
 )
+
+var testTrackid = &common.TrackingID{
+	Digest: []byte{1, 2, 3, 4},
+}
 
 // ensures that the we correctly turn secp256k1 points into eth addresses
 func TestPointToAddressCorrect(t *testing.T) {
@@ -172,7 +177,7 @@ func TestSign(t *testing.T) {
 		if newPublicKey == nil {
 			newPublicKey = result.PublicKey
 		}
-		r, err := StartSignCommon(false, result, partyIDs, steak[:], nil)(nil)
+		r, err := StartSignCommon(false, result, partyIDs, steak[:])(testTrackid.ToByteString())
 		require.NoError(t, err, "round creation should not result in an error")
 		rounds = append(rounds, r)
 	}
@@ -267,7 +272,7 @@ func TestSignTaproot(t *testing.T) {
 			PublicKey:          tapRootPublicKey,
 			VerificationShares: party.NewPointMap(genericVerificationShares),
 		}
-		r, err := StartSignCommon(true, normalResult, partyIDs, steak, nil)(nil)
+		r, err := StartSignCommon(true, normalResult, partyIDs, steak)(testTrackid.ToByteString())
 		require.NoError(t, err, "round creation should not result in an error")
 		rounds = append(rounds, r)
 	}
