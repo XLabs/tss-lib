@@ -9,6 +9,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/internal/types"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // This round corresponds with steps 2-4 of Round 2, Figure 1 in the Frost paper:
@@ -104,7 +105,7 @@ func (r *round3) StoreMessage(msg round.Message) error {
 }
 
 // Finalize implements round.Round.
-func (r *round3) Finalize(chan<- *round.Message) (round.Session, error) {
+func (r *round3) Finalize(chan<- tss.ParsedMessage) (round.Session, error) {
 	ChainKey := types.EmptyRID()
 	for _, j := range r.PartyIDs() {
 		ChainKey.XOR(r.ChainKeys[j])

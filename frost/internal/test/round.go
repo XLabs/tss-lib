@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
+	"github.com/xlabs/tss-lib/v2/tss"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 )
 
 // Rule describes various hooks that can be applied to a protocol execution.
@@ -27,7 +28,7 @@ func Rounds(rounds []round.Session, rule Rule) (error, bool) {
 		roundType reflect.Type
 		errGroup  errgroup.Group
 		N         = len(rounds)
-		out       = make(chan *round.Message, N*(N+1))
+		out       = make(chan tss.ParsedMessage, N*(N+1))
 	)
 
 	if roundType, err = checkAllRoundsSame(rounds); err != nil {
@@ -42,13 +43,18 @@ func Rounds(rounds []round.Session, rule Rule) (error, bool) {
 			if rule != nil {
 				rReal := getRound(r)
 				rule.ModifyBefore(rReal)
-				outFake := make(chan *round.Message, N+1)
+				outFake := make(chan tss.ParsedMessage, N+1)
 				rNew, err = r.Finalize(outFake)
 				close(outFake)
 				rNewReal = getRound(rNew)
 				rule.ModifyAfter(rNewReal)
 				for msg := range outFake {
-					rule.ModifyContent(rNewReal, msg.To, getContent(msg.Content))
+					var to party.ID
+					if len(msg.GetTo()) > 0 {
+						to = party.FromTssID(msg.GetTo()[0])
+					}
+
+					rule.ModifyContent(rNewReal, to, getContent(msg.Content()))
 					out <- msg
 				}
 			} else {
@@ -82,35 +88,41 @@ func Rounds(rounds []round.Session, rule Rule) (error, bool) {
 	}
 
 	for msg := range out {
-		msgBytes, err := cbor.Marshal(msg.Content)
-		if err != nil {
-			return err, false
-		}
+		// Sending mechanism for testing...
 		for _, r := range rounds {
-			m := *msg
+			tmp := proto.Clone(msg.Content())
+			cntnt, ok := tmp.(round.Content)
+			if !ok {
+				panic("not a round.Content")
+			}
+
 			r := r
-			if msg.From == r.SelfID() || msg.Content.RoundNumber() != r.Number() {
+			if party.FromTssID(msg.GetFrom()) == r.SelfID() || round.Number(msg.Content().RoundNumber()) != r.Number() {
 				continue
 			}
+
 			errGroup.Go(func() error {
-				if m.Broadcast {
+				m := round.Message{
+					From:       party.FromTssID(msg.GetFrom()),
+					To:         "",
+					Broadcast:  false,
+					Content:    cntnt,
+					TrackingID: msg.WireMsg().TrackingID,
+				}
+
+				if msg.IsBroadcast() {
+					m.Broadcast = true
+
 					b, ok := r.(round.BroadcastRound)
 					if !ok {
 						return errors.New("broadcast message but not broadcast round")
-					}
-					m.Content = b.BroadcastContent()
-					if err = cbor.Unmarshal(msgBytes, m.Content); err != nil {
-						return err
 					}
 
 					if err = b.StoreBroadcastMessage(m); err != nil {
 						return err
 					}
 				} else {
-					m.Content = r.MessageContent()
-					if err = cbor.Unmarshal(msgBytes, m.Content); err != nil {
-						return err
-					}
+					m.To = party.FromTssID(msg.GetTo()[0])
 
 					if m.To == "" || m.To == r.SelfID() {
 						if err = r.VerifyMessage(m); err != nil {

@@ -34,6 +34,7 @@ type (
 		// Returns the protobuf message wrapper struct
 		// Only its inner content should be sent over the wire, not this struct itself
 		WireMsg() *MessageWrapper
+
 		String() string
 	}
 
@@ -48,6 +49,7 @@ type (
 	MessageContent interface {
 		proto.Message
 		ValidateBasic() bool
+		RoundNumber() int
 	}
 
 	// MessageRouting holds the full routing information for the message, consumed by the transport
@@ -69,6 +71,7 @@ type (
 		MessageRouting
 		content MessageContent
 		wire    *MessageWrapper
+		round   int
 	}
 )
 

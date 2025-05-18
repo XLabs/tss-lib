@@ -1,5 +1,7 @@
 package round
 
+import "github.com/xlabs/tss-lib/v2/tss"
+
 type Round interface {
 	// VerifyMessage handles an incoming Message and validates its content with regard to the protocol specification.
 	// The content argument can be cast to the appropriate type for this round without error check.
@@ -23,7 +25,7 @@ type Round interface {
 	// In the last round, Finalize should return
 	//   r.ResultRound(result), nil
 	// where result is the output of the protocol.
-	Finalize(out chan<- *Message) (Session, error)
+	Finalize(out chan<- tss.ParsedMessage) (Session, error)
 
 	// MessageContent returns an uninitialized message.Content for this round.
 	//

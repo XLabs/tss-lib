@@ -24,7 +24,7 @@ var testTrackid = &common.TrackingID{
 
 func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte, n *test.Network, wg *sync.WaitGroup) {
 	defer wg.Done()
-	h, err := protocol.NewMultiHandler(Keygen(curve.Secp256k1{}, id, ids, threshold), nil)
+	h, err := protocol.NewMultiHandler(Keygen(curve.Secp256k1{}, id, ids, threshold), testTrackid.ToByteString())
 	require.NoError(t, err)
 	test.HandlerLoop(id, h, n)
 	r, err := h.Result()
@@ -32,7 +32,7 @@ func do(t *testing.T, id party.ID, ids []party.ID, threshold int, message []byte
 	require.IsType(t, &Config{}, r)
 	c0 := r.(*Config)
 
-	h, err = protocol.NewMultiHandler(Refresh(c0, ids), nil)
+	h, err = protocol.NewMultiHandler(Refresh(c0, ids), testTrackid.ToByteString())
 	require.NoError(t, err)
 	test.HandlerLoop(id, h, n)
 	r, err = h.Result()

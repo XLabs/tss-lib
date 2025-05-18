@@ -8,16 +8,12 @@ import (
 
 // Content represents the message, either broadcast or P2P returned by a round
 // during finalization.
-type Content interface {
-	tss.MessageContent
-	RoundNumber() Number
-}
+type Content tss.MessageContent
 
 // BroadcastContent wraps a Content, but also indicates whether this content
 // requires reliable broadcast.
 type BroadcastContent interface {
 	Content
-	Reliable() bool
 }
 
 // These structs can be embedded in a broadcast message as a way of
@@ -48,4 +44,22 @@ func (m *Message) ToParsed() tss.ParsedMessage {
 
 	msg := tss.NewMessageWrapper(meta, m.Content, m.TrackingID)
 	return tss.NewMessage(meta, m.Content, msg)
+}
+
+func IsFor(m tss.ParsedMessage, id party.ID) bool {
+	if party.FromTssID(m.GetFrom()) == id {
+		return false
+	}
+
+	if m.IsBroadcast() || m.GetTo() == nil {
+		return true
+	}
+
+	for _, to := range m.GetTo() {
+		if party.FromTssID(to) == id {
+			return true
+		}
+	}
+
+	return false
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/internal/types"
 	sch "github.com/xlabs/tss-lib/v2/frost/internal/zk/sch"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // This round corresponds with steps 5 of Round 1, 1 of Round 2, Figure 1 in the Frost paper:
@@ -116,7 +117,7 @@ func (round2) VerifyMessage(round.Message) error { return nil }
 // StoreMessage implements round.Round.
 func (round2) StoreMessage(round.Message) error { return nil }
 
-func (r *round2) Finalize(out chan<- *round.Message) (round.Session, error) {
+func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 	// These steps come from Figure 1, Round 2 of the Frost paper
 
 	// 1. "Each P_i securely sends to each other participant Pₗ a secret share

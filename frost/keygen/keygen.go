@@ -3,6 +3,7 @@ package keygen
 import (
 	"fmt"
 
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
@@ -32,7 +33,12 @@ func StartKeygenCommon(taproot bool, group curve.Curve, participants []party.ID,
 			PartyIDs:         participants,
 			Threshold:        threshold,
 			Group:            group,
+			TrackingID:       &common.TrackingID{},
 		}
+		if err := info.TrackingID.FromString(string(sessionID)); err != nil {
+			return nil, fmt.Errorf("keygen.Start: %w", err)
+		}
+
 		if taproot {
 			info.ProtocolID = protocolIDTaproot
 		} else {

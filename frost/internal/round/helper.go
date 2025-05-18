@@ -11,6 +11,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/pool"
 	"github.com/xlabs/tss-lib/v2/frost/internal/types"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // Helper implements Session without Round, and can therefore be embedded in the first round of a protocol
@@ -138,7 +139,7 @@ func (h *Helper) UpdateHashState(value hash.WriterToWithDomain) {
 
 // BroadcastMessage constructs a Message from the broadcast Content, and sets the header correctly.
 // An error is returned if the message cannot be sent to the out channel.
-func (h *Helper) BroadcastMessage(out chan<- *Message, broadcastContent Content) error {
+func (h *Helper) BroadcastMessage(out chan<- tss.ParsedMessage, broadcastContent Content) error {
 	msg := &Message{
 		From:       h.info.SelfID,
 		Broadcast:  true,
@@ -146,7 +147,7 @@ func (h *Helper) BroadcastMessage(out chan<- *Message, broadcastContent Content)
 		TrackingID: h.info.TrackingID,
 	}
 	select {
-	case out <- msg:
+	case out <- msg.ToParsed():
 		return nil
 	default:
 		return ErrOutChanFull
@@ -157,7 +158,7 @@ func (h *Helper) BroadcastMessage(out chan<- *Message, broadcastContent Content)
 // intended for all participants (but does not require reliable broadcast), the `to` field may be empty ("").
 // Returns an error if the message failed to send over out channel.
 // `out` is expected to be a buffered channel with enough capacity to store all messages.
-func (h *Helper) SendMessage(out chan<- *Message, content Content, to party.ID) error {
+func (h *Helper) SendMessage(out chan<- tss.ParsedMessage, content Content, to party.ID) error {
 	msg := &Message{
 		From:       h.info.SelfID,
 		To:         to,
@@ -167,7 +168,7 @@ func (h *Helper) SendMessage(out chan<- *Message, content Content, to party.ID) 
 	}
 
 	select {
-	case out <- msg:
+	case out <- msg.ToParsed():
 		return nil
 	default:
 		return ErrOutChanFull

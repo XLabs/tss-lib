@@ -5,7 +5,6 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/hash"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/frost/internal/math/polynomial"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/internal/types"
 	zksch "github.com/xlabs/tss-lib/v2/frost/internal/zk/sch"
 )
@@ -34,7 +33,7 @@ func (b *Broadcast2) Reliable() bool {
 }
 
 // RoundNumber implements round.Content.
-func (x *Broadcast2) RoundNumber() round.Number {
+func (x *Broadcast2) RoundNumber() int {
 	return 2
 }
 
@@ -61,7 +60,7 @@ func (b *Broadcast3) Reliable() bool {
 }
 
 // RoundNumber implements round.Content.
-func (x *Broadcast3) RoundNumber() round.Number {
+func (x *Broadcast3) RoundNumber() int {
 	return 3
 }
 
@@ -86,7 +85,7 @@ func NewMessage3(f_li curve.Scalar) (*Message3, error) {
 }
 
 // RoundNumber implements round.Content.
-func (x *Message3) RoundNumber() round.Number {
+func (x *Message3) RoundNumber() int {
 	return 3
 }
 

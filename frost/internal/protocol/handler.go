@@ -10,6 +10,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/hash"
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // StartFunc is function that creates the first round of a protocol.
@@ -240,7 +241,7 @@ func (h *MultiHandler) finalize() {
 		return
 	}
 
-	out := make(chan *round.Message, h.currentRound.N()+1)
+	out := make(chan tss.ParsedMessage, h.currentRound.N()+1)
 	// since we pass a large enough channel, we should never get an error
 	r, err := h.currentRound.Finalize(out)
 	close(out)
@@ -253,18 +254,24 @@ func (h *MultiHandler) finalize() {
 
 	// forward messages with the correct header.
 	for roundMsg := range out {
-		data, err := cbor.Marshal(roundMsg.Content)
+		data, err := cbor.Marshal(roundMsg.Content())
 		if err != nil {
 			panic(fmt.Errorf("failed to marshal round message: %w", err))
 		}
+
+		var to party.ID
+		if len(roundMsg.GetTo()) > 0 {
+			to = party.FromTssID(roundMsg.GetTo()[0])
+		}
+
 		msg := &Message{
 			SSID:                  r.SSID(),
 			From:                  r.SelfID(),
-			To:                    roundMsg.To,
+			To:                    to,
 			Protocol:              r.ProtocolID(),
-			RoundNumber:           roundMsg.Content.RoundNumber(),
+			RoundNumber:           round.Number(roundMsg.Content().RoundNumber()),
 			Data:                  data,
-			Broadcast:             roundMsg.Broadcast,
+			Broadcast:             roundMsg.IsBroadcast(),
 			BroadcastVerification: h.broadcastHashes[r.Number()-1],
 		}
 		if msg.Broadcast {

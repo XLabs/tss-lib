@@ -5,7 +5,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 )
 
-func NewBroadcast2(Di, Ei curve.Point) (*Broadcast2, error) {
+func NewBroadcast2(Di, Ei curve.Point) (round.Content, error) {
 	DiBinary, err := Di.MarshalBinary()
 	if err != nil {
 		return nil, err
@@ -23,7 +23,7 @@ func NewBroadcast2(Di, Ei curve.Point) (*Broadcast2, error) {
 	return content, nil
 }
 
-func (b *Broadcast2) RoundNumber() round.Number {
+func (b *Broadcast2) RoundNumber() int {
 	return 2
 }
 
@@ -61,7 +61,7 @@ func NewBroadcast3(z_i curve.Scalar) (*Broadcast3, error) {
 	return content, nil
 }
 
-func (b *Broadcast3) RoundNumber() round.Number {
+func (b *Broadcast3) RoundNumber() int {
 	return 3
 }
 

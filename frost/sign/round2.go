@@ -11,6 +11,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // This round roughly corresponds with steps 3-6 of Figure 3 in the Frost paper:
@@ -84,7 +85,7 @@ func (round2) VerifyMessage(round.Message) error { return nil }
 func (round2) StoreMessage(round.Message) error { return nil }
 
 // Finalize implements round.Round.
-func (r *round2) Finalize(out chan<- *round.Message) (round.Session, error) {
+func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 	// This essentially follows parts of Figure 3.
 
 	// 4. "Each Pᵢ then computes the set of binding values ρₗ = H₁(l, m, B). // l is related to the ID of the players.

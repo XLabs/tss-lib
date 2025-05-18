@@ -19,6 +19,11 @@ import (
 // This ID is used as an interpolation point of a polynomial sharing of the secret key.
 type ID string
 
+func FromTssID(pid *tss.PartyID) ID {
+	// TODO: make a concat of the key and id, and be able to convert the two perfectly.
+	return ID(pid.Id)
+}
+
 func (id ID) ToTssPartyID() *tss.PartyID {
 	return &tss.PartyID{
 		MessageWrapper_PartyID: &tss.MessageWrapper_PartyID{

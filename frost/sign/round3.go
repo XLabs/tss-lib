@@ -7,6 +7,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/frost/internal/party"
 	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
+	"github.com/xlabs/tss-lib/v2/tss"
 )
 
 // This corresponds with step 7 of Figure 3 in the Frost paper:
@@ -91,7 +92,7 @@ func (round3) VerifyMessage(round.Message) error { return nil }
 func (round3) StoreMessage(round.Message) error { return nil }
 
 // Finalize implements round.Round.
-func (r *round3) Finalize(chan<- *round.Message) (round.Session, error) {
+func (r *round3) Finalize(chan<- tss.ParsedMessage) (round.Session, error) {
 	// These steps come from Figure 3 of the Frost paper.
 
 	// 7.c "Compute the group's response z = ∑ᵢ zᵢ"

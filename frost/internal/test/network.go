@@ -47,6 +47,7 @@ func (n *Network) Next(id party.ID) <-chan *protocol.Message {
 	if !ok {
 		return n.closedListenChan
 	}
+
 	return c
 }
 
