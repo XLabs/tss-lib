@@ -1,6 +1,9 @@
 package common
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+)
 
 func ConvertBoolArrayToByteArray(bools []bool) []byte {
 	byteArray := make([]byte, (len(bools)+7)/8) // Each byte can hold up to 8 bools, so we round up
@@ -49,4 +52,72 @@ func (t *TrackingID) ToString() string {
 	}
 
 	return fmt.Sprintf("%x-%x-%x", t.Digest, t.PartiesState, t.AuxilaryData)
+}
+
+func (x *TrackingID) ToByteString() []byte {
+	return []byte(x.ToString())
+}
+
+var errNilTrackID = fmt.Errorf("nil TrackingID")
+
+func (t *TrackingID) FromString(s string) error {
+	if t == nil {
+		return errNilTrackID
+	}
+
+	if s == nilTrackID {
+		return errNilTrackID
+	}
+
+	// i need to handle cases where there are no auxilary data or parties state
+	// i.e. "010203--" or "010203-040506-"
+
+	// Split the string into parts
+	parts := bytes.Split([]byte(s), []byte{'-'})
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid TrackingID format: %s", s)
+	}
+	// Parse the first part (Digest)
+	if len(parts[0]) == 0 {
+		return fmt.Errorf("invalid TrackingID format: %s", s)
+	}
+	t.Digest = make([]byte, len(parts[0]))
+	if _, err := fmt.Sscanf(string(parts[0]), "%x", &t.Digest); err != nil {
+		return fmt.Errorf("failed to parse TrackingID from string: %w", err)
+	}
+	// Parse the second part (PartiesState)
+
+	t.PartiesState = nil
+	if len(parts[1]) > 0 {
+		t.PartiesState = make([]byte, len(parts[1]))
+
+		if _, err := fmt.Sscanf(string(parts[1]), "%x", &t.PartiesState); err != nil {
+			return fmt.Errorf("failed to parse TrackingID from string: %w", err)
+		}
+	}
+
+	// Parse the third part (AuxilaryData)
+	t.AuxilaryData = nil
+	if len(parts[2]) > 0 {
+		t.AuxilaryData = make([]byte, len(parts[2]))
+		if _, err := fmt.Sscanf(string(parts[2]), "%x", &t.AuxilaryData); err != nil {
+			return fmt.Errorf("failed to parse TrackingID from string: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (t *TrackingID) Equals(other *TrackingID) bool {
+	if t == nil && other == nil {
+		return true
+	}
+
+	if t == nil || other == nil {
+		return false
+	}
+
+	return bytes.Equal(t.Digest, other.Digest) &&
+		bytes.Equal(t.PartiesState, other.PartiesState) &&
+		bytes.Equal(t.AuxilaryData, other.AuxilaryData)
 }
