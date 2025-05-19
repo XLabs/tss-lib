@@ -3,10 +3,10 @@ package sign
 import (
 	"crypto/rand"
 
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/sample"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/sample"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/round"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"github.com/zeebo/blake3"
 )

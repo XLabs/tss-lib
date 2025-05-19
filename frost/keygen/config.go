@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/xlabs/tss-lib/v2/frost/internal/bip32"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/params"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
+	"github.com/xlabs/tss-lib/v2/internal/bip32"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/params"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/taproot"
 )
 
 // Config contains all the information produced after key generation, from the perspective

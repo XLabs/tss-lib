@@ -1,8 +1,8 @@
 package sign
 
 import (
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/round"
 )
 
 func NewBroadcast2(Di, Ei curve.Point) (round.Content, error) {

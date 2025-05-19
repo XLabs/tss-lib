@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/polynomial"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
-	"github.com/xlabs/tss-lib/v2/frost/internal/test"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/round"
+	"github.com/xlabs/tss-lib/v2/internal/test"
 )
 
 var testTrackingId = &common.TrackingID{

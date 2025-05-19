@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/keygen"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/protocol"
+	"github.com/xlabs/tss-lib/v2/internal/round"
 )
 
 const (

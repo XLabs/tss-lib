@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
-	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
-	"github.com/xlabs/tss-lib/v2/frost/internal/test"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/protocol"
+	"github.com/xlabs/tss-lib/v2/internal/taproot"
+	"github.com/xlabs/tss-lib/v2/internal/test"
 )
 
 var testTrackid = &common.TrackingID{

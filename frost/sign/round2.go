@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/cronokirby/saferith"
-	"github.com/xlabs/tss-lib/v2/frost/internal/hash"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/polynomial"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/sample"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
-	"github.com/xlabs/tss-lib/v2/frost/internal/taproot"
+	"github.com/xlabs/tss-lib/v2/internal/hash"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
+	"github.com/xlabs/tss-lib/v2/internal/math/sample"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/round"
+	"github.com/xlabs/tss-lib/v2/internal/taproot"
 	"github.com/xlabs/tss-lib/v2/tss"
 )
 

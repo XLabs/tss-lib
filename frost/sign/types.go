@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/cronokirby/saferith"
-	"github.com/xlabs/tss-lib/v2/frost/internal/eth"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/sample"
+	"github.com/xlabs/tss-lib/v2/internal/eth"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/sample"
 	"golang.org/x/crypto/sha3"
 )
 

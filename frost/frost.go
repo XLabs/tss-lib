@@ -1,12 +1,12 @@
 package frost
 
 import (
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/party"
-	"github.com/xlabs/tss-lib/v2/frost/internal/protocol"
-	"github.com/xlabs/tss-lib/v2/frost/internal/round"
 	"github.com/xlabs/tss-lib/v2/frost/keygen"
 	"github.com/xlabs/tss-lib/v2/frost/sign"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/tss-lib/v2/internal/protocol"
+	"github.com/xlabs/tss-lib/v2/internal/round"
 )
 
 type (

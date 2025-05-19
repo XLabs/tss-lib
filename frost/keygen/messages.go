@@ -2,11 +2,11 @@ package keygen
 
 import (
 	"github.com/fxamacker/cbor/v2"
-	"github.com/xlabs/tss-lib/v2/frost/internal/hash"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/frost/internal/math/polynomial"
-	"github.com/xlabs/tss-lib/v2/frost/internal/types"
-	zksch "github.com/xlabs/tss-lib/v2/frost/internal/zk/sch"
+	"github.com/xlabs/tss-lib/v2/internal/hash"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
+	"github.com/xlabs/tss-lib/v2/internal/types"
+	zksch "github.com/xlabs/tss-lib/v2/internal/zk/sch"
 )
 
 func NewBroadcast2(Phi_i *polynomial.Exponent, Sigma_i *zksch.Proof, Commitment []byte) (*Broadcast2, error) {
