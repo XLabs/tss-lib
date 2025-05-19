@@ -91,6 +91,32 @@ func (round3) VerifyMessage(round.Message) error { return nil }
 // StoreMessage implements round.Round.
 func (round3) StoreMessage(round.Message) error { return nil }
 
+func (r *round3) CanFinalize() bool {
+	// Rshares, z lambda:
+	t := r.Threshold() + 1
+
+	if len(r.RShares) < t && len(r.z) < t && len(r.Lambda) < t {
+		return false
+	}
+
+	// check we received from all participants:
+	for _, l := range r.OtherPartyIDs() {
+		if _, ok := r.RShares[l]; !ok {
+			return false
+		}
+
+		if _, ok := r.z[l]; !ok {
+			return false
+		}
+
+		if _, ok := r.Lambda[l]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Finalize implements round.Round.
 func (r *round3) Finalize(chan<- tss.ParsedMessage) (round.Session, error) {
 	// These steps come from Figure 3 of the Frost paper.

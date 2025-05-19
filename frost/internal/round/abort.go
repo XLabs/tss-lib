@@ -17,3 +17,4 @@ func (Abort) StoreMessage(Message) error                            { return nil
 func (r *Abort) Finalize(chan<- tss.ParsedMessage) (Session, error) { return r, nil }
 func (Abort) MessageContent() Content                               { return nil }
 func (Abort) Number() Number                                        { return 0 }
+func (r *Abort) CanFinalize() bool                                  { return false }

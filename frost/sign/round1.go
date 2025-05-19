@@ -52,6 +52,11 @@ func (r *round1) StoreMessage(round.Message) error  { return nil }
 
 const deriveHashKeyContext = "github.com/taurusgroup/multi-party-sig/frost 2021-07-30T09:48+00:00 Derive hash Key"
 
+func (r *round1) CanFinalize() bool {
+	// round1 is ready to finalize, since it doesn't depend on anyone else's.
+	return true
+}
+
 // Finalize implements round.Round.
 func (r *round1) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 	// We can think of this as roughly implementing Figure 2. The idea is

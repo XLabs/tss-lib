@@ -30,10 +30,14 @@ type Round interface {
 	// MessageContent returns an uninitialized message.Content for this round.
 	//
 	// The first round of a protocol should return nil.
+	// can be used to unmarshal specific messages.
 	MessageContent() Content
 
 	// Number returns the current round number.
 	Number() Number
+
+	// checks whether all messages have been received for this round.
+	CanFinalize() bool
 }
 
 // BroadcastRound extends Round in that it expects a broadcast message before the p2p message.

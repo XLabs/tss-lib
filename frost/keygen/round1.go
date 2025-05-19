@@ -56,6 +56,10 @@ func (r *round1) VerifyMessage(round.Message) error { return nil }
 // StoreMessage implements round.Round.
 func (r *round1) StoreMessage(round.Message) error { return nil }
 
+func (r *round1) CanFinalize() bool {
+	return true
+}
+
 // Finalize implements round.Round.
 //
 // The overall goal of this round is to generate a secret value, create a polynomial

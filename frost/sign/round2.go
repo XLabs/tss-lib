@@ -83,6 +83,26 @@ func (round2) VerifyMessage(round.Message) error { return nil }
 
 // StoreMessage implements round.Round.
 func (round2) StoreMessage(round.Message) error { return nil }
+func (r *round2) CanFinalize() bool {
+	t := r.Threshold() + 1 // t + 1 participants are needed to create a signature
+
+	// received from everyone.
+	if len(r.D) < t && len(r.E) < t {
+		return false
+	}
+
+	// check we received from all participants:
+	for _, l := range r.OtherPartyIDs() {
+		if _, ok := r.D[l]; !ok {
+			return false
+		}
+		if _, ok := r.E[l]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
 
 // Finalize implements round.Round.
 func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {

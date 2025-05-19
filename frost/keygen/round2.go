@@ -146,6 +146,32 @@ func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 	}, nil
 }
 
+func (r *round2) CanFinalize() bool {
+	// We can finalize if we have received all the messages from the other parties
+	// and we have sent our own message.
+
+	t := r.Threshold() + 1 // t + 1 participants are needed to create a signature
+
+	// received from everyone.
+	// the folowing used in round3: && len(r.ChainKeys) == t
+	if len(r.Phi) < t && len(r.ChainKeyCommitments) < t {
+		return false
+	}
+
+	// check we received from all participants:
+	for _, l := range r.OtherPartyIDs() {
+		if _, ok := r.Phi[l]; !ok {
+			return false
+		}
+
+		if _, ok := r.ChainKeyCommitments[l]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 // MessageContent implements round.Round.
 func (round2) MessageContent() round.Content { return nil }
 

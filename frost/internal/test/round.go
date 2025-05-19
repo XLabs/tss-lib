@@ -44,6 +44,10 @@ func Rounds(rounds []round.Session, rule Rule) (error, bool) {
 				rReal := getRound(r)
 				rule.ModifyBefore(rReal)
 				outFake := make(chan tss.ParsedMessage, N+1)
+				if !r.CanFinalize() {
+					r.CanFinalize()
+					return errors.New("cannot finalize")
+				}
 				rNew, err = r.Finalize(outFake)
 				close(outFake)
 				rNewReal = getRound(rNew)
@@ -58,6 +62,10 @@ func Rounds(rounds []round.Session, rule Rule) (error, bool) {
 					out <- msg
 				}
 			} else {
+				if !r.CanFinalize() {
+					r.CanFinalize()
+					return errors.New("cannot finalize")
+				}
 				rNew, err = r.Finalize(out)
 			}
 

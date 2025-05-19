@@ -13,3 +13,4 @@ func (Output) StoreMessage(Message) error                            { return ni
 func (r *Output) Finalize(chan<- tss.ParsedMessage) (Session, error) { return r, nil }
 func (Output) MessageContent() Content                               { return nil }
 func (Output) Number() Number                                        { return 0 }
+func (r *Output) CanFinalize() bool                                  { return true }
