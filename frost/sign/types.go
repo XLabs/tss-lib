@@ -203,8 +203,8 @@ func (s Signature) ToContractSig(pk curve.Point, msg []byte) (ContractSig, error
 		PkX:       [32]byte(pkBin[:32]),
 		PkYParity: pkBin[32],
 		Sig:       (&big.Int{}).SetBytes(sigBin),
-		msgHash:   (&big.Int{}).SetBytes(msg),
-		address:   rAddress,
+		MsgHash:   (&big.Int{}).SetBytes(msg),
+		Address:   rAddress,
 	}
 
 	return consig, nil
@@ -214,8 +214,8 @@ type ContractSig struct {
 	PkX       [32]byte
 	PkYParity uint8
 	Sig       *big.Int
-	msgHash   *big.Int
-	address   eth.EthAddress
+	MsgHash   *big.Int
+	Address   eth.EthAddress
 }
 
 func Bytes2Hex(d []byte) string {
@@ -240,8 +240,8 @@ func (s ContractSig) String() string {
 	b.WriteString("  pkX                : 0x" + Bytes2Hex(s.PkX[:]) + "\n")
 	b.WriteString("  pkyparity          : " + strconv.FormatUint(uint64(s.PkYParity), 10) + "\n")
 	b.WriteString("  sig                : 0x" + Bytes2Hex(LeftPadBytes(s.Sig.Bytes(), 32)) + "\n")
-	b.WriteString("  msghash            : 0x" + Bytes2Hex(LeftPadBytes(s.msgHash.Bytes(), 32)) + "\n")
-	b.WriteString("  nonceTimesGAddress : 0x" + Bytes2Hex(s.address[:]) + "\n")
+	b.WriteString("  msghash            : 0x" + Bytes2Hex(LeftPadBytes(s.MsgHash.Bytes(), 32)) + "\n")
+	b.WriteString("  nonceTimesGAddress : 0x" + Bytes2Hex(s.Address[:]) + "\n")
 	b.WriteString("}\n")
 
 	return b.String()
