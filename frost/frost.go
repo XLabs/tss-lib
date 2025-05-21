@@ -1,6 +1,9 @@
 package frost
 
 import (
+	"fmt"
+
+	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost/keygen"
 	"github.com/xlabs/tss-lib/v2/frost/sign"
 	"github.com/xlabs/tss-lib/v2/internal/math/curve"
@@ -14,6 +17,8 @@ type (
 	TaprootConfig = keygen.TaprootConfig
 	Signature     = sign.Signature
 )
+
+const NumRounds = 3
 
 // EmptyConfig creates an empty Config with a specific group.
 //
@@ -131,4 +136,41 @@ func SignTaproot(config *TaprootConfig, signers []party.ID, messageHash []byte) 
 	}
 
 	return sign.StartSignCommon(true, normalResult, signers, messageHash)
+}
+
+var (
+	ErrNilSignatureData = fmt.Errorf("signature data is nil")
+	ErrEmptySignatureS  = fmt.Errorf("signature.S data is empty")
+	ErrEmptySignatureR  = fmt.Errorf("signature.R data is empty")
+)
+
+// used to convert a common.SignatureData to a  frost.Signature.
+// frost signature can be turned to contractSignature which can be used by ethereum contracts.
+func Secp256k1SignatureTranslate(sig *common.SignatureData) (Signature, error) {
+	if sig == nil {
+		return Signature{}, ErrNilSignatureData
+	}
+	if sig.S == nil {
+		return Signature{}, ErrEmptySignatureS
+	}
+	if sig.R == nil {
+		return Signature{}, ErrEmptySignatureR
+	}
+
+	group := curve.Secp256k1{}
+
+	z := group.NewScalar()
+	if err := z.UnmarshalBinary(sig.S); err != nil {
+		return Signature{}, fmt.Errorf("failed to unmarshal S: %w", err)
+	}
+
+	R := group.NewPoint()
+	if err := R.UnmarshalBinary(sig.R); err != nil {
+		return Signature{}, fmt.Errorf("failed to unmarshal R: %w", err)
+	}
+
+	return Signature{
+		R: R,
+		Z: z,
+	}, nil
 }

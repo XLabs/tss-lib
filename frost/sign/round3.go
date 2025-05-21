@@ -107,7 +107,7 @@ func (r *round3) CanFinalize() bool {
 	// Rshares, z lambda:
 	t := r.Threshold() + 1
 
-	if len(r.RShares) < t && len(r.z) < t && len(r.Lambda) < t {
+	if len(r.RShares) < t || len(r.z) < t || len(r.Lambda) < t {
 		return false
 	}
 
@@ -165,7 +165,7 @@ func (r *round3) Finalize(chan<- tss.ParsedMessage) (round.Session, error) {
 	} else {
 		sig := Signature{
 			R: r.R,
-			z: z,
+			Z: z,
 		}
 
 		if err := sig.Verify(r.Y, r.M); err != nil {

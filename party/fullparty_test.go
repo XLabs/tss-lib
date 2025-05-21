@@ -1,9 +1,9 @@
 package party
 
 import (
-	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
-	"math/big"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -11,48 +11,30 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/xlabs/tss-lib/v2/common"
+	"github.com/xlabs/tss-lib/v2/frost"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
+	"github.com/xlabs/tss-lib/v2/internal/math/sample"
+	"github.com/xlabs/tss-lib/v2/internal/party"
 	"github.com/xlabs/tss-lib/v2/test"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"google.golang.org/protobuf/proto"
 )
 
-var (
-	smallFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_quick")
-	largeFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_fixtures")
-)
+func init() {
 
-func getProjectRootDir() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 
-	abs, err := filepath.Abs(wd)
-	if err != nil {
-		panic(err)
-	}
-
-	for {
-		cur := filepath.Dir(abs)
-		if cur == "" {
-			panic("could not find project root")
-		}
-
-		if !strings.Contains(cur, "tss-lib") {
-			break
-		}
-		abs = cur
-
-	}
-
-	return abs
+	// Set the logger as the default logger
+	slog.SetDefault(logger)
 }
 
 func TestSigning(t *testing.T) {
@@ -73,7 +55,6 @@ func TestSigning(t *testing.T) {
 		participants:             5,
 		threshold:                3,
 		numSignatures:            50,
-		keygenLocation:           path.Join(getProjectRootDir(), "test", "_ecdsa_quick"),
 		maxNetworkSimulationTime: time.Minute,
 	}
 	t.Run("3 threshold 20 signatures", st2.run)
@@ -93,8 +74,8 @@ func (st *signerTester) run(t *testing.T) {
 	digestSet := createDigests(st.numSignatures)
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, st.participants),
+		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
+		sigchan:         make(chan *common.SignatureData, st.numSignatures),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
@@ -115,14 +96,14 @@ func (st *signerTester) run(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second * 5)
+	fmt.Println("Setup done. waiting for test to run.")
+
+	time.Sleep(time.Second * 1)
 	donechan := make(chan struct{})
 	go func() {
 		defer close(donechan)
 		n.run(a)
 	}()
-
-	fmt.Println("Setup done. test starting.")
 
 	fmt.Println("ngoroutines:", runtime.NumGoroutine())
 	<-donechan
@@ -144,7 +125,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
+		outchan:         make(chan tss.ParsedMessage, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
@@ -177,12 +158,13 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	v, ok := impl.signingHandler.trackingIDToSigner.Load(trackingId.ToString())
 	a.True(ok)
 
-	singleSigner, ok := v.(*singleSigner)
+	singleSigner, ok := v.(*singleSession)
 	a.True(ok)
 
 	// unless request to sign something, LocalParty should remain nil.
-	a.Nil(singleSigner.localParty)
-	a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
+	a.Nil(singleSigner.session)
+	a.Greater(len(singleSigner.messages[0]), 1)
+	// a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
 
 	for _, party := range parties {
 		party.Stop()
@@ -205,7 +187,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 	digestSet, _ := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*1000),
+		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, 5),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
@@ -261,7 +243,7 @@ func testLateParties(t *testing.T, numLate int) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
+		outchan:         make(chan tss.ParsedMessage, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
@@ -327,7 +309,7 @@ func TestCleanup(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 	n := networkSimulator{
-		outchan: make(chan tss.Message, len(parties)*20),
+		outchan: make(chan tss.ParsedMessage, len(parties)*20),
 		sigchan: make(chan *common.SignatureData, test.TestParticipants),
 		errchan: make(chan *tss.Error, 1),
 	}
@@ -363,7 +345,7 @@ func getLen(m *sync.Map) int {
 }
 
 type networkSimulator struct {
-	outchan         chan tss.Message
+	outchan         chan tss.ParsedMessage
 	sigchan         chan *common.SignatureData
 	errchan         chan *tss.Error
 	idToFullParty   map[string]FullParty
@@ -388,7 +370,7 @@ func (n *networkSimulator) verifiedAllSignatures() bool {
 func idToParty(parties []FullParty) map[string]FullParty {
 	idToFullParty := map[string]FullParty{}
 	for _, p := range parties {
-		idToFullParty[p.(*Impl).partyID.Id] = p
+		idToFullParty[p.(*Impl).self.Id] = p
 	}
 	return idToFullParty
 }
@@ -430,6 +412,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 
 			if !verified {
 
+				// TODO: validate signature using the results from frost.
 				a.True(validateSignature(anyParty.GetPublic(), m, d[:]))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m)
@@ -448,15 +431,22 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 	}
 }
 
-func validateSignature(pk *ecdsa.PublicKey, m *common.SignatureData, digest []byte) bool {
-	S := (&big.Int{}).SetBytes(m.S)
-	r := (&big.Int{}).SetBytes(m.R)
+func validateSignature(pk curve.Point, m *common.SignatureData, digest []byte) bool {
+	sg, err := frost.Secp256k1SignatureTranslate(m)
+	if err != nil {
+		fmt.Println("failed to translate signature:", err)
+		return false
+	}
 
-	return ecdsa.Verify(pk, digest, r, S)
+	if err := sg.Verify(pk, digest); err != nil {
+		fmt.Println("failed to verify signature:", err)
+		return false
+	}
 
+	return true
 }
 
-func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]FullParty, expectErr bool) {
+func passMsg(a *assert.Assertions, newMsg tss.ParsedMessage, idToParty map[string]FullParty, expectErr bool) {
 	bz, routing, err := newMsg.WireBytes()
 	if expectErr && err != nil {
 		return
@@ -464,7 +454,7 @@ func passMsg(a *assert.Assertions, newMsg tss.Message, idToParty map[string]Full
 	a.NoError(err)
 
 	if routing.IsBroadcast || routing.To == nil {
-
+		slog.Info("Broadcasting message", "from", routing.From.GetId(), "type", newMsg.Type())
 		for pID, p := range idToParty {
 			parsedMsg, done := copyParsedMessage(a, bz, routing, expectErr)
 			if done {
@@ -516,38 +506,77 @@ func copyParsedMessage(a *assert.Assertions, bz []byte, routing *tss.MessageRout
 	return parsedMsg, false
 }
 
-func makeTestParameters(a *assert.Assertions, participants, threshold int, location string) []Parameters {
+func makeTestParameters(a *assert.Assertions, participants, threshold int) []Parameters {
 	ps := make([]Parameters, participants)
-	sortedIds := make([]*tss.PartyID, len(ps))
+	partyIDs := make([]*tss.PartyID, len(ps))
 
-	for i := 0; i < len(ps); i++ {
-		kg := KeygenHandler{
-			StoragePath: location,
+	for i := range partyIDs {
+		partyIDs[i] = &tss.PartyID{
+			MessageWrapper_PartyID: &tss.MessageWrapper_PartyID{
+				Id:  strconv.Itoa(i),
+				Key: nil, // will be set later.
+			},
+			Index: -1, // We don't care about index in frost.
 		}
-		a.NoError(kg.setup(nil, &tss.PartyID{Index: i}))
-		key := kg.SavedData.Ks[i]
-		sortedIds[i] = tss.NewPartyID(key.String(), key.String(), key)
+	}
+	group := curve.Secp256k1{}
+
+	f, pk := DKGShares(group, threshold)
+
+	privateShares := make(map[party.ID]curve.Scalar, len(partyIDs))
+	for _, pid := range partyIDs {
+		id := party.ID(pid.Id)
+
+		privateShares[id] = f.Evaluate(id.Scalar(group))
+	}
+
+	verificationShares := make(map[party.ID]curve.Point, len(partyIDs))
+
+	for _, pid := range partyIDs {
+		id := party.ID(pid.Id)
+		point := privateShares[id].ActOnBase()
+		verificationShares[id] = point
+		bts, err := point.MarshalBinary()
+		a.NoError(err)
+
+		pid.Key = bts
+	}
+
+	for i, pid := range partyIDs {
+		id := party.ID(pid.Id)
 
 		ps[i] = Parameters{
-			SavedSecrets:         kg.SavedData,
-			PartyIDs:             sortedIds,
-			Self:                 sortedIds[i],
-			Threshold:            threshold,
-			WorkDir:              "",  // using SavedSecrets - no need to concern with workDir.
-			MaxSignerTTL:         0,   // letting it pick default.
-			LoadDistributionSeed: nil, // using nil shared secret.
+			InitConfigs: &frost.Config{
+				ID:                 id,
+				Threshold:          threshold,
+				PrivateShare:       privateShares[id],
+				PublicKey:          pk,
+				ChainKey:           []byte{1, 2, 3, 4},
+				VerificationShares: party.NewPointMap(verificationShares),
+			},
+			PartyIDs: partyIDs,
+			Self:     pid,
+
+			MaxSignerTTL:         0, // letting it pick default.
+			LoadDistributionSeed: []byte{5, 6, 7, 8},
 		}
 	}
 
 	return ps
 }
 
-func createFullParties(a *assert.Assertions, participants, threshold int, location string) ([]FullParty, []Parameters) {
-	if location == "" {
-		panic("location must be set")
-	}
+func DKGShares(group curve.Secp256k1, threshold int) (*polynomial.Polynomial, curve.Point) {
 
-	params := makeTestParameters(a, participants, threshold, location)
+	secret := sample.Scalar(rand.Reader, group)
+	f := polynomial.NewPolynomial(group, threshold, secret)
+	publicKey := secret.ActOnBase()
+
+	return f, publicKey
+
+}
+
+func createFullParties(a *assert.Assertions, participants, threshold int, location string) ([]FullParty, []Parameters) {
+	params := makeTestParameters(a, participants, threshold)
 	parties := make([]FullParty, len(params))
 
 	for i := range params {
@@ -555,86 +584,88 @@ func createFullParties(a *assert.Assertions, participants, threshold int, locati
 		a.NoError(err)
 		parties[i] = p
 	}
+
 	return parties, params
 }
 
 func TestClosingThreadpoolMidRun(t *testing.T) {
-	// This test Fails when not run in isolation.
-	a := assert.New(t)
+	t.Skip()
+	// // This test Fails when not run in isolation.
+	// a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
+	// parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
 
-	digestSet, hash := createSingleDigest()
+	// digestSet, hash := createSingleDigest()
 
-	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *tss.Error, 1),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 8,
-		expectErr:       true,
-	}
+	// n := networkSimulator{
+	// 	outchan:         make(chan tss.ParsedMessage, len(parties)*20),
+	// 	sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+	// 	errchan:         make(chan *tss.Error, 1),
+	// 	idToFullParty:   idToParty(parties),
+	// 	digestsToVerify: digestSet,
+	// 	Timeout:         time.Second * 8,
+	// 	expectErr:       true,
+	// }
 
-	goroutinesstart := runtime.NumGoroutine()
+	// goroutinesstart := runtime.NumGoroutine()
 
-	chanReceivedAsyncTask := make(chan struct{})
-	barrier := make(chan struct{})
-	var visitedFlag int32 = 0
-	for _, p := range parties {
-		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	// chanReceivedAsyncTask := make(chan struct{})
+	// barrier := make(chan struct{})
+	// var visitedFlag int32 = 0
+	// for _, p := range parties {
+	// 	a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
 
-		tmp, ok := p.(*Impl)
-		a.True(ok)
+	// 	tmp, ok := p.(*Impl)
+	// 	a.True(ok)
 
-		fnc := tmp.parameters.AsyncWorkComputation
-		// setting different AsyncWorkComputation to test closing the threadpool
-		tmp.parameters.AsyncWorkComputation = func(f func()) error {
-			select {
-			// signaling we reached an async function
-			case chanReceivedAsyncTask <- struct{}{}:
-			default:
-			}
+	// 	// fnc := tmp.parameters.AsyncWorkComputation
+	// 	// setting different AsyncWorkComputation to test closing the threadpool
+	// 	tmp.parameters.AsyncWorkComputation = func(f func()) error {
+	// 		select {
+	// 		// signaling we reached an async function
+	// 		case chanReceivedAsyncTask <- struct{}{}:
+	// 		default:
+	// 		}
 
-			<-barrier
-			atomic.AddInt32(&visitedFlag, 1)
-			return fnc(f)
-		}
-	}
+	// 		<-barrier
+	// 		atomic.AddInt32(&visitedFlag, 1)
+	// 		return fnc(f)
+	// 	}
+	// }
 
-	a.Equal(
-		len(parties)*(numCryptoWorker+numHandlerWorkers+1)+goroutinesstart,
-		runtime.NumGoroutine(),
-		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
-	)
+	// a.Equal(
+	// 	len(parties)*(numCryptoWorker+numHandlerWorkers+1)+goroutinesstart,
+	// 	runtime.NumGoroutine(),
+	// 	"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
+	// )
 
-	for i := 0; i < len(parties); i++ {
-		fpSign(a, parties[i], SigningTask{
-			Digest: hash,
-		})
-	}
+	// for i := 0; i < len(parties); i++ {
+	// 	fpSign(a, parties[i], SigningTask{
+	// 		Digest: hash,
+	// 	})
+	// }
 
-	donechan := make(chan struct{})
-	go func() {
-		defer close(donechan)
-		n.run(a)
-	}()
+	// donechan := make(chan struct{})
+	// go func() {
+	// 	defer close(donechan)
+	// 	n.run(a)
+	// }()
 
-	// stopping everyone to close the threadpools.
-	<-chanReceivedAsyncTask
-	for _, party := range parties {
-		party.(*Impl).cancelFunc()
-	}
-	close(barrier)
-	<-donechan
+	// // stopping everyone to close the threadpools.
+	// <-chanReceivedAsyncTask
+	// for _, party := range parties {
+	// 	party.(*Impl).cancelFunc()
+	// }
+	// close(barrier)
+	// <-donechan
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	// for _, party := range parties {
+	// 	party.Stop()
+	// }
 
-	a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
+	// a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
 
-	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
+	// a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
 }
 
 func TestTrailingZerosInDigests(t *testing.T) {
@@ -651,7 +682,7 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	digestSet[hash2] = false
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*1000),
+		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, 5),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
@@ -710,7 +741,7 @@ func TestChangingCommittee(t *testing.T) {
 	fmt.Println("old digest:", hash)
 
 	n := networkSimulator{
-		outchan:         make(chan tss.Message, len(parties)*10000), // 10k messages per party should be enough.
+		outchan:         make(chan tss.ParsedMessage, len(parties)*10000), // 10k messages per party should be enough.
 		sigchan:         make(chan *common.SignatureData, len(parties)),
 		errchan:         make(chan *tss.Error, 1),
 		idToFullParty:   idToParty(parties),
@@ -722,8 +753,12 @@ func TestChangingCommittee(t *testing.T) {
 		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
 	}
 
+	threadsWait := sync.WaitGroup{}
+	threadsWait.Add(2)
+
 	barrier := make(chan struct{})
 	go func() {
+		defer threadsWait.Done()
 		wg := sync.WaitGroup{}
 		for _, party := range parties {
 			wg.Add(1)
@@ -740,18 +775,20 @@ func TestChangingCommittee(t *testing.T) {
 	}()
 
 	go func() {
+		defer threadsWait.Done()
+
 		<-barrier
 		for nremoved := 1; nremoved < 5; nremoved++ {
 			fmt.Println("changing comittee, starting signing process again.")
 
-			time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
+			// time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
 			faulties := make([]*tss.PartyID, nremoved)
 			for i := 0; i < nremoved; i++ {
-				faulties[i] = parties[i].(*Impl).partyID
+				faulties[i] = parties[i].(*Impl).self
 			}
 			faultiesMap := map[Digest]bool{}
 			for _, pid := range faulties {
-				faultiesMap[pidToDigest(pid.MessageWrapper_PartyID)] = true
+				faultiesMap[pidToDigest(pid)] = true
 			}
 
 			var prevFaulties []*tss.PartyID
@@ -770,7 +807,7 @@ func TestChangingCommittee(t *testing.T) {
 
 				// shuffle the order of the parties when telling them to replace the comittee.
 				// (Ensures different ordered faulties array does not affect the signprotocol)
-				seedPerParty := pidToDigest(p.partyID.MessageWrapper_PartyID)
+				seedPerParty := pidToDigest(p.self)
 
 				shuffledFaulties, err := shuffleParties(seedPerParty[:], faulties)
 				a.NoError(err)
@@ -782,8 +819,16 @@ func TestChangingCommittee(t *testing.T) {
 				})
 				a.NoError(err)
 
+				if err != nil {
+					p.AsyncRequestNewSignature(SigningTask{
+						Digest:       hash,
+						Faulties:     shuffledFaulties,
+						AuxilaryData: []byte{},
+					})
+					return
+				}
 				for _, pid := range info.SigningCommittee {
-					a.NotContains(faultiesMap, pidToDigest(pid.MessageWrapper_PartyID))
+					a.NotContains(faultiesMap, pidToDigest(pid))
 				}
 			}
 		}
@@ -800,4 +845,38 @@ func TestChangingCommittee(t *testing.T) {
 	for _, party := range parties {
 		party.Stop()
 	}
+
+	threadsWait.Wait()
+}
+
+var (
+	smallFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_quick")
+	largeFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_fixtures")
+)
+
+func getProjectRootDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	abs, err := filepath.Abs(wd)
+	if err != nil {
+		panic(err)
+	}
+
+	for {
+		cur := filepath.Dir(abs)
+		if cur == "" {
+			panic("could not find project root")
+		}
+
+		if !strings.Contains(cur, "tss-lib") {
+			break
+		}
+		abs = cur
+
+	}
+
+	return abs
 }

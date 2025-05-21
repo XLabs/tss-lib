@@ -3,8 +3,8 @@ package party
 import (
 	"encoding/binary"
 
-	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
-	"github.com/xlabs/tss-lib/v2/ecdsa/signing"
+	"github.com/xlabs/tss-lib/v2/frost/sign"
+	"github.com/xlabs/tss-lib/v2/internal/party"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
@@ -20,12 +20,10 @@ const (
 
 func findProtocolType(message tss.ParsedMessage) protocolType {
 	switch message.Content().(type) {
-	case *signing.SignRound1Message1, *signing.SignRound1Message2, *signing.SignRound2Message, *signing.SignRound3Message,
-		*signing.SignRound4Message, *signing.SignRound5Message, *signing.SignRound6Message, *signing.SignRound7Message,
-		*signing.SignRound8Message, *signing.SignRound9Message:
+	case *sign.Broadcast2, *sign.Broadcast3:
 		return signingProtocolType
-	case *keygen.KGRound1Message, *keygen.KGRound2Message1, *keygen.KGRound2Message2, *keygen.KGRound3Message:
-		return keygenProtocolType
+	// case :
+	// 	return keygenProtocolType
 	default: // unrecognised message, just ignore!
 		return unknownProtocolType
 	}
@@ -98,4 +96,13 @@ func shuffleParties(seed []byte, parties []*tss.PartyID) ([]*tss.PartyID, error)
 	}
 
 	return cpy, nil
+}
+
+func pids2IDs(pids []*tss.PartyID) []party.ID {
+	ids := make([]party.ID, len(pids))
+	for i, pid := range pids {
+		ids[i] = party.ID(pid.GetId())
+	}
+
+	return ids
 }

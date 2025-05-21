@@ -44,6 +44,7 @@ func (r *round2) StoreBroadcastMessage(msg round.Message) error {
 		return round.ErrInvalidContent
 	}
 
+	
 	Di := r.Group().NewPoint()
 	Ei := r.Group().NewPoint()
 

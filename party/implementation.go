@@ -3,34 +3,19 @@ package party
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
-	"os"
-	"path"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/ecdsa/keygen"
-	"github.com/xlabs/tss-lib/v2/ecdsa/signing"
+	"github.com/xlabs/tss-lib/v2/frost"
+	"github.com/xlabs/tss-lib/v2/internal/math/curve"
+	"github.com/xlabs/tss-lib/v2/internal/party"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"golang.org/x/crypto/sha3"
 )
-
-type KeygenHandler struct {
-	LocalParty  tss.Party
-	StoragePath string
-	// communication channels
-	ProtocolEndOutput <-chan *keygen.LocalPartySaveData
-
-	SavedData *keygen.LocalPartySaveData
-}
-
-type partyIdIndex int
 
 type signerState int
 
@@ -40,37 +25,8 @@ const (
 	notInCommittee
 )
 
-type singleSigner struct {
-	// time represents the moment this signleSigner is created.
-	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
-	time   time.Time
-	digest Digest
-	// This field might change during the lifetime of the signer.
-	// every failed attempt to sign will change this field with a new value.
-	trackingId *common.TrackingID
-
-	// messageBuffer stores messages that are received before the signer receives the
-	// signal to initiate signing.
-	// It’s a map from hash(partyID.key || partyID.Id) to slices
-	// that contains up to maxStoragePerParty messages..
-	messageBuffer  map[Digest][]tss.ParsedMessage
-	partyIdToIndex map[Digest]partyIdIndex
-	committee      tss.SortedPartyIDs
-	self           *tss.PartyID
-	// nil if not started signing yet.
-	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
-	// and used.
-	localParty tss.Party
-	mtx        sync.Mutex
-
-	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
-	state signerState
-
-	sync.Once
-}
-
 // signingHandler handles all signers in the FullParty.
-// The proper way to get a signer is to use getOrCreateSingleSigner method.
+// The proper way to get a signer is to use getOrCreateSingleSession method.
 type signingHandler struct {
 
 	// might store the same signer multiple times: once for each tracking id.
@@ -83,24 +39,31 @@ type signingHandler struct {
 
 // Impl handles multiple signers
 type Impl struct {
+	mtx sync.Mutex
+
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	partyID    *tss.PartyID
-	parameters *tss.Parameters
+	config   *frost.Config
+	peers    []*tss.PartyID
+	peersmap map[party.ID]*tss.PartyID
+	peerIDs  []party.ID
 
-	keygenHandler  *KeygenHandler
+	self *tss.PartyID
+	// parameters *tss.Parameters
+
 	signingHandler *signingHandler
 
 	incomingMessagesChannel chan tss.ParsedMessage
-	startSignerTaskChan     chan *singleSigner
+	startSignerTaskChan     chan *singleSession
 
 	errorChannel           chan<- *tss.Error
-	outChan                chan tss.Message
+	outChan                chan tss.ParsedMessage
 	signatureOutputChannel chan *common.SignatureData
 	cryptoWorkChan         chan func()
-	maxTTl                 time.Duration
-	loadDistributionSeed   []byte
+
+	maxTTl               time.Duration
+	loadDistributionSeed []byte
 
 	workersWg sync.WaitGroup
 }
@@ -129,7 +92,7 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	keysToDelete := make([]any, 0)
 
 	s.trackingIDToSigner.Range(func(key, value any) bool {
-		signer, ok := value.(*singleSigner)
+		signer, ok := value.(*singleSession)
 		if !ok {
 			// since this is not a signer, it should be removed.
 			keysToDelete = append(keysToDelete, key)
@@ -149,66 +112,11 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 	}
 }
 
-func (s *singleSigner) getInitTime() time.Time {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+func (p *Impl) GetPublic() curve.Point {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 
-	return s.time
-}
-
-func (p *Impl) GetPublic() *ecdsa.PublicKey {
-	if p.keygenHandler == nil {
-		return nil
-	}
-
-	if p.keygenHandler.SavedData == nil {
-		return nil
-	}
-
-	if p.keygenHandler.SavedData.ECDSAPub == nil {
-		return nil
-	}
-
-	return p.keygenHandler.SavedData.ECDSAPub.ToECDSAPubKey()
-}
-
-func (k *KeygenHandler) setup(outChan chan tss.Message, selfId *tss.PartyID) error {
-	_ = outChan
-
-	if k.SavedData != nil {
-		return nil
-	}
-
-	content, err := os.ReadFile(k.keysFileName(selfId))
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(content, &k.SavedData); err != nil {
-		return err
-	}
-
-	// TODO: set up keygen.LocalParty, and run it.
-	return nil
-}
-
-func (k *KeygenHandler) keysFileName(selfId *tss.PartyID) string {
-	return path.Join(k.StoragePath, fmt.Sprintf("keygen_data_%d.json", selfId.Index))
-}
-
-func (k *KeygenHandler) storeKeygenData(toSave *keygen.LocalPartySaveData) error {
-	k.SavedData = toSave
-
-	content, err := json.Marshal(toSave)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(k.keysFileName(k.LocalParty.PartyID()), content, 0777)
-}
-
-func (k *KeygenHandler) getSavedParams() *keygen.LocalPartySaveData {
-	return k.SavedData
+	return p.config.PublicKey
 }
 
 // The worker serves as messages courier to all "localParty" instances.
@@ -220,20 +128,15 @@ func (p *Impl) worker() {
 		case message := <-p.incomingMessagesChannel:
 			switch findProtocolType(message) {
 			case keygenProtocolType:
-				fmt.Println("keygen protocol")
+				continue // TODO: handle keygen messages.
 			case signingProtocolType:
 				p.handleIncomingSigningMessage(message)
 			default:
-				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.partyID, message.GetFrom())
+				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.self, message.GetFrom())
 			}
 
 		case signer := <-p.startSignerTaskChan:
 			p.startSigner(signer)
-
-		case o := <-p.keygenHandler.ProtocolEndOutput:
-			if err := p.keygenHandler.storeKeygenData(o); err != nil {
-				p.errorChannel <- tss.NewError(err, "keygen data storing", 0, p.partyID, nil)
-			}
 
 		case <-p.ctx.Done():
 			return
@@ -246,7 +149,7 @@ var (
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
-func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error {
+func (p *Impl) Start(outChannel chan tss.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error {
 	if outChannel == nil || signatureOutputChannel == nil || errChannel == nil {
 		return errors.New("nil channel passed to Start()")
 	}
@@ -255,54 +158,49 @@ func (p *Impl) Start(outChannel chan tss.Message, signatureOutputChannel chan *c
 	p.signatureOutputChannel = signatureOutputChannel
 	p.outChan = outChannel
 
-	p.workersWg.Add(numCryptoWorker + numHandlerWorkers + 1) // +1 for cleanup worker.
+	p.workersWg.Add(numHandlerWorkers + 1) // +1 for cleanup worker.
+
 	// since the worker needs to contend for locks, we can add more than the number of CPUs.
 	for i := 0; i < numHandlerWorkers; i++ {
 		go p.worker()
 	}
 
-	p.initCryptopool()
+	// p.initCryptopool()
 
 	go p.cleanupWorker()
-
-	if err := p.keygenHandler.setup(outChannel, p.partyID); err != nil {
-		p.Stop()
-
-		return fmt.Errorf("keygen handler setup failed: %w", err)
-	}
 
 	return nil
 }
 
-func (p *Impl) initCryptopool() {
-	p.cryptoWorkChan = make(chan func(), runtime.NumCPU())
-	p.parameters.Context = p.ctx
-	p.parameters.AsyncWorkComputation = func(f func()) error {
-		select {
-		case p.cryptoWorkChan <- f:
-			return nil
-		case <-p.ctx.Done():
-			return errors.New("context aborted")
-		}
-	}
+// func (p *Impl) initCryptopool() {
+// 	p.cryptoWorkChan = make(chan func(), runtime.NumCPU())
+// 	// p.parameters.Context = p.ctx
+// 	// p.parameters.AsyncWorkComputation = func(f func()) error {
+// 		select {
+// 		case p.cryptoWorkChan <- f:
+// 			return nil
+// 		case <-p.ctx.Done():
+// 			return errors.New("context aborted")
+// 		}
+// 	}
 
-	for i := 0; i < numCryptoWorker; i++ {
-		go p.cryptoWorker()
-	}
-}
+// 	for i := 0; i < numCryptoWorker; i++ {
+// go p.cryptoWorker()
+// 	}
+// }
 
-func (p *Impl) cryptoWorker() {
-	defer p.workersWg.Done()
+// func (p *Impl) cryptoWorker() {
+// 	defer p.workersWg.Done()
 
-	for {
-		select {
-		case f := <-p.cryptoWorkChan:
-			f()
-		case <-p.ctx.Done():
-			return
-		}
-	}
-}
+// 	for {
+// 		select {
+// 		case f := <-p.cryptoWorkChan:
+// 			f()
+// 		case <-p.ctx.Done():
+// 			return
+// 		}
+// 	}
+// }
 
 func (p *Impl) Stop() {
 	p.cancelFunc()
@@ -314,7 +212,7 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	trackid := p.createTrackingID(s)
 
 	// fast lock.
-	signer, err := p.getOrCreateSingleSigner(trackid)
+	signer, err := p.getOrCreateSingleSession(trackid)
 	if err != nil {
 		return nil, err
 	}
@@ -334,115 +232,77 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	return info, nil
 }
 
-func (p *Impl) startSigner(signer *singleSigner) {
+func (p *Impl) startSigner(signer *singleSession) {
 	if signer == nil {
 		return
 	}
 
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
+	p.mtx.Lock()
+	config := p.config
+	p.mtx.Unlock()
 
 	// The following method initiates the localParty (if it’s a committee
 	//  member). Starting the localParty will involve computationally
 	// intensive cryptographic operations.
-	if err := p.unsafeSetLocalParty(signer); err != nil {
-		tsserr := tss.NewTrackableError(err, "starting protocol failed", -1, nil, signer.trackingId)
-		p.reportError(tsserr)
+	if err := p.setSession(config, signer); err != nil {
+		p.reportError(tss.NewTrackableError(
+			err,
+			"startSigner",
+			-1,
+			nil,
+			signer.trackingId,
+		))
 
 		return
 	}
 
-	if signer.state != set {
+	if signer.checkState() != set {
 		return // not in committee, or, any other reason
 	}
 
-	// If the single signer had received all messages from the committee,
-	// the following loop would involve significant cryptographic computations.
-	// Conversely, if the single signer hadn’t received all messages, the loop would be relatively light.
-	for _, msgArr := range signer.messageBuffer {
-		for _, message := range msgArr {
-			ok, err := signer.unsafeFeedLocalParty(message)
-			if !ok {
-				p.reportError(err)
-			}
-		}
-	}
+	p.sessionAdvance(signer)
 }
 
-// The signer isn't necessarily allowed to sign. as a result, we might return a nil signer - to ensure
-// we don't sign messages blindly.
-func (p *Impl) getSignerOrCacheMessage(message tss.ParsedMessage) (*singleSigner, *tss.Error) {
-	signer, err := p.getOrCreateSingleSigner(message.WireMsg().GetTrackingID())
-	if err != nil {
-		return nil, tss.NewTrackableError(err, "get tss.signer", -1, nil, message.WireMsg().TrackingID)
-	}
+func (p *Impl) sessionAdvance(signer *singleSession) {
+	if err := signer.consumeStoredMessages(); err != nil {
+		p.reportError(err)
 
-	shouldSign := signer.attemptToCacheIfShouldNotSign(message)
-	if !shouldSign {
-		return nil, nil
-	}
-
-	return signer, nil
-}
-
-// Since storing to cache is done strictly when this signer had not yet started to sign, this
-// method will return a bool indicating whether it is allowed to sign.
-func (signer *singleSigner) attemptToCacheIfShouldNotSign(message tss.ParsedMessage) (shouldSign bool) {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	if signer.state == set {
-		shouldSign = true
 		return
 	}
 
-	// Else we store the messages. we might not be in the committee right now,
-	// but this signer might be later consolidated with the committee (due to changes with the committee).
-	dgst := pidToDigest(message.GetFrom().MessageWrapper_PartyID)
+	sessionComplete, err := signer.attemptRoundFinalize()
+	if err != nil {
+		p.reportError(err)
 
-	if len(signer.messageBuffer[dgst]) < maxStoragePerParty {
-		signer.messageBuffer[dgst] = append(signer.messageBuffer[dgst], message)
+		return
 	}
 
-	return
+	if !sessionComplete {
+		return
+	}
+
+	sig, err := signer.extractSignature()
+	if err != nil {
+		p.reportError(err)
+
+		return
+	}
+
+	p.outputSig(sig, signer)
 }
 
-func (signer *singleSigner) feedLocalParty(msg tss.ParsedMessage) (bool, *tss.Error) {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
+var (
+	errCantFeedUnset          = errors.New("can't feed unset signer")
+	errNilSigner              = errors.New("nil signer")
+	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
+)
 
-	// fmt.Println("Recived msg of type:", msg.Type())
-	return signer.unsafeFeedLocalParty(msg)
-}
-
-func (signer *singleSigner) unsafeFeedLocalParty(msg tss.ParsedMessage) (bool, *tss.Error) {
-	index, ok := signer.partyIdToIndex[pidToDigest(msg.GetFrom().MessageWrapper_PartyID)]
-	if !ok {
-		// committee changed, and this party is no longer in the committee.
-		return true, nil
-	}
-
-	msg.GetFrom().Index = int(index) // setting the index of the according to the current committee.
-
-	if signer.state != set {
-		// can't feed a local party that hasn't started yet.
-		return false, tss.NewTrackableError(fmt.Errorf("can't feed unset signer"), "", -1, nil, msg.WireMsg().TrackingID)
-	}
-
-	if signer.trackingId.ToString() != msg.WireMsg().GetTrackingID().ToString() {
-		// tracking id changes due to fault tolarance order.
-		// trackid is always advancing. so if we have something reaching this,
-		// then it is old.
-		return true, nil
-	}
-
-	return signer.localParty.Update(msg)
-}
-
-func pidToDigest(pid *tss.MessageWrapper_PartyID) Digest {
+func pidToDigest(pid *tss.PartyID) Digest {
 	bf := bytes.NewBuffer(nil)
-	bf.WriteString(pid.Id)
-	bf.Write(pid.Key)
+
+	bf.WriteString(pid.GetId())
+	bf.Write(pid.GetKey())
+
 	return hash(bf.Bytes())
 }
 
@@ -462,85 +322,67 @@ func indexInCommittee(self *tss.PartyID, committee tss.UnSortedPartyIDs) int {
 	return -1
 }
 
-func (p *Impl) unsafeSetLocalParty(signer *singleSigner) error {
-	secrets := p.keygenHandler.getSavedParams()
-	if secrets == nil {
-		return ErrNoSigningKey
-	}
+// assumes locked by the caller.
+func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
 
-	switch signer.state {
-	case set:
+	if signer.state != unset {
 		return nil
-
-	case notInCommittee:
-		return nil // not an error
-
-	case unset:
-		// check if notInCommittee:
-		index := indexInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee))
-		if index == -1 {
-			signer.state = notInCommittee
-			return nil
-		}
-
-		signer.state = set
-		// updating the self to a copy with a different index
-		// (matching the indices of the current committee).
-		signer.self = signer.committee[index]
-
-		signer.localParty = signing.NewLocalParty(
-			(&big.Int{}).SetBytes(signer.digest[:]),
-			// track id is what we use to identify the signer throughout messages.
-			signer.trackingId,
-			p.makeParams(signer.committee, signer.self),
-			*secrets,
-			p.outChan,
-			p.signatureOutputChannel,
-			DigestSize,
-		)
-
-		if err := signer.localParty.Start(); err != nil && err.Cause() != nil {
-			return err.Cause()
-		}
 	}
+
+	// check if in committee:
+	index := indexInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee))
+	if index == -1 {
+		signer.state = notInCommittee
+
+		return nil
+	}
+
+	signer.state = set
+
+	sessionCreator := frost.Sign(config, pids2IDs(signer.committee), signer.digest[:])
+
+	session, err := sessionCreator(signer.trackingId.ToByteString())
+	if err != nil {
+		return err
+	}
+
+	signer.session = session
 
 	return nil
 }
 
-// since the parties and committee are shuffled we need to create specialized parameters for the signing protocol.
-func (p *Impl) makeParams(parties []*tss.PartyID, selfIdInCurrentCommittee *tss.PartyID) *tss.Parameters {
-	prms := tss.NewParameters(tss.S256(), tss.NewPeerContext(parties), selfIdInCurrentCommittee, len(parties), p.parameters.Threshold())
-	prms.Context = p.parameters.Context
-	prms.AsyncWorkComputation = p.parameters.AsyncWorkComputation
+var errFirstRoundCantFinalize = errors.New("first round can't finalize")
 
-	return prms
-}
-
-// getOrCreateSingleSigner returns the signer for the given digest, or creates a new one if it doesn't exist.
-func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSigner, error) {
+// getOrCreateSingleSession returns the signer for the given digest, or creates a new one if it doesn't exist.
+func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleSession, error) {
 	s := p.signingHandler
 
 	dgst := Digest{}
 	copy(dgst[:], trackingId.Digest)
 
-	_signer, loaded := s.trackingIDToSigner.LoadOrStore(trackingId.ToString(), &singleSigner{
-		time:          time.Now(),
-		self:          p.partyID,
-		messageBuffer: map[Digest][]tss.ParsedMessage{},
-
-		digest:     dgst, // no digest yet.
+	_signer, loaded := s.trackingIDToSigner.LoadOrStore(trackingId.ToString(), &singleSession{
+		time:       time.Now(),
+		self:       p.self,
+		digest:     dgst,
 		trackingId: trackingId,
+		mtx:        sync.Mutex{},
+		state:      unset,
+		// upon setting the committee, we will set the session.
+		committee: nil,
+		session:   nil,
 
-		partyIdToIndex: map[Digest]partyIdIndex{},
-		localParty:     nil,
+		// first round doesn't receive messages (only round number 2,3)
+		messages: make([]map[Digest]tss.ParsedMessage, frost.NumRounds-1),
 
-		mtx:   sync.Mutex{},
-		state: unset,
+		outputchan: p.outChan,
+		peersmap:   p.peersmap,
 	})
 
-	signer, ok := _signer.(*singleSigner)
+	signer, ok := _signer.(*singleSession)
 	if !ok {
-		return nil, errors.New("internal error, expected *singleSigner")
+		return nil, errors.New("internal error, expected *singleSession")
 	}
 
 	signer.mtx.Lock()
@@ -553,7 +395,7 @@ func (p *Impl) getOrCreateSingleSigner(trackingId *common.TrackingID) (*singleSi
 			return nil, err
 		}
 
-		signer.unsafeSetCommittee(committee)
+		signer.committee = committee
 	}
 
 	return signer, nil
@@ -581,7 +423,10 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs,
 }
 
 func (p *Impl) committeeSize() int {
-	return p.parameters.Threshold() + 1
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	return p.config.Threshold + 1
 }
 
 func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
@@ -591,17 +436,6 @@ func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
 
 func equalIDs(a, b *tss.PartyID) bool {
 	return a.Id == b.Id && bytes.Equal(a.Key, b.Key)
-}
-
-func (signer *singleSigner) unsafeSetCommittee(parties []*tss.PartyID) {
-	signer.partyIdToIndex = make(map[Digest]partyIdIndex, len(parties))
-
-	for _, party := range parties {
-		pidDigest := pidToDigest(party.MessageWrapper_PartyID)
-		signer.partyIdToIndex[pidDigest] = partyIdIndex(party.Index)
-	}
-
-	signer.committee = parties
 }
 
 func (p *Impl) Update(message tss.ParsedMessage) error {
@@ -614,22 +448,32 @@ func (p *Impl) Update(message tss.ParsedMessage) error {
 }
 
 func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
-	signer, err := p.getSignerOrCacheMessage(message)
+	// assumes the message has a tracking ID.
+	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
 	if err != nil {
-		p.reportError(err)
+		p.reportError(tss.NewTrackableError(
+			err,
+			"handleIncomingSigningMessage",
+			-1,
+			message.GetFrom(),
+			message.WireMsg().GetTrackingID(),
+		))
+
 		return
 	}
 
-	if signer == nil {
-		// (SAFETY) To ensure messages aren't signed blindly because some rouge
-		// Party started signing without a valid reason, this Party will only sign if it knows of the digest.
-		return
+	state := signer.checkState()
+	if state == notInCommittee {
+		return // no need to store the message.
 	}
 
-	ok, err := signer.feedLocalParty(message)
-	if !ok {
-		p.reportError(err)
+	signer.storeMessage(message)
+
+	if state != set {
+		return // not allowed to consume/ finalize messages.
 	}
+
+	p.sessionAdvance(signer)
 }
 
 func (p *Impl) reportError(newError *tss.Error) {
@@ -643,12 +487,13 @@ func (p *Impl) reportError(newError *tss.Error) {
 func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	offlineMap := map[string]bool{}
 	for _, v := range s.Faulties {
-		offlineMap[string(v.Key)] = true
+		offlineMap[string(v.GetKey())] = true
 	}
 
-	pids := make([]bool, len(p.parameters.Parties().IDs()))
-	for i, v := range p.parameters.Parties().IDs() {
-		if !offlineMap[string(v.Key)] {
+	pids := make([]bool, len(p.peers))
+
+	for i, v := range p.peers {
+		if !offlineMap[string(v.GetKey())] {
 			pids[i] = true
 		}
 	}
@@ -656,6 +501,7 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	dgst := Digest{}
 	copy(dgst[:], s.Digest[:])
 
+	// TODO: Discuss what happens upon config change. maybe trackID should contain the hash of config? (sessions with the tracking ID but unmatching configs will fail.)
 	tid := &common.TrackingID{
 		Digest:       dgst[:],
 		PartiesState: common.ConvertBoolArrayToByteArray(pids),
@@ -667,7 +513,7 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 
 // returns the parties that can still be part of the committee.
 func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
-	pids := p.parameters.Parties().IDs()
+	pids := p.peers
 
 	ValidCommitteeMembers := make([]*tss.PartyID, 0, len(pids))
 
@@ -696,6 +542,45 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	return &SigningInfo{
 		SigningCommittee: sortedCommittee,
 		TrackingID:       trackingId,
-		IsSigner:         isInCommittee(p.partyID, tss.UnSortedPartyIDs(sortedCommittee)),
+		IsSigner:         isInCommittee(p.self, tss.UnSortedPartyIDs(sortedCommittee)),
 	}, nil
+}
+
+func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) {
+	rbits, err := sig.R.MarshalBinary()
+	if err != nil {
+		p.reportError(tss.NewTrackableError(
+			err,
+			"outputSig",
+			-1,
+			signer.self,
+			signer.trackingId,
+		))
+
+		return
+	}
+
+	sbits, err := sig.Z.MarshalBinary()
+	if err != nil {
+		p.reportError(tss.NewTrackableError(
+			err,
+			"outputSig",
+			-1,
+			signer.self,
+			signer.trackingId,
+		))
+
+		return
+	}
+
+	select {
+	case p.signatureOutputChannel <- &common.SignatureData{
+		R:          rbits,
+		S:          sbits,
+		M:          signer.digest[:],
+		TrackingId: signer.trackingId,
+	}:
+	case <-p.ctx.Done():
+		// nothing to report. closing.
+	}
 }

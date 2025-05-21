@@ -44,7 +44,7 @@ type Signature struct {
 	// R is the commitment point.
 	R curve.Point
 	// z is the response scalar.
-	z curve.Scalar
+	Z curve.Scalar
 }
 
 func Sign(secret curve.Scalar, m []byte) Signature {
@@ -66,7 +66,7 @@ func Sign(secret curve.Scalar, m []byte) Signature {
 
 	return Signature{
 		R: R,
-		z: z,
+		Z: z,
 	}
 }
 
@@ -90,7 +90,7 @@ func (sig Signature) Verify(public curve.Point, m []byte) error {
 	// expected := challenge.Act(public) // ePK = -exG?
 	ePK := challenge.Act(public)
 	// expected = expected.Add(sig.R)    // R + exG =? kG + exG == sG
-	sG := sig.z.ActOnBase() // sG = zG
+	sG := sig.Z.ActOnBase() // sG = zG
 
 	actual := ePK.Add(sG) // where  s = k-s_iC.
 	// ePK + sG = e(xG) + (k+xe)G
@@ -106,6 +106,8 @@ func (sig Signature) Verify(public curve.Point, m []byte) error {
 
 	return nil //actual.Equal(sig.R)
 }
+
+func VerifyContract(ContractSig) {}
 
 // Verify checks if a signature equation actually holds.
 //
@@ -184,7 +186,7 @@ func challengeHash(R curve.Point, pk curve.Point, msgHash []byte) ([]byte, error
 }
 
 func (s Signature) ToContractSig(pk curve.Point, msg []byte) (ContractSig, error) {
-	sigBin, err := s.z.MarshalBinary()
+	sigBin, err := s.Z.MarshalBinary()
 	if err != nil {
 		return ContractSig{}, err
 	}
@@ -202,8 +204,9 @@ func (s Signature) ToContractSig(pk curve.Point, msg []byte) (ContractSig, error
 	consig := ContractSig{
 		PkX:       [32]byte(pkBin[:32]),
 		PkYParity: pkBin[32],
-		Sig:       (&big.Int{}).SetBytes(sigBin),
-		MsgHash:   (&big.Int{}).SetBytes(msg),
+		S:         (&big.Int{}).SetBytes(sigBin),
+		M:         (&big.Int{}).SetBytes(msg),
+		R:         s.R,
 		Address:   rAddress,
 	}
 
@@ -213,9 +216,11 @@ func (s Signature) ToContractSig(pk curve.Point, msg []byte) (ContractSig, error
 type ContractSig struct {
 	PkX       [32]byte
 	PkYParity uint8
-	Sig       *big.Int
-	MsgHash   *big.Int
-	Address   eth.EthAddress
+	M         *big.Int // Message Hash
+
+	S       *big.Int
+	R       curve.Point
+	Address eth.EthAddress
 }
 
 func Bytes2Hex(d []byte) string {
@@ -239,8 +244,8 @@ func (s ContractSig) String() string {
 	b.WriteString("ContractSig{\n")
 	b.WriteString("  pkX                : 0x" + Bytes2Hex(s.PkX[:]) + "\n")
 	b.WriteString("  pkyparity          : " + strconv.FormatUint(uint64(s.PkYParity), 10) + "\n")
-	b.WriteString("  sig                : 0x" + Bytes2Hex(LeftPadBytes(s.Sig.Bytes(), 32)) + "\n")
-	b.WriteString("  msghash            : 0x" + Bytes2Hex(LeftPadBytes(s.MsgHash.Bytes(), 32)) + "\n")
+	b.WriteString("  msghash            : 0x" + Bytes2Hex(LeftPadBytes(s.M.Bytes(), 32)) + "\n")
+	b.WriteString("  s                  : 0x" + Bytes2Hex(LeftPadBytes(s.S.Bytes(), 32)) + "\n")
 	b.WriteString("  nonceTimesGAddress : 0x" + Bytes2Hex(s.Address[:]) + "\n")
 	b.WriteString("}\n")
 
