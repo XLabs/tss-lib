@@ -59,26 +59,38 @@ func (r *round3) StoreBroadcastMessage(msg round.Message) error {
 		return fmt.Errorf("failed to unmarshal zᵢ: %w", err)
 	}
 
-	// These steps come from Figure 3 of the Frost paper.
+	var expected, actual curve.Point
+	if r.taproot {
+		// These steps come from Figure 3 of the Frost paper.
 
-	// 7.b "Verify the validity of each response by checking
-	//
-	//    zᵢ • G = Rᵢ + c * λᵢ * Yᵢ
-	//
-	// for each share zᵢ, i in S. If the equality does not hold, identify and report the
-	// misbehaving participant, and then abort. Otherwise, continue."
-	//
-	// Note that step 7.a is an artifact of having a signing authority. In our case,
-	// we've already computed everything that step computes.
+		// 7.b "Verify the validity of each response by checking
+		//
+		//    zᵢ • G = Rᵢ + c * λᵢ * Yᵢ
+		//
+		// for each share zᵢ, i in S. If the equality does not hold, identify and report the
+		// misbehaving participant, and then abort. Otherwise, continue."
+		//
+		// Note that step 7.a is an artifact of having a signing authority. In our case,
+		// we've already computed everything that step computes.
+		expected = r.c.Act(r.Lambda[from].Act(r.YShares[from])).Add(r.RShares[from])
 
-	// expected := r.c.Act(r.Lambda[from].Act(r.YShares[from])).Add(r.RShares[from])
+		actual = Zi.ActOnBase()
 
-	// actual := body.Z_i.ActOnBase()
+	} else {
+		left := r.c.Act(r.Lambda[from].Act(r.YShares[from]))
+		right := r.RShares[from]
+		expected = left.Sub(right)
 
-	// TODO: Verify the correct value of z_i. (I've commented this out for now)
-	// if !actual.Equal(expected) {
-	// 	return fmt.Errorf("failed to verify response from %v", from)
-	// }
+		// z_i = (λᵢ sᵢ c) - [dᵢ + (eᵢ ρᵢ)] here.
+		actual = Zi.ActOnBase() // z_i*G = [ C * λᵢ *si  - (di +ei*rhoi)]G=
+		// 							 (C * λᵢ *si)G  - (di +ei*rhoi)G =
+		// 							 (C * λᵢ)Yᵢ - (di +ei*rhoi)G=
+		// 							 (C * λᵢ)Yᵢ - Rshares[i]
+	}
+
+	if !actual.Equal(expected) {
+		return fmt.Errorf("round3: failed to verify response from %v", from)
+	}
 
 	r.z[from] = Zi
 

@@ -138,6 +138,7 @@ func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 		RShares[l] = RShares[l].Add(r.D[l])
 		R = R.Add(RShares[l])
 	}
+	// Rshares[i] = [(ρᵢ * Eᵢ) + Dᵢ]
 	var c curve.Scalar
 	if r.taproot {
 		// BIP-340 adjustment: We need R to have an even y coordinate. This means
@@ -173,7 +174,7 @@ func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 	var z_i curve.Scalar
 	// S in schnorr: s = k + x*C
 	// 5. "Each Pᵢ computes their response using their long-lived secret share sᵢ
-	// by computing zᵢ = [dᵢ + (eᵢ ρᵢ)] + λᵢ sᵢ c, using S to determine // Should be minus siC (z_i) = (di +ei*rhoi) - \lambdai si C
+	// by computing zᵢ = [dᵢ + (eᵢ ρᵢ)] + λᵢ sᵢ c, using S to determine
 	// the ith lagrange coefficient λᵢ"
 	if r.taproot {
 		z_i = r.Group().NewScalar().Set(Lambdas[r.SelfID()]).Mul(r.s_i).Mul(c)
@@ -181,12 +182,16 @@ func (r *round2) Finalize(out chan<- tss.ParsedMessage) (round.Session, error) {
 		ed := r.Group().NewScalar().Set(rho[r.SelfID()]).Mul(r.e_i)
 		z_i.Add(ed)
 	} else {
+		//changed to work with smart contracts using ecrecover.
+		// thus z_i = (λᵢ sᵢ c) - [dᵢ + (eᵢ ρᵢ)] here.
+		// we later negate the resulting z to get the schnorr value s = k - x*c
 		z_i = r.Group().NewScalar().Set(Lambdas[r.SelfID()]).Mul(r.s_i).Mul(c)
 
 		// ed == dᵢ + eᵢ ρᵢ
 		ed := r.Group().NewScalar().Set(rho[r.SelfID()]).Mul(r.e_i)
 		ed.Add(r.d_i)
 
+		// zi = λi si c - (di + ei ρi)
 		z_i.Sub(ed)
 	}
 
