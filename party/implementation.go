@@ -25,6 +25,19 @@ const (
 	notInCommittee
 )
 
+func (s signerState) String() string {
+	switch s {
+	case unset:
+		return "unset"
+	case set:
+		return "set"
+	case notInCommittee:
+		return "notInCommittee"
+	default:
+		return fmt.Sprintf("unknown state: %d", s)
+	}
+}
+
 // signingHandler handles all signers in the FullParty.
 // The proper way to get a signer is to use getOrCreateSingleSession method.
 type signingHandler struct {
@@ -54,7 +67,7 @@ type Impl struct {
 
 	signingHandler *signingHandler
 
-	incomingMessagesChannel chan tss.ParsedMessage
+	incomingMessagesChannel chan feedMessageTask
 	startSignerTaskChan     chan *singleSession
 
 	errorChannel           chan<- *tss.Error
@@ -125,14 +138,14 @@ func (p *Impl) worker() {
 
 	for {
 		select {
-		case message := <-p.incomingMessagesChannel:
-			switch findProtocolType(message) {
+		case task := <-p.incomingMessagesChannel:
+			switch findProtocolType(task.message) {
 			case keygenProtocolType:
 				continue // TODO: handle keygen messages.
 			case signingProtocolType:
-				p.handleIncomingSigningMessage(message)
+				p.handleIncomingSigningMessage(task)
 			default:
-				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "", 0, p.self, message.GetFrom())
+				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
 			}
 
 		case signer := <-p.startSignerTaskChan:
@@ -256,43 +269,48 @@ func (p *Impl) startSigner(signer *singleSession) {
 		return
 	}
 
-	if signer.checkState() != set {
+	if signer.getState() != set {
 		return // not in committee, or, any other reason
 	}
 
 	p.sessionAdvance(signer)
 }
 
-func (p *Impl) sessionAdvance(signer *singleSession) {
+func (p *Impl) sessionAdvance(signer *singleSession) UpdateMeta {
 	if err := signer.consumeStoredMessages(); err != nil {
-		p.reportError(err)
-
-		return
+		return UpdateMeta{Error: err}
 	}
 
-	sessionComplete, err := signer.attemptRoundFinalize()
+	report, err := signer.attemptRoundFinalize()
 	if err != nil {
-		p.reportError(err)
-
-		return
+		return UpdateMeta{Error: err}
 	}
 
-	if !sessionComplete {
-		return
+	if !report.isSessionComplete {
+		return UpdateMeta{
+			AdvancedRound:      report.advancedRound,
+			CurrentRoundNumber: int(report.currentRound),
+			SignerState:        set.String(),
+		}
 	}
 
 	sig, err := signer.extractSignature()
 	if err != nil {
-		p.reportError(err)
-
-		return
+		return UpdateMeta{Error: err}
 	}
 
-	p.outputSig(sig, signer)
+	if err := p.outputSig(sig, signer); err != nil {
+		return UpdateMeta{Error: err}
+	}
+
+	return UpdateMeta{
+		AdvancedRound:      report.advancedRound,
+		CurrentRoundNumber: int(signer.getRound()),
+		SignerState:        set.String(),
+	}
 }
 
 var (
-	errCantFeedUnset          = errors.New("can't feed unset signer")
 	errNilSigner              = errors.New("nil signer")
 	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
 )
@@ -353,7 +371,7 @@ func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 	return nil
 }
 
-var errFirstRoundCantFinalize = errors.New("first round can't finalize")
+var errInternalStorage = errors.New("internal: couldn't load signer due to convertion issue")
 
 // getOrCreateSingleSession returns the signer for the given digest, or creates a new one if it doesn't exist.
 func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleSession, error) {
@@ -382,7 +400,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 
 	signer, ok := _signer.(*singleSession)
 	if !ok {
-		return nil, errors.New("internal error, expected *singleSession")
+		return nil, errInternalStorage
 	}
 
 	signer.mtx.Lock()
@@ -438,42 +456,71 @@ func equalIDs(a, b *tss.PartyID) bool {
 	return a.Id == b.Id && bytes.Equal(a.Key, b.Key)
 }
 
-func (p *Impl) Update(message tss.ParsedMessage) error {
+type feedMessageTask struct {
+	message tss.ParsedMessage
+	result  chan UpdateMeta
+}
+
+func (p *Impl) Update(message tss.ParsedMessage) (<-chan UpdateMeta, error) {
+	answerChan := make(chan UpdateMeta, 1)
+
 	select {
-	case p.incomingMessagesChannel <- message:
-		return nil
+	case p.incomingMessagesChannel <- feedMessageTask{message: message, result: answerChan}:
+		return answerChan, nil
 	case <-p.ctx.Done():
-		return errors.New("worker stopped")
+		close(answerChan) // ensures no one will block waiting on the channel.
+
+		return answerChan, p.ctx.Err()
 	}
 }
 
-func (p *Impl) handleIncomingSigningMessage(message tss.ParsedMessage) {
+func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 	// assumes the message has a tracking ID.
+	message := task.message
 	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
 	if err != nil {
-		p.reportError(tss.NewTrackableError(
-			err,
-			"handleIncomingSigningMessage",
-			-1,
-			message.GetFrom(),
-			message.WireMsg().GetTrackingID(),
-		))
+		task.result <- UpdateMeta{
+			Error: tss.NewTrackableError(
+				err,
+				"handleIncomingSigningMessage",
+				-1,
+				message.GetFrom(),
+				message.WireMsg().GetTrackingID(),
+			),
+		}
 
 		return
 	}
 
-	state := signer.checkState()
+	state := signer.getState()
 	if state == notInCommittee {
-		return // no need to store the message.
+		// no need to store the message since the signer is not in the committee.
+
+		task.result <- UpdateMeta{ // updating the task result.
+			AdvancedRound:      false,
+			CurrentRoundNumber: 0,
+			SignerState:        unset.String(),
+		}
+
+		return
 	}
 
 	signer.storeMessage(message)
 
 	if state != set {
-		return // not allowed to consume/ finalize messages.
+		// not allowed to consume/ finalize messages.
+
+		task.result <- UpdateMeta{
+			AdvancedRound:      false,
+			CurrentRoundNumber: 0,
+			SignerState:        state.String(),
+		}
+
+		return
 	}
 
-	p.sessionAdvance(signer)
+	task.result <- p.sessionAdvance(signer)
+
 }
 
 func (p *Impl) reportError(newError *tss.Error) {
@@ -511,6 +558,8 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	return tid
 }
 
+var errInvalidTrackingID = errors.New("invalid tracking id")
+
 // returns the parties that can still be part of the committee.
 func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
 	pids := p.peers
@@ -518,7 +567,7 @@ func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSo
 	ValidCommitteeMembers := make([]*tss.PartyID, 0, len(pids))
 
 	if len(trackingId.PartiesState) < (len(pids)+7)/8 {
-		return nil, errors.New("invalid tracking id")
+		return nil, errInvalidTrackingID
 	}
 
 	for i, pid := range pids {
@@ -546,31 +595,27 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	}, nil
 }
 
-func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) {
+func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *tss.Error {
 	rbits, err := sig.R.MarshalBinary()
 	if err != nil {
-		p.reportError(tss.NewTrackableError(
+		return tss.NewTrackableError(
 			err,
 			"outputSig",
 			-1,
 			signer.self,
 			signer.trackingId,
-		))
-
-		return
+		)
 	}
 
 	sbits, err := sig.Z.MarshalBinary()
 	if err != nil {
-		p.reportError(tss.NewTrackableError(
+		return tss.NewTrackableError(
 			err,
 			"outputSig",
 			-1,
 			signer.self,
 			signer.trackingId,
-		))
-
-		return
+		)
 	}
 
 	select {
@@ -581,6 +626,8 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) {
 		TrackingId: signer.trackingId,
 	}:
 	case <-p.ctx.Done():
-		// nothing to report. closing.
+		// nothing to report.
 	}
+
+	return nil
 }

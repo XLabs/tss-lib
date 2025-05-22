@@ -463,7 +463,7 @@ func passMsg(a *assert.Assertions, newMsg tss.ParsedMessage, idToParty map[strin
 			if routing.From.GetId() == pID {
 				continue
 			}
-			err = p.Update(parsedMsg)
+			_, err = p.Update(parsedMsg)
 			if expectErr && err != nil {
 				continue
 			}
@@ -479,7 +479,7 @@ func passMsg(a *assert.Assertions, newMsg tss.ParsedMessage, idToParty map[strin
 			return
 		}
 
-		err = idToParty[id.Id].Update(parsedMsg)
+		_, err = idToParty[id.Id].Update(parsedMsg)
 		if expectErr && err != nil {
 			continue
 		}

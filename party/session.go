@@ -102,7 +102,7 @@ func (signer *singleSession) storeMessage(message tss.ParsedMessage) error {
 	return nil
 }
 
-func (signer *singleSession) checkState() signerState {
+func (signer *singleSession) getState() signerState {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
@@ -169,42 +169,64 @@ func (signer *singleSession) culpritsToPartyIDs(culprits []party.ID) []*tss.Part
 	return partyIDs
 }
 
-// Attempt to finalize the round. if the round was the protocol's final round,
-// return true.
-func (signer *singleSession) attemptRoundFinalize() (bool, *tss.Error) {
+func (signer *singleSession) getRound() round.Number {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	// advancing from the last round -> this session is completed.
+	if signer.session == nil {
+		return 0
+	}
+
+	return signer.session.Number()
+}
+
+type finalizeReport struct {
+	isSessionComplete bool
+	advancedRound     bool
+	currentRound      round.Number
+}
+
+var errFirstRoundCantFinalize = errors.New("first round can't finalize")
+
+// Attempt to finalize the round. if the round was the protocol's final round,
+// return true.
+func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *tss.Error) {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
 	rnd := signer.session.Number()
 	sessionComplete := false
 
+	report := finalizeReport{
+		isSessionComplete: false,
+		advancedRound:     false,
+		currentRound:      rnd,
+	}
+
 	if !signer.session.CanFinalize() {
-		if int(rnd) == 1 {
-			return sessionComplete, tss.NewTrackableError(
+		if int(rnd) == 1 { // Should never happen.
+			return report, tss.NewTrackableError(
 				errFirstRoundCantFinalize,
-				"unsafeRoundFinalize",
+				"attemptRoundFinalize:firstRound",
 				int(rnd),
 				signer.self,
 				signer.trackingId,
 			)
 		}
 
-		return sessionComplete, nil
+		return report, nil
 	}
 
 	// finalizing the final round of the session...
+	// not updatingt the report until we PASS the finalization.
 	sessionComplete = rnd == signer.session.FinalRoundNumber()
 
 	tmp, err := signer.session.Finalize(signer.outputchan)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
-
-			// TODO: output ABORT message to all parties.
-
-			return sessionComplete, tss.NewTrackableError(
+			return report, tss.NewTrackableError(
 				b.Err,
-				"unsafeRoundFinalize:abort",
+				"attemptRoundFinalize:abort",
 				int(rnd),
 				signer.self,
 				signer.trackingId,
@@ -212,13 +234,20 @@ func (signer *singleSession) attemptRoundFinalize() (bool, *tss.Error) {
 			)
 		}
 
-		return sessionComplete, tss.NewTrackableError(
+		return report, tss.NewTrackableError(
 			err,
-			"unsafeRoundFinalize",
+			"attemptRoundFinalize:finalize",
 			int(rnd),
 			signer.self,
 			signer.trackingId,
 		)
+	}
+
+	// Updating the report.
+	report = finalizeReport{
+		isSessionComplete: sessionComplete,
+		advancedRound:     true,
+		currentRound:      tmp.Number(),
 	}
 
 	// if the session was in final round, and advanced -> this session is done.
@@ -226,14 +255,13 @@ func (signer *singleSession) attemptRoundFinalize() (bool, *tss.Error) {
 	// advancing the inner session.
 	signer.session = tmp
 
-	slog.Debug("advanced round",
-		slog.String("ID", signer.self.Id),
-		slog.String("trackingId", signer.trackingId.ToString()),
-		slog.Int("round", int(signer.session.Number())),
-	)
-
-	return sessionComplete, nil
+	return report, nil
 }
+
+var (
+	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
+	errSigNotOfCorrectType        = errors.New("session final round failed: not of type frost.Signature")
+)
 
 func (signer *singleSession) extractSignature() (frost.Signature, *tss.Error) {
 	// checking for output.
@@ -242,8 +270,8 @@ func (signer *singleSession) extractSignature() (frost.Signature, *tss.Error) {
 	r, ok := signer.session.(*round.Output)
 	if !ok {
 		return sig, tss.NewTrackableError(
-			errors.New("session final round failed: not of type 'Output'"),
-			"unsafeRoundFinalize:afterFinalize",
+			errFinalRoundNotOfCorrectType,
+			"extractSignature:roundConvert",
 			-1,
 			signer.self,
 			signer.trackingId,
@@ -253,8 +281,8 @@ func (signer *singleSession) extractSignature() (frost.Signature, *tss.Error) {
 	sig, ok = r.Result.(frost.Signature)
 	if !ok {
 		return sig, tss.NewTrackableError(
-			errors.New("session final round failed: not of type frost.Signature"),
-			"unsafeRoundFinalize:afterFinalize",
+			errSigNotOfCorrectType,
+			"extractSignature:sigConvert",
 			int(-1),
 			signer.self,
 			signer.trackingId,

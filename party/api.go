@@ -45,6 +45,14 @@ type SigningInfo struct {
 	IsSigner         bool
 }
 
+type UpdateMeta struct {
+	AdvancedRound      bool
+	CurrentRoundNumber int
+	SignerState        string
+
+	Error error
+}
+
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
 	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
@@ -62,7 +70,7 @@ type FullParty interface {
 	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
-	Update(tss.ParsedMessage) error
+	Update(tss.ParsedMessage) (<-chan UpdateMeta, error)
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() curve.Point
@@ -119,7 +127,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 			sigPartReadyChan:   nil, // set up during Start()
 		},
 
-		incomingMessagesChannel: make(chan tss.ParsedMessage, len(p.PartyIDs)),
+		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),
 		startSignerTaskChan:     make(chan *singleSession),
 		// the following fields should be provided in Start()
 		errorChannel:           nil,
