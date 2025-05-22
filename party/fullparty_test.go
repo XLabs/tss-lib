@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/xlabs/tss-lib/v2/common"
 	"github.com/xlabs/tss-lib/v2/frost"
+	"github.com/xlabs/tss-lib/v2/frost/sign"
 	"github.com/xlabs/tss-lib/v2/internal/math/curve"
 	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
 	"github.com/xlabs/tss-lib/v2/internal/math/sample"
@@ -42,7 +43,6 @@ func TestSigning(t *testing.T) {
 		participants:             test.TestParticipants,
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
-		keygenLocation:           largeFixturesLocation,
 		maxNetworkSimulationTime: time.Second * 200,
 	}
 	t.Run("one signature", st.run)
@@ -62,14 +62,13 @@ func TestSigning(t *testing.T) {
 
 type signerTester struct {
 	participants, threshold, numSignatures int
-	keygenLocation                         string
 	maxNetworkSimulationTime               time.Duration
 }
 
 func (st *signerTester) run(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, st.participants, st.threshold, st.keygenLocation)
+	parties, _ := createFullParties(a, st.participants, st.threshold)
 
 	digestSet := createDigests(st.numSignatures)
 
@@ -120,7 +119,7 @@ Test to ensure that a Part will not attempt to sign a digest, even if received m
 func TestPartyDoesntFollowRouge(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
 	digestSet, hash := createSingleDigest()
 
@@ -182,7 +181,7 @@ func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
 func TestMultipleRequestToSignSameThing(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
+	parties, _ := createFullParties(a, 5, 3)
 
 	digestSet, _ := createSingleDigest()
 
@@ -238,7 +237,7 @@ func TestLateParties(t *testing.T) {
 func testLateParties(t *testing.T, numLate int) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
 	digestSet, hash := createSingleDigest()
 
@@ -303,7 +302,7 @@ func createSingleDigest() (map[Digest]bool, Digest) {
 func TestCleanup(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 	maxTTL := time.Second * 1
 	for _, impl := range parties {
 		impl.(*Impl).maxTTl = maxTTL
@@ -575,7 +574,7 @@ func DKGShares(group curve.Secp256k1, threshold int) (*polynomial.Polynomial, cu
 
 }
 
-func createFullParties(a *assert.Assertions, participants, threshold int, location string) ([]FullParty, []Parameters) {
+func createFullParties(a *assert.Assertions, participants, threshold int) ([]FullParty, []Parameters) {
 	params := makeTestParameters(a, participants, threshold)
 	parties := make([]FullParty, len(params))
 
@@ -671,7 +670,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 func TestTrailingZerosInDigests(t *testing.T) {
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, 5, 3, smallFixturesLocation)
+	parties, _ := createFullParties(a, 5, 3)
 
 	digestSet := make(map[Digest]bool)
 
@@ -735,7 +734,7 @@ func TestChangingCommittee(t *testing.T) {
 	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation) // threshold =2 means we need 3 in comittee to sign
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold) // threshold =2 means we need 3 in comittee to sign
 
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
@@ -849,11 +848,6 @@ func TestChangingCommittee(t *testing.T) {
 	threadsWait.Wait()
 }
 
-var (
-	smallFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_quick")
-	largeFixturesLocation = path.Join(getProjectRootDir(), "test", "_ecdsa_fixtures")
-)
-
 func getProjectRootDir() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -879,4 +873,70 @@ func getProjectRootDir() string {
 	}
 
 	return abs
+}
+
+func TestErrorsInUpdate(t *testing.T) {
+	a := assert.New(t)
+	parties, _ := createFullParties(a, 5, 4)
+
+	outchan := make(chan tss.ParsedMessage, len(parties)*20)
+	sigchan := make(chan *common.SignatureData, test.TestParticipants)
+	errchan := make(chan *tss.Error, 1)
+
+	for _, v := range parties {
+		v.Start(outchan, sigchan, errchan)
+	}
+
+	_, hash := createSingleDigest()
+
+	for _, party := range parties {
+		go fpSign(a, party, SigningTask{
+			Digest: hash,
+		})
+	}
+
+	success := atomic.Bool{}
+	success.Store(false)
+
+	donechn := time.After(time.Second * 5)
+	for {
+		select {
+		case <-donechn:
+			if !success.Load() {
+				t.Fail()
+			}
+			return
+
+		case m := <-outchan:
+			if m.GetFrom().Id == parties[0].(*Impl).self.Id {
+				// this is the party that will send rubbish.
+				switch msg := m.Content().(type) {
+				case *sign.Broadcast3:
+					msg.Zi = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9}
+				case *sign.Broadcast2:
+					msg.Ei[10] += 1
+				}
+			}
+
+			for _, p := range parties {
+				p := p
+				m := m
+				go func() {
+					Update, err := p.Update(m)
+					if err != nil {
+						return
+					}
+
+					meta := <-Update
+					if meta.Error != nil {
+						success.Store(true)
+					}
+
+					fmt.Println("update:", <-Update)
+				}()
+			}
+		}
+
+	}
+
 }
