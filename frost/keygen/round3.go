@@ -111,7 +111,7 @@ func (r *round3) CanFinalize() bool {
 	t := r.Threshold() + 1 // t + 1 participants are needed to create a signature
 
 	// received from everyone.
-	if len(r.shareFrom) < t && len(r.ChainKeys) < t {
+	if len(r.shareFrom) < t || len(r.ChainKeys) < t {
 		return false
 	}
 

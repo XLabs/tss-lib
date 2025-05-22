@@ -154,7 +154,7 @@ func (r *round2) CanFinalize() bool {
 
 	// received from everyone.
 	// the folowing used in round3: && len(r.ChainKeys) == t
-	if len(r.Phi) < t && len(r.ChainKeyCommitments) < t {
+	if len(r.Phi) < t || len(r.ChainKeyCommitments) < t {
 		return false
 	}
 

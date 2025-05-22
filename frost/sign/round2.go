@@ -44,7 +44,6 @@ func (r *round2) StoreBroadcastMessage(msg round.Message) error {
 		return round.ErrInvalidContent
 	}
 
-	
 	Di := r.Group().NewPoint()
 	Ei := r.Group().NewPoint()
 
@@ -88,7 +87,7 @@ func (r *round2) CanFinalize() bool {
 	t := r.Threshold() + 1 // t + 1 participants are needed to create a signature
 
 	// received from everyone.
-	if len(r.D) < t && len(r.E) < t {
+	if len(r.D) < t || len(r.E) < t {
 		return false
 	}
 
