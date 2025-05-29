@@ -6,11 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost"
-	"github.com/xlabs/tss-lib/v2/internal/party"
-	"github.com/xlabs/tss-lib/v2/internal/round"
-	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/round"
+	"github.com/xlabs/multi-party-sig/protocols/frost"
+	common "github.com/xlabs/tss-common"
 )
 
 type singleSession struct {
@@ -23,10 +22,10 @@ type singleSession struct {
 	// this index is unique, and is used to identify the signer.
 	trackingId *common.TrackingID
 
-	messages []map[Digest]tss.ParsedMessage
+	messages []map[Digest]common.ParsedMessage
 
-	committee tss.SortedPartyIDs
-	self      *tss.PartyID
+	committee common.SortedPartyIDs
+	self      *common.PartyID
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
@@ -38,8 +37,8 @@ type singleSession struct {
 
 	// helpers:
 
-	outputchan chan<- tss.ParsedMessage
-	peersmap   map[party.ID]*tss.PartyID
+	outputchan chan<- common.ParsedMessage
+	peersmap   map[party.ID]*common.PartyID
 }
 
 func (s *singleSession) getInitTime() time.Time {
@@ -58,7 +57,7 @@ var (
 )
 
 // When storing a message, we might not be able to finalize,
-func (signer *singleSession) storeMessage(message tss.ParsedMessage) error {
+func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	slog.Debug("storing message",
 		slog.String("ID", signer.self.Id),
 		slog.String("type", message.Type()),
@@ -91,7 +90,7 @@ func (signer *singleSession) storeMessage(message tss.ParsedMessage) error {
 	storePosition := msgRnd - 2
 
 	if signer.messages[storePosition] == nil {
-		signer.messages[storePosition] = make(map[Digest]tss.ParsedMessage)
+		signer.messages[storePosition] = make(map[Digest]common.ParsedMessage)
 	}
 
 	dgst := pidToDigest(message.GetFrom())
@@ -111,12 +110,12 @@ func (signer *singleSession) getState() signerState {
 
 // after storing a new message, the session can attempt to consume any dandling messages in its queues.
 // Once all consumed, one can attempt to finailize the round.
-func (signer *singleSession) consumeStoredMessages() *tss.Error {
+func (signer *singleSession) consumeStoredMessages() *common.Error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
 	if signer.session == nil {
-		return tss.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
+		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
 	}
 
 	rnd := signer.session.Number()
@@ -139,7 +138,7 @@ func (signer *singleSession) consumeStoredMessages() *tss.Error {
 		// TODO: support non-broadcast messages.
 		r, ok := signer.session.(round.BroadcastRound)
 		if !ok {
-			return tss.NewError(errShouldBeBroadcastRound, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
+			return common.NewError(errShouldBeBroadcastRound, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
 		}
 
 		m := round.Message{
@@ -151,7 +150,7 @@ func (signer *singleSession) consumeStoredMessages() *tss.Error {
 		}
 
 		if err := r.StoreBroadcastMessage(m); err != nil {
-			return tss.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
+			return common.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
 		}
 
 	}
@@ -159,8 +158,8 @@ func (signer *singleSession) consumeStoredMessages() *tss.Error {
 	return nil
 }
 
-func (signer *singleSession) culpritsToPartyIDs(culprits []party.ID) []*tss.PartyID {
-	partyIDs := make([]*tss.PartyID, len(culprits))
+func (signer *singleSession) culpritsToPartyIDs(culprits []party.ID) []*common.PartyID {
+	partyIDs := make([]*common.PartyID, len(culprits))
 
 	for i, culprit := range culprits {
 		partyIDs[i] = signer.peersmap[culprit]
@@ -190,7 +189,7 @@ var errFirstRoundCantFinalize = errors.New("first round can't finalize")
 
 // Attempt to finalize the round. if the round was the protocol's final round,
 // return true.
-func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *tss.Error) {
+func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Error) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
@@ -205,7 +204,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *tss.Error)
 
 	if !signer.session.CanFinalize() {
 		if int(rnd) == 1 { // Should never happen.
-			return report, tss.NewTrackableError(
+			return report, common.NewTrackableError(
 				errFirstRoundCantFinalize,
 				"attemptRoundFinalize:firstRound",
 				int(rnd),
@@ -224,7 +223,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *tss.Error)
 	tmp, err := signer.session.Finalize(signer.outputchan)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
-			return report, tss.NewTrackableError(
+			return report, common.NewTrackableError(
 				b.Err,
 				"attemptRoundFinalize:abort",
 				int(rnd),
@@ -234,7 +233,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *tss.Error)
 			)
 		}
 
-		return report, tss.NewTrackableError(
+		return report, common.NewTrackableError(
 			err,
 			"attemptRoundFinalize:finalize",
 			int(rnd),
@@ -263,13 +262,13 @@ var (
 	errSigNotOfCorrectType        = errors.New("session final round failed: not of type frost.Signature")
 )
 
-func (signer *singleSession) extractSignature() (frost.Signature, *tss.Error) {
+func (signer *singleSession) extractSignature() (frost.Signature, *common.Error) {
 	// checking for output.
 	var sig frost.Signature
 
 	r, ok := signer.session.(*round.Output)
 	if !ok {
-		return sig, tss.NewTrackableError(
+		return sig, common.NewTrackableError(
 			errFinalRoundNotOfCorrectType,
 			"extractSignature:roundConvert",
 			-1,
@@ -280,7 +279,7 @@ func (signer *singleSession) extractSignature() (frost.Signature, *tss.Error) {
 
 	sig, ok = r.Result.(frost.Signature)
 	if !ok {
-		return sig, tss.NewTrackableError(
+		return sig, common.NewTrackableError(
 			errSigNotOfCorrectType,
 			"extractSignature:sigConvert",
 			int(-1),

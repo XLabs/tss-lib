@@ -7,10 +7,11 @@
 package test
 
 import (
+	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/tss"
 )
 
-func SharedPartyUpdater(party tss.Party, msg tss.Message, errCh chan<- *tss.Error) {
+func SharedPartyUpdater(party tss.Party, msg common.Message, errCh chan<- *common.Error) {
 	// do not send a message from this party back to itself
 	if party.PartyID() == msg.GetFrom() {
 		return
@@ -20,7 +21,7 @@ func SharedPartyUpdater(party tss.Party, msg tss.Message, errCh chan<- *tss.Erro
 		errCh <- party.WrapError(err)
 		return
 	}
-	pMsg, err := tss.ParseWireMessage(bz, msg.GetFrom(), msg.IsBroadcast())
+	pMsg, err := common.ParseWireMessage(bz, msg.GetFrom(), msg.IsBroadcast())
 	if err != nil {
 		errCh <- party.WrapError(err)
 		return

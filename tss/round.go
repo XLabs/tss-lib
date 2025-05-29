@@ -6,14 +6,16 @@
 
 package tss
 
+import common "github.com/xlabs/tss-common"
+
 type Round interface {
 	Params() *Parameters
-	Start() *Error
-	Update() (bool, *Error)
+	Start() *common.Error
+	Update() (bool, *common.Error)
 	RoundNumber() int
-	CanAccept(msg ParsedMessage) bool
+	CanAccept(msg common.ParsedMessage) bool
 	CanProceed() bool
 	NextRound() Round
-	WaitingFor() []*PartyID
-	WrapError(err error, culprits ...*PartyID) *Error
+	WaitingFor() []*common.PartyID
+	WrapError(err error, culprits ...*common.PartyID) *common.Error
 }

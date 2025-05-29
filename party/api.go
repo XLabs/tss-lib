@@ -6,19 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost"
-	"github.com/xlabs/tss-lib/v2/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/internal/party"
-	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/multi-party-sig/pkg/math/curve"
+	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/protocols/frost"
+	common "github.com/xlabs/tss-common"
 )
 
 type Parameters struct {
 	// for simplicity of testing:
 	InitConfigs *frost.Config // maybe store this in a file
 
-	PartyIDs []*tss.PartyID // should have the same string IDs as the ones that created the initConfigs.
-	Self     *tss.PartyID
+	PartyIDs []*common.PartyID // should have the same string IDs as the ones that created the initConfigs.
+	Self     *common.PartyID
 
 	MaxSignerTTL time.Duration
 
@@ -35,12 +34,12 @@ type Digest [32]byte
 
 type SigningTask struct {
 	Digest       Digest
-	Faulties     []*tss.PartyID // Can be nil
-	AuxilaryData []byte         // can be nil
+	Faulties     []*common.PartyID // Can be nil
+	AuxilaryData []byte            // can be nil
 }
 
 type SigningInfo struct {
-	SigningCommittee tss.SortedPartyIDs
+	SigningCommittee common.SortedPartyIDs
 	TrackingID       *common.TrackingID
 	IsSigner         bool
 }
@@ -59,7 +58,7 @@ type FullParty interface {
 	// Broadcast protocol) or Uni-cast over the network (messages should be signed and encrypted).
 	// signatureOutputChannel: this channel delivers the final output of a signature protocol (a usable signature).
 	// errChannel: this channel delivers any error during the protocol.
-	Start(outChannel chan tss.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error
+	Start(outChannel chan common.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *common.Error) error
 
 	// Stop stops the FullParty, and closes its sub-components.
 	Stop()
@@ -70,7 +69,7 @@ type FullParty interface {
 	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
-	Update(tss.ParsedMessage) (<-chan UpdateMeta, error)
+	Update(common.ParsedMessage) (<-chan UpdateMeta, error)
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() curve.Point
@@ -96,7 +95,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		p.MaxSignerTTL = signerMaxTTL
 	}
 
-	peersMap := make(map[party.ID]*tss.PartyID, len(p.PartyIDs))
+	peersMap := make(map[party.ID]*common.PartyID, len(p.PartyIDs))
 	for _, partyID := range p.PartyIDs {
 		peersMap[party.ID(partyID.GetId())] = partyID
 	}

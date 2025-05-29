@@ -11,27 +11,27 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/xlabs/tss-lib/v2/common"
+	common "github.com/xlabs/tss-common"
 )
 
 type Party interface {
-	Start() *Error
+	Start() *common.Error
 	// The main entry point when updating a party's state from the wire.
 	// isBroadcast should represent whether the message was received via a reliable broadcast
-	UpdateFromBytes(wireBytes []byte, from *PartyID, isBroadcast bool) (ok bool, err *Error)
+	UpdateFromBytes(wireBytes []byte, from *common.PartyID, isBroadcast bool) (ok bool, err *common.Error)
 	// You may use this entry point to update a party's state when running locally or in tests
-	Update(msg ParsedMessage) (ok bool, err *Error)
+	Update(msg common.ParsedMessage) (ok bool, err *common.Error)
 	Running() bool
-	WaitingFor() []*PartyID
-	ValidateMessage(msg ParsedMessage) (bool, *Error)
-	StoreMessage(msg ParsedMessage) (bool, *Error)
+	WaitingFor() []*common.PartyID
+	ValidateMessage(msg common.ParsedMessage) (bool, *common.Error)
+	StoreMessage(msg common.ParsedMessage) (bool, *common.Error)
 	FirstRound() Round
-	WrapError(err error, culprits ...*PartyID) *Error
-	PartyID() *PartyID
+	WrapError(err error, culprits ...*common.PartyID) *common.Error
+	PartyID() *common.PartyID
 	String() string
 
 	// Private lifecycle methods
-	setRound(Round) *Error
+	setRound(Round) *common.Error
 	round() Round
 	advance()
 	lock()
@@ -48,24 +48,24 @@ func (p *BaseParty) Running() bool {
 	return p.rnd != nil
 }
 
-func (p *BaseParty) WaitingFor() []*PartyID {
+func (p *BaseParty) WaitingFor() []*common.PartyID {
 	p.lock()
 	defer p.unlock()
 	if p.rnd == nil {
-		return []*PartyID{}
+		return []*common.PartyID{}
 	}
 	return p.rnd.WaitingFor()
 }
 
-func (p *BaseParty) WrapError(err error, culprits ...*PartyID) *Error {
+func (p *BaseParty) WrapError(err error, culprits ...*common.PartyID) *common.Error {
 	if p.rnd == nil {
-		return NewError(err, "", -1, nil, culprits...)
+		return common.NewError(err, "", -1, nil, culprits...)
 	}
 	return p.rnd.WrapError(err, culprits...)
 }
 
 // an implementation of ValidateMessage that is shared across the different types of parties (keygen, signing, dynamic groups)
-func (p *BaseParty) ValidateMessage(msg ParsedMessage) (bool, *Error) {
+func (p *BaseParty) ValidateMessage(msg common.ParsedMessage) (bool, *common.Error) {
 	if msg == nil || msg.Content() == nil {
 		return false, p.WrapError(fmt.Errorf("received nil msg: %s", msg))
 	}
@@ -89,7 +89,7 @@ func (p *BaseParty) String() string {
 // -----
 // Private lifecycle methods
 
-func (p *BaseParty) setRound(round Round) *Error {
+func (p *BaseParty) setRound(round Round) *common.Error {
 	if p.rnd != nil {
 		return p.WrapError(errors.New("a round is already set on this party"))
 	}
@@ -115,7 +115,7 @@ func (p *BaseParty) unlock() {
 
 // ----- //
 
-func BaseStart(p Party, task string, prepare ...func(Round) *Error) *Error {
+func BaseStart(p Party, task string, prepare ...func(Round) *common.Error) *common.Error {
 	p.lock()
 	defer p.unlock()
 	if p.PartyID() == nil || !p.PartyID().ValidateBasic() {
@@ -136,52 +136,52 @@ func BaseStart(p Party, task string, prepare ...func(Round) *Error) *Error {
 			return err
 		}
 	}
-	common.Logger.Infof("party %s: %s round %d starting", p.round().Params().PartyID(), task, 1)
+	// common.Logger.Infof("party %s: %s round %d starting", p.round().Params().PartyID(), task, 1)
 	defer func() {
-		common.Logger.Debugf("party %s: %s round %d finished", p.round().Params().PartyID(), task, 1)
+		// common.Logger.Debugf("party %s: %s round %d finished", p.round().Params().PartyID(), task, 1)
 	}()
 	return p.round().Start()
 }
 
 // an implementation of Update that is shared across the different types of parties (keygen, signing, dynamic groups)
-func BaseUpdate(p Party, msg ParsedMessage, task string) (ok bool, err *Error) {
+func BaseUpdate(p Party, msg common.ParsedMessage, task string) (ok bool, err *common.Error) {
 	// fast-fail on an invalid message; do not lock the mutex yet
 	if _, err := p.ValidateMessage(msg); err != nil {
 		return false, err
 	}
 	// lock the mutex. need this mtx unlock hook; L108 is recursive so cannot use defer
-	r := func(ok bool, err *Error) (bool, *Error) {
+	r := func(ok bool, err *common.Error) (bool, *common.Error) {
 		p.unlock()
 		return ok, err
 	}
 	p.lock() // data is written to P state below
-	common.Logger.Debugf("party %s received message: %s", p.PartyID(), msg.String())
+	// common.Logger.Debugf("party %s received message: %s", p.PartyID(), msg.String())
 	if p.round() != nil {
-		common.Logger.Debugf("party %s round %d update: %s", p.PartyID(), p.round().RoundNumber(), msg.String())
+		// common.Logger.Debugf("party %s round %d update: %s", p.PartyID(), p.round().RoundNumber(), msg.String())
 	}
 	if ok, err := p.StoreMessage(msg); err != nil || !ok {
 		return r(false, err)
 	}
 	if p.round() != nil {
-		common.Logger.Debugf("party %s: %s round %d update", p.round().Params().PartyID(), task, p.round().RoundNumber())
+		// common.Logger.Debugf("party %s: %s round %d update", p.round().Params().PartyID(), task, p.round().RoundNumber())
 		if _, err := p.round().Update(); err != nil {
 			return r(false, err)
 		}
 		if p.round().CanProceed() {
-			var trackid *common.TrackingID
-			if msg != nil && msg.WireMsg() != nil {
-				trackid = msg.WireMsg().TrackingID
-			}
+			// var trackid *common.TrackingID
+			// if msg != nil && msg.WireMsg() != nil {
+			// trackid = msg.WireMsg().TrackingID
+			// }
 
 			if p.advance(); p.round() != nil {
 				if err := p.round().Start(); err != nil {
 					return r(false, err)
 				}
-				rndNum := p.round().RoundNumber()
-				common.Logger.Infof("party %s: %s round %d started (tracking id: %v)", p.round().Params().PartyID(), task, rndNum, trackid.ToString())
+				// rndNum := p.round().RoundNumber()
+				// common.Logger.Infof("party %s: %s round %d started (tracking id: %v)", p.round().Params().PartyID(), task, rndNum, trackid.ToString())
 			} else {
 				// finished! the round implementation will have sent the data through the `end` channel.
-				common.Logger.Infof("party %s: %s finished! (tracking id: %v)", p.PartyID(), task, trackid.ToString())
+				// common.Logger.Infof("party %s: %s finished! (tracking id: %v)", p.PartyID(), task, trackid.ToString())
 			}
 			p.unlock()                      // recursive so can't defer after return
 			return BaseUpdate(p, msg, task) // re-run round update or finish)

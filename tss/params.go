@@ -13,12 +13,14 @@ import (
 	"io"
 	"runtime"
 	"time"
+
+	common "github.com/xlabs/tss-common"
 )
 
 type (
 	Parameters struct {
 		ec                  elliptic.Curve
-		partyID             *PartyID
+		partyID             *common.PartyID
 		parties             *PeerContext
 		partyCount          int
 		threshold           int
@@ -50,7 +52,7 @@ const (
 )
 
 // Exported, used in `tss` client
-func NewParameters(ec elliptic.Curve, ctx *PeerContext, partyID *PartyID, partyCount, threshold int) *Parameters {
+func NewParameters(ec elliptic.Curve, ctx *PeerContext, partyID *common.PartyID, partyCount, threshold int) *Parameters {
 	return &Parameters{
 		ec:                  ec,
 		parties:             ctx,
@@ -72,7 +74,7 @@ func (params *Parameters) Parties() *PeerContext {
 	return params.parties
 }
 
-func (params *Parameters) PartyID() *PartyID {
+func (params *Parameters) PartyID() *common.PartyID {
 	return params.partyID
 }
 
@@ -136,7 +138,7 @@ func (params *Parameters) SetRand(rand io.Reader) {
 // ----- //
 
 // Exported, used in `tss` client
-func NewReSharingParameters(ec elliptic.Curve, ctx, newCtx *PeerContext, partyID *PartyID, partyCount, threshold, newPartyCount, newThreshold int) *ReSharingParameters {
+func NewReSharingParameters(ec elliptic.Curve, ctx, newCtx *PeerContext, partyID *common.PartyID, partyCount, threshold, newPartyCount, newThreshold int) *ReSharingParameters {
 	params := NewParameters(ec, ctx, partyID, partyCount, threshold)
 	return &ReSharingParameters{
 		Parameters:    params,
@@ -166,7 +168,7 @@ func (rgParams *ReSharingParameters) NewThreshold() int {
 	return rgParams.newThreshold
 }
 
-func (rgParams *ReSharingParameters) OldAndNewParties() []*PartyID {
+func (rgParams *ReSharingParameters) OldAndNewParties() []*common.PartyID {
 	return append(rgParams.OldParties().IDs(), rgParams.NewParties().IDs()...)
 }
 

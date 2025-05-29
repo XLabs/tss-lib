@@ -3,9 +3,9 @@ package party
 import (
 	"encoding/binary"
 
-	"github.com/xlabs/tss-lib/v2/frost/sign"
-	"github.com/xlabs/tss-lib/v2/internal/party"
-	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	common "github.com/xlabs/tss-common"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
 )
@@ -18,7 +18,7 @@ const (
 	signingProtocolType
 )
 
-func findProtocolType(message tss.ParsedMessage) protocolType {
+func findProtocolType(message common.ParsedMessage) protocolType {
 	switch message.Content().(type) {
 	case *sign.Broadcast2, *sign.Broadcast3:
 		return signingProtocolType
@@ -80,12 +80,12 @@ func randomShuffle[T any](seed []byte, arr []T) error {
 	return nil
 }
 
-func shuffleParties(seed []byte, parties []*tss.PartyID) ([]*tss.PartyID, error) {
-	cpy := make([]*tss.PartyID, len(parties))
+func shuffleParties(seed []byte, parties []*common.PartyID) ([]*common.PartyID, error) {
+	cpy := make([]*common.PartyID, len(parties))
 	// deep copy:
 	for i, p := range parties {
-		pid := proto.Clone(p.MessageWrapper_PartyID).(*tss.MessageWrapper_PartyID)
-		cpy[i] = &tss.PartyID{
+		pid := proto.Clone(p.MessageWrapper_PartyID).(*common.MessageWrapper_PartyID)
+		cpy[i] = &common.PartyID{
 			MessageWrapper_PartyID: pid,
 			Index:                  p.Index,
 		}
@@ -98,7 +98,7 @@ func shuffleParties(seed []byte, parties []*tss.PartyID) ([]*tss.PartyID, error)
 	return cpy, nil
 }
 
-func pids2IDs(pids []*tss.PartyID) []party.ID {
+func pids2IDs(pids []*common.PartyID) []party.ID {
 	ids := make([]party.ID, len(pids))
 	for i, pid := range pids {
 		ids[i] = party.ID(pid.GetId())

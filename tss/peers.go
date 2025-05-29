@@ -6,20 +6,22 @@
 
 package tss
 
+import common "github.com/xlabs/tss-common"
+
 type (
 	PeerContext struct {
-		partyIDs SortedPartyIDs
+		partyIDs common.SortedPartyIDs
 	}
 )
 
-func NewPeerContext(parties SortedPartyIDs) *PeerContext {
+func NewPeerContext(parties common.SortedPartyIDs) *PeerContext {
 	return &PeerContext{partyIDs: parties}
 }
 
-func (p2pCtx *PeerContext) IDs() SortedPartyIDs {
+func (p2pCtx *PeerContext) IDs() common.SortedPartyIDs {
 	return p2pCtx.partyIDs
 }
 
-func (p2pCtx *PeerContext) SetIDs(ids SortedPartyIDs) {
+func (p2pCtx *PeerContext) SetIDs(ids common.SortedPartyIDs) {
 	p2pCtx.partyIDs = ids
 }

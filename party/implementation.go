@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost"
-	"github.com/xlabs/tss-lib/v2/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/internal/party"
-	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/multi-party-sig/pkg/math/curve"
+	"github.com/xlabs/multi-party-sig/pkg/party"
+
+	"github.com/xlabs/multi-party-sig/protocols/frost"
+	common "github.com/xlabs/tss-common"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -58,20 +58,20 @@ type Impl struct {
 	cancelFunc context.CancelFunc
 
 	config   *frost.Config
-	peers    []*tss.PartyID
-	peersmap map[party.ID]*tss.PartyID
+	peers    []*common.PartyID
+	peersmap map[party.ID]*common.PartyID
 	peerIDs  []party.ID
 
-	self *tss.PartyID
-	// parameters *tss.Parameters
+	self *common.PartyID
+	// parameters *common.Parameters
 
 	signingHandler *signingHandler
 
 	incomingMessagesChannel chan feedMessageTask
 	startSignerTaskChan     chan *singleSession
 
-	errorChannel           chan<- *tss.Error
-	outChan                chan tss.ParsedMessage
+	errorChannel           chan<- *common.Error
+	outChan                chan common.ParsedMessage
 	signatureOutputChannel chan *common.SignatureData
 	cryptoWorkChan         chan func()
 
@@ -145,7 +145,7 @@ func (p *Impl) worker() {
 			case signingProtocolType:
 				p.handleIncomingSigningMessage(task)
 			default:
-				p.errorChannel <- tss.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
+				p.errorChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
 			}
 
 		case signer := <-p.startSignerTaskChan:
@@ -162,7 +162,7 @@ var (
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
-func (p *Impl) Start(outChannel chan tss.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *tss.Error) error {
+func (p *Impl) Start(outChannel chan common.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *common.Error) error {
 	if outChannel == nil || signatureOutputChannel == nil || errChannel == nil {
 		return errors.New("nil channel passed to Start()")
 	}
@@ -258,7 +258,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 	//  member). Starting the localParty will involve computationally
 	// intensive cryptographic operations.
 	if err := p.setSession(config, signer); err != nil {
-		p.reportError(tss.NewTrackableError(
+		p.reportError(common.NewTrackableError(
 			err,
 			"startSigner",
 			-1,
@@ -315,7 +315,7 @@ var (
 	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
 )
 
-func pidToDigest(pid *tss.PartyID) Digest {
+func pidToDigest(pid *common.PartyID) Digest {
 	bf := bytes.NewBuffer(nil)
 
 	bf.WriteString(pid.GetId())
@@ -326,11 +326,11 @@ func pidToDigest(pid *tss.PartyID) Digest {
 
 var ErrNoSigningKey = errors.New("no key to sign with")
 
-func isInCommittee(self *tss.PartyID, committee tss.UnSortedPartyIDs) bool {
-	return indexInCommittee(self, tss.UnSortedPartyIDs(committee)) != -1
+func isInCommittee(self *common.PartyID, committee common.UnSortedPartyIDs) bool {
+	return indexInCommittee(self, common.UnSortedPartyIDs(committee)) != -1
 }
 
-func indexInCommittee(self *tss.PartyID, committee tss.UnSortedPartyIDs) int {
+func indexInCommittee(self *common.PartyID, committee common.UnSortedPartyIDs) int {
 	for i, v := range committee {
 		if equalIDs(v, self) {
 			return i
@@ -350,7 +350,7 @@ func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 	}
 
 	// check if in committee:
-	index := indexInCommittee(signer.self, tss.UnSortedPartyIDs(signer.committee))
+	index := indexInCommittee(signer.self, common.UnSortedPartyIDs(signer.committee))
 	if index == -1 {
 		signer.state = notInCommittee
 
@@ -392,7 +392,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		session:   nil,
 
 		// first round doesn't receive messages (only round number 2,3)
-		messages: make([]map[Digest]tss.ParsedMessage, frost.NumRounds-1),
+		messages: make([]map[Digest]common.ParsedMessage, frost.NumRounds-1),
 
 		outputchan: p.outChan,
 		peersmap:   p.peersmap,
@@ -419,7 +419,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	return signer, nil
 }
 
-func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs, error) {
+func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyIDs, error) {
 	validParties, err := p.getValidCommitteeMembers(trackid)
 	if err != nil {
 		return nil, err
@@ -437,7 +437,7 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (tss.SortedPartyIDs,
 		return nil, err
 	}
 
-	return tss.SortPartyIDs(parties[:p.committeeSize()]), nil
+	return common.SortPartyIDs(parties[:p.committeeSize()]), nil
 }
 
 func (p *Impl) committeeSize() int {
@@ -452,16 +452,16 @@ func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
 	return seed
 }
 
-func equalIDs(a, b *tss.PartyID) bool {
+func equalIDs(a, b *common.PartyID) bool {
 	return a.Id == b.Id && bytes.Equal(a.Key, b.Key)
 }
 
 type feedMessageTask struct {
-	message tss.ParsedMessage
+	message common.ParsedMessage
 	result  chan UpdateMeta
 }
 
-func (p *Impl) Update(message tss.ParsedMessage) (<-chan UpdateMeta, error) {
+func (p *Impl) Update(message common.ParsedMessage) (<-chan UpdateMeta, error) {
 	answerChan := make(chan UpdateMeta, 1)
 
 	select {
@@ -480,7 +480,7 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
 	if err != nil {
 		task.result <- UpdateMeta{
-			Error: tss.NewTrackableError(
+			Error: common.NewTrackableError(
 				err,
 				"handleIncomingSigningMessage",
 				-1,
@@ -523,7 +523,7 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 
 }
 
-func (p *Impl) reportError(newError *tss.Error) {
+func (p *Impl) reportError(newError *common.Error) {
 	select {
 	case p.errorChannel <- newError:
 	case <-p.ctx.Done():
@@ -561,10 +561,10 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 var errInvalidTrackingID = errors.New("invalid tracking id")
 
 // returns the parties that can still be part of the committee.
-func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSortedPartyIDs, error) {
+func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (common.UnSortedPartyIDs, error) {
 	pids := p.peers
 
-	ValidCommitteeMembers := make([]*tss.PartyID, 0, len(pids))
+	ValidCommitteeMembers := make([]*common.PartyID, 0, len(pids))
 
 	if len(trackingId.PartiesState) < (len(pids)+7)/8 {
 		return nil, errInvalidTrackingID
@@ -576,7 +576,7 @@ func (p *Impl) getValidCommitteeMembers(trackingId *common.TrackingID) (tss.UnSo
 		}
 	}
 
-	return tss.UnSortedPartyIDs(ValidCommitteeMembers), nil
+	return common.UnSortedPartyIDs(ValidCommitteeMembers), nil
 }
 
 func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
@@ -591,14 +591,14 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	return &SigningInfo{
 		SigningCommittee: sortedCommittee,
 		TrackingID:       trackingId,
-		IsSigner:         isInCommittee(p.self, tss.UnSortedPartyIDs(sortedCommittee)),
+		IsSigner:         isInCommittee(p.self, common.UnSortedPartyIDs(sortedCommittee)),
 	}, nil
 }
 
-func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *tss.Error {
+func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Error {
 	rbits, err := sig.R.MarshalBinary()
 	if err != nil {
-		return tss.NewTrackableError(
+		return common.NewTrackableError(
 			err,
 			"outputSig",
 			-1,
@@ -609,7 +609,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *tss.Error 
 
 	sbits, err := sig.Z.MarshalBinary()
 	if err != nil {
-		return tss.NewTrackableError(
+		return common.NewTrackableError(
 			err,
 			"outputSig",
 			-1,

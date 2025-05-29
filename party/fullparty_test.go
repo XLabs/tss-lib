@@ -16,15 +16,16 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
-	"github.com/xlabs/tss-lib/v2/common"
-	"github.com/xlabs/tss-lib/v2/frost"
-	"github.com/xlabs/tss-lib/v2/frost/sign"
-	"github.com/xlabs/tss-lib/v2/internal/math/curve"
-	"github.com/xlabs/tss-lib/v2/internal/math/polynomial"
-	"github.com/xlabs/tss-lib/v2/internal/math/sample"
-	"github.com/xlabs/tss-lib/v2/internal/party"
+	"github.com/xlabs/multi-party-sig/protocols/frost"
+	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	common "github.com/xlabs/tss-common"
+
+	"github.com/xlabs/multi-party-sig/pkg/math/curve"
+	"github.com/xlabs/multi-party-sig/pkg/math/polynomial"
+	"github.com/xlabs/multi-party-sig/pkg/math/sample"
+	"github.com/xlabs/multi-party-sig/pkg/party"
+
 	"github.com/xlabs/tss-lib/v2/test"
-	"github.com/xlabs/tss-lib/v2/tss"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -73,9 +74,9 @@ func (st *signerTester) run(t *testing.T) {
 	digestSet := createDigests(st.numSignatures)
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
+		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, st.numSignatures),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         st.maxNetworkSimulationTime,
@@ -124,9 +125,9 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*20),
+		outchan:         make(chan common.ParsedMessage, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 3,
@@ -186,9 +187,9 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 	digestSet, _ := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
+		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, 5),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 30 * time.Duration(len(digestSet)),
@@ -242,9 +243,9 @@ func testLateParties(t *testing.T, numLate int) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*20),
+		outchan:         make(chan common.ParsedMessage, len(parties)*20),
 		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 3,
@@ -308,9 +309,9 @@ func TestCleanup(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 	n := networkSimulator{
-		outchan: make(chan tss.ParsedMessage, len(parties)*20),
+		outchan: make(chan common.ParsedMessage, len(parties)*20),
 		sigchan: make(chan *common.SignatureData, test.TestParticipants),
-		errchan: make(chan *tss.Error, 1),
+		errchan: make(chan *common.Error, 1),
 	}
 
 	for _, p := range parties {
@@ -344,9 +345,9 @@ func getLen(m *sync.Map) int {
 }
 
 type networkSimulator struct {
-	outchan         chan tss.ParsedMessage
+	outchan         chan common.ParsedMessage
 	sigchan         chan *common.SignatureData
-	errchan         chan *tss.Error
+	errchan         chan *common.Error
 	idToFullParty   map[string]FullParty
 	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
 
@@ -445,7 +446,7 @@ func validateSignature(pk curve.Point, m *common.SignatureData, digest []byte) b
 	return true
 }
 
-func passMsg(a *assert.Assertions, newMsg tss.ParsedMessage, idToParty map[string]FullParty, expectErr bool) {
+func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[string]FullParty, expectErr bool) {
 	bz, routing, err := newMsg.WireBytes()
 	if expectErr && err != nil {
 		return
@@ -486,9 +487,9 @@ func passMsg(a *assert.Assertions, newMsg tss.ParsedMessage, idToParty map[strin
 	}
 }
 
-func copyParsedMessage(a *assert.Assertions, bz []byte, routing *tss.MessageRouting, expectErr bool) (tss.ParsedMessage, bool) {
-	frm := proto.Clone(routing.From).(*tss.MessageWrapper_PartyID)
-	from := &tss.PartyID{
+func copyParsedMessage(a *assert.Assertions, bz []byte, routing *common.MessageRouting, expectErr bool) (common.ParsedMessage, bool) {
+	frm := proto.Clone(routing.From).(*common.MessageWrapper_PartyID)
+	from := &common.PartyID{
 		MessageWrapper_PartyID: frm,
 		Index:                  -1, // Setting as -1 for malicious affect. (shouldn't hinder the library)
 	}
@@ -496,7 +497,7 @@ func copyParsedMessage(a *assert.Assertions, bz []byte, routing *tss.MessageRout
 	bts := make([]byte, len(bz))
 	copy(bts, bz)
 
-	parsedMsg, err := tss.ParseWireMessage(bts, from, routing.IsBroadcast)
+	parsedMsg, err := common.ParseWireMessage(bts, from, routing.IsBroadcast)
 	if expectErr && err != nil {
 		return nil, true
 	}
@@ -507,11 +508,11 @@ func copyParsedMessage(a *assert.Assertions, bz []byte, routing *tss.MessageRout
 
 func makeTestParameters(a *assert.Assertions, participants, threshold int) []Parameters {
 	ps := make([]Parameters, participants)
-	partyIDs := make([]*tss.PartyID, len(ps))
+	partyIDs := make([]*common.PartyID, len(ps))
 
 	for i := range partyIDs {
-		partyIDs[i] = &tss.PartyID{
-			MessageWrapper_PartyID: &tss.MessageWrapper_PartyID{
+		partyIDs[i] = &common.PartyID{
+			MessageWrapper_PartyID: &common.MessageWrapper_PartyID{
 				Id:  strconv.Itoa(i),
 				Key: nil, // will be set later.
 			},
@@ -597,9 +598,9 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	// digestSet, hash := createSingleDigest()
 
 	// n := networkSimulator{
-	// 	outchan:         make(chan tss.ParsedMessage, len(parties)*20),
+	// 	outchan:         make(chan common.ParsedMessage, len(parties)*20),
 	// 	sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-	// 	errchan:         make(chan *tss.Error, 1),
+	// 	errchan:         make(chan *common.Error, 1),
 	// 	idToFullParty:   idToParty(parties),
 	// 	digestsToVerify: digestSet,
 	// 	Timeout:         time.Second * 8,
@@ -681,9 +682,9 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	digestSet[hash2] = false
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*1000),
+		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
 		sigchan:         make(chan *common.SignatureData, 5),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
@@ -740,9 +741,9 @@ func TestChangingCommittee(t *testing.T) {
 	fmt.Println("old digest:", hash)
 
 	n := networkSimulator{
-		outchan:         make(chan tss.ParsedMessage, len(parties)*10000), // 10k messages per party should be enough.
+		outchan:         make(chan common.ParsedMessage, len(parties)*10000), // 10k messages per party should be enough.
 		sigchan:         make(chan *common.SignatureData, len(parties)),
-		errchan:         make(chan *tss.Error, 1),
+		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 120 * time.Duration(len(digestSet)),
@@ -781,7 +782,7 @@ func TestChangingCommittee(t *testing.T) {
 			fmt.Println("changing comittee, starting signing process again.")
 
 			// time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
-			faulties := make([]*tss.PartyID, nremoved)
+			faulties := make([]*common.PartyID, nremoved)
 			for i := 0; i < nremoved; i++ {
 				faulties[i] = parties[i].(*Impl).self
 			}
@@ -790,7 +791,7 @@ func TestChangingCommittee(t *testing.T) {
 				faultiesMap[pidToDigest(pid)] = true
 			}
 
-			var prevFaulties []*tss.PartyID
+			var prevFaulties []*common.PartyID
 			if len(faulties)-1 > 0 {
 				prevFaulties = faulties[:len(faulties)-1]
 			}
@@ -879,9 +880,9 @@ func TestErrorsInUpdate(t *testing.T) {
 	a := assert.New(t)
 	parties, _ := createFullParties(a, 5, 4)
 
-	outchan := make(chan tss.ParsedMessage, len(parties)*20)
+	outchan := make(chan common.ParsedMessage, len(parties)*20)
 	sigchan := make(chan *common.SignatureData, test.TestParticipants)
-	errchan := make(chan *tss.Error, 1)
+	errchan := make(chan *common.Error, 1)
 
 	for _, v := range parties {
 		v.Start(outchan, sigchan, errchan)
