@@ -263,6 +263,9 @@ var (
 )
 
 func (signer *singleSession) extractSignature() (frost.Signature, *common.Error) {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
 	// checking for output.
 	var sig frost.Signature
 
