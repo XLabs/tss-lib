@@ -173,42 +173,10 @@ func (p *Impl) Start(outChannel chan common.ParsedMessage, signatureOutputChanne
 		go p.worker()
 	}
 
-	// p.initCryptopool()
-
 	go p.cleanupWorker()
 
 	return nil
 }
-
-// func (p *Impl) initCryptopool() {
-// 	p.cryptoWorkChan = make(chan func(), runtime.NumCPU())
-// 	// p.parameters.Context = p.ctx
-// 	// p.parameters.AsyncWorkComputation = func(f func()) error {
-// 		select {
-// 		case p.cryptoWorkChan <- f:
-// 			return nil
-// 		case <-p.ctx.Done():
-// 			return errors.New("context aborted")
-// 		}
-// 	}
-
-// 	for i := 0; i < numCryptoWorker; i++ {
-// go p.cryptoWorker()
-// 	}
-// }
-
-// func (p *Impl) cryptoWorker() {
-// 	defer p.workersWg.Done()
-
-// 	for {
-// 		select {
-// 		case f := <-p.cryptoWorkChan:
-// 			f()
-// 		case <-p.ctx.Done():
-// 			return
-// 		}
-// 	}
-// }
 
 func (p *Impl) Stop() {
 	p.cancelFunc()

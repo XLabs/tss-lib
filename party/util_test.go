@@ -24,7 +24,7 @@ func TestNoDupsInShuffle(t *testing.T) {
 
 	d := crypto.Keccak256([]byte("hello, world"))
 
-	err := randomShuffle(d, elems)
+	err := shuffle(d, elems)
 	require.NoError(t, err)
 	set := map[int]any{}
 	for _, e := range elems {
@@ -52,7 +52,7 @@ func TestShuffleLoadBalances(t *testing.T) {
 	for i := 0; i < numAttempts; i++ {
 		binary.BigEndian.PutUint64(d[:], uint64(i))
 
-		a.NoError(randomShuffle(d, elems))
+		a.NoError(shuffle(d, elems))
 		for _, elem := range elems[:cutoff] {
 			counters[elem]++
 		}

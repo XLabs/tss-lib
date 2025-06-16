@@ -60,7 +60,7 @@ func (p *prng) modint(i uint64) (int, error) {
 	return int(n % i), nil
 }
 
-func randomShuffle[T any](seed []byte, arr []T) error {
+func shuffle[T any](seed []byte, arr []T) error {
 	rng, err := newPrng(seed)
 	if err != nil {
 		return err
@@ -91,7 +91,7 @@ func shuffleParties(seed []byte, parties []*common.PartyID) ([]*common.PartyID, 
 		}
 	}
 
-	if err := randomShuffle(seed, cpy); err != nil {
+	if err := shuffle(seed, cpy); err != nil {
 		return nil, err
 	}
 
