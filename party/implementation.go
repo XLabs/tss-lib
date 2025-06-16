@@ -52,8 +52,6 @@ type signingHandler struct {
 
 // Impl handles multiple signers
 type Impl struct {
-	mtx sync.Mutex
-
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
@@ -126,9 +124,6 @@ func (s *signingHandler) cleanup(maxTTL time.Duration) {
 }
 
 func (p *Impl) GetPublic() curve.Point {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-
 	return p.config.PublicKey
 }
 
@@ -250,9 +245,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 		return
 	}
 
-	p.mtx.Lock()
 	config := p.config
-	p.mtx.Unlock()
 
 	// The following method initiates the localParty (if it’s a committee
 	//  member). Starting the localParty will involve computationally
@@ -441,9 +434,6 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 }
 
 func (p *Impl) committeeSize() int {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-
 	return p.config.Threshold + 1
 }
 

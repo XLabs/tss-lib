@@ -76,9 +76,6 @@ type FullParty interface {
 
 	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
 	GetSigningInfo(s SigningTask) (*SigningInfo, error)
-
-	// TODO: Once ready, should be able to refresh the DKG config of this party.
-	// RefreshDKGConfig() error
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -110,8 +107,6 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
-		mtx: sync.Mutex{},
-
 		ctx:        ctx,
 		cancelFunc: cancelF,
 
