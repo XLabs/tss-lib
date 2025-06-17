@@ -2,6 +2,7 @@ package party
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -13,12 +14,20 @@ import (
 	common "github.com/xlabs/tss-common"
 )
 
+type signerState int
+
+const (
+	unset signerState = iota
+	set
+	notInCommittee
+)
+
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
 	startTime time.Time
 
-	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
+	// the state of the signer. can be one of { unset, set, notInCommittee }.
 	state atomic.Int64
 
 	digest Digest
@@ -41,6 +50,19 @@ type singleSession struct {
 	// used for easy access to the FullParty's components.
 	outputchan chan<- common.ParsedMessage
 	peersmap   map[party.ID]*common.PartyID
+}
+
+func (s signerState) String() string {
+	switch s {
+	case unset:
+		return "unset"
+	case set:
+		return "set"
+	case notInCommittee:
+		return "notInCommittee"
+	default:
+		return fmt.Sprintf("unknown state: %d", s)
+	}
 }
 
 func (s *singleSession) getInitTime() time.Time {
@@ -102,8 +124,7 @@ func (signer *singleSession) getState() signerState {
 	return signerState(signer.state.Load())
 }
 
-// after storing a new message, the session can attempt to consume any dandling messages in its queues.
-// Once all consumed, one can attempt to finailize the round.
+// consumeStoredMessages will attempt to consume all messages stored for the current round.
 func (signer *singleSession) consumeStoredMessages() *common.Error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
@@ -152,6 +173,8 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	return nil
 }
 
+// culpritsToPartyIDs converts a slice of party ids as strings to a slice of *common.PartyID.
+// it is used to convert captured culprits of the frost protocols to the common.PartyID type.
 func (signer *singleSession) culpritsToPartyIDs(culprits []party.ID) []*common.PartyID {
 	partyIDs := make([]*common.PartyID, len(culprits))
 
@@ -187,6 +210,16 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	if signer.session == nil {
+		return finalizeReport{}, common.NewTrackableError(
+			errNilSigner,
+			"attemptRoundFinalize:sessionNil",
+			-1,
+			signer.self,
+			signer.trackingId,
+		)
+	}
+
 	rnd := signer.session.Number()
 	sessionComplete := false
 
@@ -214,7 +247,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	// not updatingt the report until we PASS the finalization.
 	sessionComplete = rnd == signer.session.FinalRoundNumber()
 
-	tmp, err := signer.session.Finalize(signer.outputchan)
+	newRound, err := signer.session.Finalize(signer.outputchan)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
 			return report, common.NewTrackableError(
@@ -239,14 +272,13 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	// Updating the report.
 	report = finalizeReport{
 		isSessionComplete: sessionComplete,
-		advancedRound:     true,
-		currentRound:      tmp.Number(),
+		// if the session was in final round, and advanced -> this session is done.
+		advancedRound: true,
+		currentRound:  newRound.Number(),
 	}
 
-	// if the session was in final round, and advanced -> this session is done.
-
 	// advancing the inner session.
-	signer.session = tmp
+	signer.session = newRound
 
 	return report, nil
 }

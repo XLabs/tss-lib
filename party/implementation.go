@@ -18,27 +18,6 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-type signerState int
-
-const (
-	unset signerState = iota
-	set
-	notInCommittee
-)
-
-func (s signerState) String() string {
-	switch s {
-	case unset:
-		return "unset"
-	case set:
-		return "set"
-	case notInCommittee:
-		return "notInCommittee"
-	default:
-		return fmt.Sprintf("unknown state: %d", s)
-	}
-}
-
 // signingHandler handles all signers in the FullParty.
 // The proper way to get a signer is to use getOrCreateSingleSession method.
 type signingHandler struct {
