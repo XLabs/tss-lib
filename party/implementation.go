@@ -426,7 +426,6 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 func (p *Impl) reportError(newError *common.Error) {
 	select {
 	case p.errorChannel <- newError:
-	case <-p.ctx.Done():
 	default: // no one is waiting on error reporting channel/ no buffer.
 	}
 }
