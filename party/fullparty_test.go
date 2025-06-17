@@ -162,8 +162,10 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	a.True(ok)
 
 	// unless request to sign something, LocalParty should remain nil.
+	singleSigner.mtx.Lock()
 	a.Nil(singleSigner.session)
 	a.Greater(len(singleSigner.messages[0]), 1)
+	singleSigner.mtx.Unlock()
 	// a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
 
 	for _, party := range parties {

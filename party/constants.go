@@ -11,6 +11,5 @@ import (
 )
 
 const signerMaxTTL = time.Minute * 5
-const maxStoragePerParty = 100
 
 const DigestSize = 32

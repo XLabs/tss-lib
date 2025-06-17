@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -306,19 +307,21 @@ func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	if signer.state != unset {
+	state := signer.getState()
+
+	if state != unset {
 		return nil
 	}
 
 	// check if in committee:
 	index := indexInCommittee(signer.self, common.UnSortedPartyIDs(signer.committee))
 	if index == -1 {
-		signer.state = notInCommittee
+		signer.state.Store(int64(notInCommittee))
 
 		return nil
 	}
 
-	signer.state = set
+	signer.state.Store(int64(set))
 
 	sessionCreator := frost.Sign(config, pids2IDs(signer.committee), signer.digest[:])
 
@@ -342,12 +345,13 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	copy(dgst[:], trackingId.Digest)
 
 	_signer, loaded := s.trackingIDToSigner.LoadOrStore(trackingId.ToString(), &singleSession{
-		time:       time.Now(),
+		startTime: time.Now(),
+		state:     atomic.Int64{},
+
 		self:       p.self,
 		digest:     dgst,
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
-		state:      unset,
 		// upon setting the committee, we will set the session.
 		committee: nil,
 		session:   nil,

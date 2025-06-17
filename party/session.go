@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/party"
@@ -13,9 +14,12 @@ import (
 )
 
 type singleSession struct {
-	// time represents the moment this signleSigner is created.
+	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
-	time time.Time
+	startTime time.Time
+
+	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
+	state atomic.Int64
 
 	digest Digest
 
@@ -26,37 +30,30 @@ type singleSession struct {
 
 	committee common.SortedPartyIDs
 	self      *common.PartyID
+
 	// nil if not started signing yet.
 	// once a request to sign was received (via AsyncRequestNewSignature), this will be set,
 	// and used.
 	session round.Session
 	mtx     sync.Mutex
 
-	// the state of the signer. can be one of { unset, set, started, notInCommittee }.
-	state signerState
-
-	// helpers:
-
+	// the following fields are references from the FullParty,
+	// used for easy access to the FullParty's components.
 	outputchan chan<- common.ParsedMessage
 	peersmap   map[party.ID]*common.PartyID
 }
 
 func (s *singleSession) getInitTime() time.Time {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	return s.time
+	return s.startTime // read only value.
 }
-
-// TODO: Create an ABORT message, and learn how to handle it. If even one party sends an ABORT message ->
-//  the session will cancel, since it depends on everyone in that committee.
 
 var (
 	errRoundTooLarge = errors.New("message round is greater than the session's final round")
 	errRoundTooSmall = errors.New("message round is smaller than smallest round that receives messages")
 )
 
-// When storing a message, we might not be able to finalize,
+// storeMessage used before one can consume it.
+// this ensures that if the singleSession is not yet ready/ set, it won't miss messages.
 func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	slog.Debug("storing message",
 		slog.String("ID", signer.self.Id),
@@ -67,14 +64,14 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	signerRound, finalround := 0, frost.NumRounds
+	signerRound := 0
 	if signer.session != nil {
 		signerRound = int(signer.session.Number())
 	}
 
 	msgRnd := message.Content().RoundNumber()
 
-	if msgRnd > finalround {
+	if msgRnd > frost.NumRounds {
 		return errRoundTooLarge
 	}
 
@@ -102,10 +99,7 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 }
 
 func (signer *singleSession) getState() signerState {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	return signer.state
+	return signerState(signer.state.Load())
 }
 
 // after storing a new message, the session can attempt to consume any dandling messages in its queues.
