@@ -247,6 +247,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	// not updatingt the report until we PASS the finalization.
 	sessionComplete = rnd == signer.session.FinalRoundNumber()
 
+	roundNumberBeforeFinalization := signer.session.Number()
 	newRound, err := signer.session.Finalize(signer.outputchan)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
@@ -271,10 +272,10 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 
 	// Updating the report.
 	report = finalizeReport{
-		isSessionComplete: sessionComplete,
 		// if the session was in final round, and advanced -> this session is done.
-		advancedRound: true,
-		currentRound:  newRound.Number(),
+		isSessionComplete: sessionComplete,
+		advancedRound:     roundNumberBeforeFinalization != newRound.Number(),
+		currentRound:      newRound.Number(),
 	}
 
 	// advancing the inner session.
@@ -318,4 +319,12 @@ func (signer *singleSession) extractSignature() (frost.Signature, *common.Error)
 	}
 
 	return sig, nil
+}
+
+func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
+	if err := signer.consumeStoredMessages(); err != nil {
+		return finalizeReport{}, err
+	}
+
+	return signer.attemptRoundFinalize()
 }

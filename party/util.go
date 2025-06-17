@@ -16,7 +16,6 @@ type protocolType int
 
 const (
 	unknownProtocolType protocolType = iota
-	keygenProtocolType
 	signingProtocolType
 )
 
@@ -24,8 +23,6 @@ func findProtocolType(message common.ParsedMessage) protocolType {
 	switch message.Content().(type) {
 	case *sign.Broadcast2, *sign.Broadcast3:
 		return signingProtocolType
-	// case :
-	// 	return keygenProtocolType
 	default: // unrecognised message, just ignore!
 		return unknownProtocolType
 	}

@@ -41,6 +41,14 @@ func init() {
 
 func TestSigning(t *testing.T) {
 	st := signerTester{
+		participants:             1,
+		threshold:                0,
+		numSignatures:            1,
+		maxNetworkSimulationTime: time.Second * 3,
+	}
+	t.Run("one-out-of-one signer", st.run)
+
+	st = signerTester{
 		participants:             test.TestParticipants,
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
@@ -75,7 +83,7 @@ func (st *signerTester) run(t *testing.T) {
 
 	n := networkSimulator{
 		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, st.numSignatures),
+		sigchan:         make(chan *common.SignatureData, st.numSignatures*len(parties)),
 		errchan:         make(chan *common.Error, 1),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,

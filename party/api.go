@@ -101,10 +101,6 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		return nil, errors.New("duplicate partyIDs found")
 	}
 
-	if len(p.PartyIDs) < 2 {
-		return nil, errors.New("at least 2 partyIDs are required")
-	}
-
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
 		ctx:        ctx,

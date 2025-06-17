@@ -29,7 +29,6 @@ type Impl struct {
 	peerIDs  []party.ID
 
 	self *common.PartyID
-	// parameters *common.Parameters
 
 	sessionMap *sessionMap
 
@@ -68,7 +67,7 @@ func (p *Impl) GetPublic() curve.Point {
 	return p.config.PublicKey
 }
 
-// The worker serves as messages courier to all "localParty" instances.
+// The worker serves as messages courier to all singelSession instances.
 func (p *Impl) worker() {
 	defer p.workersWg.Done()
 
@@ -76,8 +75,6 @@ func (p *Impl) worker() {
 		select {
 		case task := <-p.incomingMessagesChannel:
 			switch findProtocolType(task.message) {
-			case keygenProtocolType:
-				continue // TODO: handle keygen messages.
 			case signingProtocolType:
 				p.handleIncomingSigningMessage(task)
 			default:
@@ -94,7 +91,6 @@ func (p *Impl) worker() {
 }
 
 var (
-	numCryptoWorker   = runtime.NumCPU() + 1 // plus one to ensure more workers than CPUs in case of blocking on blocking on memory access.
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
@@ -156,9 +152,9 @@ func (p *Impl) startSigner(signer *singleSession) {
 
 	config := p.config
 
-	// The following method initiates the localParty (if it’s a committee
-	//  member). Starting the localParty will involve computationally
-	// intensive cryptographic operations.
+	// The following method initiates the singleSession (if it’s a committee
+	// member). Depending on the protocol, this function might be
+	// compute intensive (frost is cheap, gg18 is not).
 	if err := p.setSession(config, signer); err != nil {
 		p.reportError(common.NewTrackableError(
 			err,
@@ -175,17 +171,25 @@ func (p *Impl) startSigner(signer *singleSession) {
 		return // not in committee, or, any other reason
 	}
 
+	// the first round doesn't have to wait for messages, so we can advance it right away.
 	p.sessionAdvance(signer)
 }
 
+// session advance will consume messages, and attempt to finalize the session.
 func (p *Impl) sessionAdvance(signer *singleSession) UpdateMeta {
-	if err := signer.consumeStoredMessages(); err != nil {
-		return UpdateMeta{Error: err}
-	}
+	var err *common.Error
+	var report finalizeReport
 
-	report, err := signer.attemptRoundFinalize()
-	if err != nil {
-		return UpdateMeta{Error: err}
+	// do while loop:
+	// if advanced one round -> see if there is more to advance.
+	for ok := true; ok; ok = report.advancedRound {
+		if report, err = signer.advanceOnce(); err != nil {
+			return UpdateMeta{Error: err}
+		}
+
+		if report.isSessionComplete {
+			break // session is complete, no need to advance further.
+		}
 	}
 
 	if !report.isSessionComplete {
