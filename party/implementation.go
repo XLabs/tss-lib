@@ -18,18 +18,6 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// signingHandler handles all signers in the FullParty.
-// The proper way to get a signer is to use getOrCreateSingleSession method.
-type signingHandler struct {
-
-	// might store the same signer multiple times: once for each tracking id.
-	// the signer itself holds the same TTL, and the number of attempts of signing.
-	// [There can be multiple mappings for the same signer].
-	trackingIDToSigner sync.Map
-
-	sigPartReadyChan chan *common.SignatureData
-}
-
 // Impl handles multiple signers
 type Impl struct {
 	ctx        context.Context
@@ -43,7 +31,7 @@ type Impl struct {
 	self *common.PartyID
 	// parameters *common.Parameters
 
-	signingHandler *signingHandler
+	sessionMap *sessionMap
 
 	incomingMessagesChannel chan feedMessageTask
 	startSignerTaskChan     chan *singleSession
@@ -51,7 +39,6 @@ type Impl struct {
 	errorChannel           chan<- *common.Error
 	outChan                chan common.ParsedMessage
 	signatureOutputChannel chan *common.SignatureData
-	cryptoWorkChan         chan func()
 
 	maxTTl               time.Duration
 	loadDistributionSeed []byte
@@ -72,34 +59,8 @@ func (p *Impl) cleanupWorker() {
 			return
 
 		case <-time.After(p.maxTTl):
-			p.signingHandler.cleanup(p.maxTTl)
+			p.sessionMap.cleanup(p.maxTTl)
 		}
-	}
-}
-
-func (s *signingHandler) cleanup(maxTTL time.Duration) {
-	currentTime := time.Now()
-
-	keysToDelete := make([]any, 0)
-
-	s.trackingIDToSigner.Range(func(key, value any) bool {
-		signer, ok := value.(*singleSession)
-		if !ok {
-			// since this is not a signer, it should be removed.
-			keysToDelete = append(keysToDelete, key)
-
-			return true
-		}
-
-		if currentTime.Sub(signer.getInitTime()) >= maxTTL {
-			keysToDelete = append(keysToDelete, key)
-		}
-
-		return true // true to continue the iteration
-	})
-
-	for _, key := range keysToDelete {
-		s.trackingIDToSigner.Delete(key)
 	}
 }
 
@@ -282,13 +243,12 @@ func indexInCommittee(self *common.PartyID, committee common.UnSortedPartyIDs) i
 }
 
 // assumes locked by the caller.
+// This is the only method that changes the session state.
 func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	state := signer.getState()
-
-	if state != unset {
+	if signer.getState() != unset {
 		return nil
 	}
 
@@ -314,16 +274,14 @@ func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 	return nil
 }
 
-var errInternalStorage = errors.New("internal: couldn't load signer due to convertion issue")
-
 // getOrCreateSingleSession returns the signer for the given digest, or creates a new one if it doesn't exist.
 func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleSession, error) {
-	s := p.signingHandler
+	s := p.sessionMap
 
 	dgst := Digest{}
 	copy(dgst[:], trackingId.Digest)
 
-	_signer, loaded := s.trackingIDToSigner.LoadOrStore(trackingId.ToString(), &singleSession{
+	signer, loaded := s.LoadOrStore(trackingId.ToString(), &singleSession{
 		startTime: time.Now(),
 		state:     atomic.Int64{},
 
@@ -331,9 +289,11 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		digest:     dgst,
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
-		// upon setting the committee, we will set the session.
+
+		// set after store or load of the singleSession.
 		committee: nil,
-		session:   nil,
+		// session is once allowed to sign (AsyncRequestNewSignature).
+		session: nil,
 
 		// first round doesn't receive messages (only round number 2,3)
 		messages: make([]map[Digest]common.ParsedMessage, frost.NumRounds-1),
@@ -341,11 +301,6 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		outputchan: p.outChan,
 		peersmap:   p.peersmap,
 	})
-
-	signer, ok := _signer.(*singleSession)
-	if !ok {
-		return nil, errInternalStorage
-	}
 
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()

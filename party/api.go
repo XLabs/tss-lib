@@ -115,11 +115,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		peersmap: peersMap,
 		peerIDs:  pids2IDs(p.PartyIDs),
 
-		config: p.InitConfigs,
-		signingHandler: &signingHandler{
-			trackingIDToSigner: sync.Map{},
-			sigPartReadyChan:   nil, // set up during Start()
-		},
+		config:     p.InitConfigs,
+		sessionMap: &sessionMap{Map: sync.Map{}},
 
 		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),
 		startSignerTaskChan:     make(chan *singleSession),

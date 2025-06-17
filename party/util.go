@@ -2,6 +2,8 @@ package party
 
 import (
 	"encoding/binary"
+	"sync"
+	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
@@ -105,4 +107,41 @@ func pids2IDs(pids []*common.PartyID) []party.ID {
 	}
 
 	return ids
+}
+
+// sessionMap is a wrapper around a syncMap, specified
+// to store and load singleSessions.
+type sessionMap struct {
+	sync.Map
+}
+
+func (s *sessionMap) cleanup(maxTTL time.Duration) {
+	currentTime := time.Now()
+
+	keysToDelete := make([]any, 0)
+
+	s.Range(func(key, value any) bool {
+		signer, ok := value.(*singleSession)
+		if !ok {
+			// since this is not a signer, it should be removed.
+			keysToDelete = append(keysToDelete, key)
+
+			return true
+		}
+
+		if currentTime.Sub(signer.getInitTime()) >= maxTTL {
+			keysToDelete = append(keysToDelete, key)
+		}
+
+		return true // true to continue the iteration
+	})
+
+	for _, key := range keysToDelete {
+		s.Delete(key)
+	}
+}
+
+func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSession, bool) {
+	_signer, loaded := s.Map.LoadOrStore(key, toload)
+	return _signer.(*singleSession), loaded
 }

@@ -155,7 +155,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	impl := parties[len(parties)-1].(*Impl)
 
 	// test:
-	v, ok := impl.signingHandler.trackingIDToSigner.Load(trackingId.ToString())
+	v, ok := impl.sessionMap.Load(trackingId.ToString())
 	a.True(ok)
 
 	singleSigner, ok := v.(*singleSession)
@@ -325,11 +325,11 @@ func TestCleanup(t *testing.T) {
 		Digest: digest,
 	})
 
-	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 1, "expected 1 signer ")
+	a.Equal(getLen(&p1.sessionMap.Map), 1, "expected 1 signer ")
 
 	<-time.After(maxTTL * 2)
 
-	a.Equal(getLen(&p1.signingHandler.trackingIDToSigner), 0, "expected 0 signers ")
+	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
 
 	for _, party := range parties {
 		party.Stop()
@@ -805,7 +805,7 @@ func TestChangingCommittee(t *testing.T) {
 					Digest:   hash,
 					Faulties: prevFaulties, // prev round faulties.
 				})
-				p.signingHandler.trackingIDToSigner.Delete(trackid.ToString()) // ensures signature is not created.
+				p.sessionMap.Map.Delete(trackid.ToString()) // ensures signature is not created.
 
 				// shuffle the order of the parties when telling them to replace the comittee.
 				// (Ensures different ordered faulties array does not affect the signprotocol)
