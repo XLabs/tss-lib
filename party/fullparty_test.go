@@ -380,7 +380,7 @@ func (n *networkSimulator) verifiedAllSignatures() bool {
 func idToParty(parties []FullParty) map[string]FullParty {
 	idToFullParty := map[string]FullParty{}
 	for _, p := range parties {
-		idToFullParty[p.(*Impl).self.Id] = p
+		idToFullParty[p.(*Impl).self.GetID()] = p
 	}
 	return idToFullParty
 }
@@ -464,13 +464,13 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 	a.NoError(err)
 
 	if routing.IsBroadcast || routing.To == nil {
-		slog.Info("Broadcasting message", "from", routing.From.GetId(), "type", newMsg.Type())
+		slog.Info("Broadcasting message", "from", routing.From.GetID(), "type", newMsg.Type())
 		for pID, p := range idToParty {
 			parsedMsg, done := copyParsedMessage(a, bz, routing, expectErr)
 			if done {
 				return
 			}
-			if routing.From.GetId() == pID {
+			if routing.From.GetID() == pID {
 				continue
 			}
 			_, err = p.Update(parsedMsg)
@@ -489,7 +489,7 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 			return
 		}
 
-		_, err = idToParty[id.Id].Update(parsedMsg)
+		_, err = idToParty[id.GetID()].Update(parsedMsg)
 		if expectErr && err != nil {
 			continue
 		}
@@ -498,11 +498,7 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 }
 
 func copyParsedMessage(a *assert.Assertions, bz []byte, routing *common.MessageRouting, expectErr bool) (common.ParsedMessage, bool) {
-	frm := proto.Clone(routing.From).(*common.MessageWrapper_PartyID)
-	from := &common.PartyID{
-		MessageWrapper_PartyID: frm,
-		Index:                  -1, // Setting as -1 for malicious affect. (shouldn't hinder the library)
-	}
+	from := proto.CloneOf(routing.From)
 
 	bts := make([]byte, len(bz))
 	copy(bts, bz)
@@ -522,11 +518,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 
 	for i := range partyIDs {
 		partyIDs[i] = &common.PartyID{
-			MessageWrapper_PartyID: &common.MessageWrapper_PartyID{
-				Id:  strconv.Itoa(i),
-				Key: nil, // will be set later.
-			},
-			Index: -1, // We don't care about index in frost.
+			ID: strconv.Itoa(i),
 		}
 	}
 	group := curve.Secp256k1{}
@@ -535,7 +527,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 
 	privateShares := make(map[party.ID]curve.Scalar, len(partyIDs))
 	for _, pid := range partyIDs {
-		id := party.ID(pid.Id)
+		id := party.ID(pid.GetID())
 
 		privateShares[id] = f.Evaluate(id.Scalar(group))
 	}
@@ -543,17 +535,13 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 	verificationShares := make(map[party.ID]curve.Point, len(partyIDs))
 
 	for _, pid := range partyIDs {
-		id := party.ID(pid.Id)
+		id := party.ID(pid.GetID())
 		point := privateShares[id].ActOnBase()
 		verificationShares[id] = point
-		bts, err := point.MarshalBinary()
-		a.NoError(err)
-
-		pid.Key = bts
 	}
 
 	for i, pid := range partyIDs {
-		id := party.ID(pid.Id)
+		id := party.ID(pid.GetID())
 
 		ps[i] = Parameters{
 			InitConfigs: &frost.Config{
@@ -564,6 +552,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 				ChainKey:           []byte{1, 2, 3, 4},
 				VerificationShares: party.NewPointMap(verificationShares),
 			},
+
 			PartyIDs: partyIDs,
 			Self:     pid,
 
@@ -919,7 +908,7 @@ func TestErrorsInUpdate(t *testing.T) {
 			return
 
 		case m := <-outchan:
-			if m.GetFrom().Id == parties[0].(*Impl).self.Id {
+			if m.GetFrom().GetID() == parties[0].(*Impl).self.GetID() {
 				// this is the party that will send rubbish.
 				switch msg := m.Content().(type) {
 				case *sign.Broadcast3:

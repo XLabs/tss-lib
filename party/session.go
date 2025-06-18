@@ -78,9 +78,9 @@ var (
 // this ensures that if the singleSession is not yet ready/ set, it won't miss messages.
 func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	slog.Debug("storing message",
-		slog.String("ID", signer.self.Id),
+		slog.String("ID", signer.self.GetID()),
 		slog.String("type", message.Type()),
-		slog.String("from", message.GetFrom().Id),
+		slog.String("from", message.GetFrom().GetID()),
 	)
 
 	signer.mtx.Lock()
@@ -157,7 +157,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		}
 
 		m := round.Message{
-			From:       party.ID(msg.GetFrom().Id),
+			From:       party.ID(msg.GetFrom().GetID()),
 			To:         "",
 			Broadcast:  true,
 			Content:    msg.Content(),

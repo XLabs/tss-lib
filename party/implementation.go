@@ -224,26 +224,9 @@ var (
 func pidToDigest(pid *common.PartyID) Digest {
 	bf := bytes.NewBuffer(nil)
 
-	bf.WriteString(pid.GetId())
-	bf.Write(pid.GetKey())
+	bf.WriteString(pid.GetID())
 
 	return hash(bf.Bytes())
-}
-
-var ErrNoSigningKey = errors.New("no key to sign with")
-
-func isInCommittee(self *common.PartyID, committee common.UnSortedPartyIDs) bool {
-	return indexInCommittee(self, common.UnSortedPartyIDs(committee)) != -1
-}
-
-func indexInCommittee(self *common.PartyID, committee common.UnSortedPartyIDs) int {
-	for i, v := range committee {
-		if equalIDs(v, self) {
-			return i
-		}
-	}
-
-	return -1
 }
 
 // assumes locked by the caller.
@@ -256,14 +239,13 @@ func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
 		return nil
 	}
 
-	// check if in committee:
-	index := indexInCommittee(signer.self, common.UnSortedPartyIDs(signer.committee))
-	if index == -1 {
+	if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(p.self) {
 		signer.state.Store(int64(notInCommittee))
 
 		return nil
 	}
 
+	// set the state to "set" (in committee).
 	signer.state.Store(int64(set))
 
 	sessionCreator := frost.Sign(config, pids2IDs(signer.committee), signer.digest[:])
@@ -352,10 +334,6 @@ func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
 	return seed
 }
 
-func equalIDs(a, b *common.PartyID) bool {
-	return a.Id == b.Id && bytes.Equal(a.Key, b.Key)
-}
-
 type feedMessageTask struct {
 	message common.ParsedMessage
 	result  chan UpdateMeta
@@ -433,13 +411,13 @@ func (p *Impl) reportError(newError *common.Error) {
 func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	offlineMap := map[string]bool{}
 	for _, v := range s.Faulties {
-		offlineMap[string(v.GetKey())] = true
+		offlineMap[string(v.GetID())] = true
 	}
 
 	pids := make([]bool, len(p.peers))
 
 	for i, v := range p.peers {
-		if !offlineMap[string(v.GetKey())] {
+		if !offlineMap[string(v.GetID())] {
 			pids[i] = true
 		}
 	}
@@ -490,7 +468,7 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	return &SigningInfo{
 		SigningCommittee: sortedCommittee,
 		TrackingID:       trackingId,
-		IsSigner:         isInCommittee(p.self, common.UnSortedPartyIDs(sortedCommittee)),
+		IsSigner:         common.UnSortedPartyIDs(sortedCommittee).IsInCommittee(p.self),
 	}, nil
 }
 

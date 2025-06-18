@@ -66,8 +66,16 @@ github.com/xlabs/multi-party-sig v0.0.0-20250529055318-4a1fb22ad55d h1:hpmtb8qQm
 github.com/xlabs/multi-party-sig v0.0.0-20250529055318-4a1fb22ad55d/go.mod h1:AfnSsoRveu+yZ0udw153VGlpkMf5x9sXbWyABSR2uhk=
 github.com/xlabs/multi-party-sig v0.0.0-20250529064923-23479a0245d4 h1:arfYeoWltvl2eVzBuTYbzMW0Rb5yBBcmAiS2B2m0r8E=
 github.com/xlabs/multi-party-sig v0.0.0-20250529064923-23479a0245d4/go.mod h1:AfnSsoRveu+yZ0udw153VGlpkMf5x9sXbWyABSR2uhk=
+github.com/xlabs/multi-party-sig v0.0.0-20250618102020-4ed822e1321d h1:xvO4PI+WRCTVMHZpZEGGI5o2ujeIlOYxSPNkTosbwrI=
+github.com/xlabs/multi-party-sig v0.0.0-20250618102020-4ed822e1321d/go.mod h1:gRrDbdGdfv0tHpHlfKmcS3wNJu0ULE1B1Z7vBZ386tk=
+github.com/xlabs/multi-party-sig v1.0.0 h1:IKCoQ2x2fsuB0htLqsGpuEOUK36sAkf64d7mTShDfY4=
+github.com/xlabs/multi-party-sig v1.0.0/go.mod h1:pgIE5Mz2HDtsnZMkbPYBcuH+ypb0WOESUSI4NgDS2GY=
 github.com/xlabs/tss-common v0.0.0-20250529055213-8357b47bc351 h1:2+2mjigPWXMU2XRbLZyJW5EntN9S6eggHIUw4Nv0tlA=
 github.com/xlabs/tss-common v0.0.0-20250529055213-8357b47bc351/go.mod h1:EBXV5kup1GsnVpEknaxXXpid87uN6Mh7NboAZhV+HNM=
+github.com/xlabs/tss-common v0.0.0-20250618100133-1aabd235c631 h1:EXcCRO0f2soedEIvubKitPcZxgczJdeQZHkJdWE3Pq8=
+github.com/xlabs/tss-common v0.0.0-20250618100133-1aabd235c631/go.mod h1:EBXV5kup1GsnVpEknaxXXpid87uN6Mh7NboAZhV+HNM=
+github.com/xlabs/tss-common v0.0.0-20250618120842-76eedd6f3270 h1:c+I/hxmHP8X9cw/VJygsXDtgBZbs9d0TgsRdeEGN4OM=
+github.com/xlabs/tss-common v0.0.0-20250618120842-76eedd6f3270/go.mod h1:EBXV5kup1GsnVpEknaxXXpid87uN6Mh7NboAZhV+HNM=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/zeebo/assert v1.1.0 h1:hU1L1vLTHsnO8x8c9KAR5GmM5QscxHg5RNU5z5qbUWY=
@@ -137,6 +145,8 @@ golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8T
 golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 google.golang.org/protobuf v1.33.0 h1:uNO2rsAINq/JlFpSdYEKIZ0uKD/R9cpdv0T+yoGwGmI=
 google.golang.org/protobuf v1.33.0/go.mod h1:c6P6GXX6sHbq/GpV6MGZEdwhWPcYBgnhAHhKbcUYpos=
+google.golang.org/protobuf v1.36.6 h1:z1NpPI8ku2WgiWnf+t9wTPsn6eP1L7ksHUlkfLvd9xY=
+google.golang.org/protobuf v1.36.6/go.mod h1:jduwjTPXsFjZGTmRluh+L6NjiWu7pchiJ2/5YcXBHnY=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=

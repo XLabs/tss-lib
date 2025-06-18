@@ -83,11 +83,7 @@ func shuffleParties(seed []byte, parties []*common.PartyID) ([]*common.PartyID, 
 	cpy := make([]*common.PartyID, len(parties))
 	// deep copy:
 	for i, p := range parties {
-		pid := proto.Clone(p.MessageWrapper_PartyID).(*common.MessageWrapper_PartyID)
-		cpy[i] = &common.PartyID{
-			MessageWrapper_PartyID: pid,
-			Index:                  p.Index,
-		}
+		cpy[i] = proto.CloneOf(p)
 	}
 
 	if err := shuffle(seed, cpy); err != nil {
@@ -100,7 +96,7 @@ func shuffleParties(seed []byte, parties []*common.PartyID) ([]*common.PartyID, 
 func pids2IDs(pids []*common.PartyID) []party.ID {
 	ids := make([]party.ID, len(pids))
 	for i, pid := range pids {
-		ids[i] = party.ID(pid.GetId())
+		ids[i] = party.ID(pid.GetID())
 	}
 
 	return ids

@@ -12,12 +12,12 @@ require (
 	github.com/ipfs/go-log v1.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
-	github.com/xlabs/multi-party-sig v0.0.0-20250529064923-23479a0245d4
-	github.com/xlabs/tss-common v0.0.0-20250529055213-8357b47bc351
+	github.com/xlabs/multi-party-sig v1.0.0
+	github.com/xlabs/tss-common v0.0.0-20250618120842-76eedd6f3270
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.22.0
 	golang.org/x/sync v0.7.0
-	google.golang.org/protobuf v1.33.0
+	google.golang.org/protobuf v1.36.6
 )
 
 require (

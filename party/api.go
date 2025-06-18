@@ -94,7 +94,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 	peersMap := make(map[party.ID]*common.PartyID, len(p.PartyIDs))
 	for _, partyID := range p.PartyIDs {
-		peersMap[party.ID(partyID.GetId())] = partyID
+		peersMap[party.ID(partyID.GetID())] = partyID
 	}
 
 	if len(peersMap) != len(p.PartyIDs) {
@@ -129,10 +129,5 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 }
 
 func (p *Parameters) ensurePartiesContainsSelf() bool {
-	for _, party := range p.PartyIDs {
-		if party.Id == p.Self.Id {
-			return true
-		}
-	}
-	return false
+	return common.UnSortedPartyIDs(p.PartyIDs).IsInCommittee(p.Self) // ensure that the self partyID is in the PartyIDs list.
 }
