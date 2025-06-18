@@ -588,83 +588,67 @@ func createFullParties(a *assert.Assertions, participants, threshold int) ([]Ful
 }
 
 func TestClosingThreadpoolMidRun(t *testing.T) {
-	t.Skip()
-	// // This test Fails when not run in isolation.
-	// a := assert.New(t)
+	// t.Skip()
+	// This test Fails when not run in isolation.
+	a := assert.New(t)
 
-	// parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold, largeFixturesLocation)
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
 
-	// digestSet, hash := createSingleDigest()
+	digestSet := createDigests(200) // 200 digests to sign
 
-	// n := networkSimulator{
-	// 	outchan:         make(chan common.ParsedMessage, len(parties)*20),
-	// 	sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-	// 	errchan:         make(chan *common.Error, 1),
-	// 	idToFullParty:   idToParty(parties),
-	// 	digestsToVerify: digestSet,
-	// 	Timeout:         time.Second * 8,
-	// 	expectErr:       true,
-	// }
+	n := networkSimulator{
+		outchan:         make(chan common.ParsedMessage, len(parties)*20),
+		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
+		errchan:         make(chan *common.Error, 1),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: digestSet,
+		Timeout:         time.Second * 5,
+		expectErr:       true,
+	}
 
-	// goroutinesstart := runtime.NumGoroutine()
+	goroutinesstart := runtime.NumGoroutine()
 
-	// chanReceivedAsyncTask := make(chan struct{})
-	// barrier := make(chan struct{})
-	// var visitedFlag int32 = 0
-	// for _, p := range parties {
-	// 	a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	for _, p := range parties {
+		a.NoError(p.Start(n.outchan, n.sigchan, n.errchan))
+	}
 
-	// 	tmp, ok := p.(*Impl)
-	// 	a.True(ok)
+	a.Equal(
+		len(parties)*(numHandlerWorkers+1)+goroutinesstart,
+		runtime.NumGoroutine(),
+		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
+	)
 
-	// 	// fnc := tmp.parameters.AsyncWorkComputation
-	// 	// setting different AsyncWorkComputation to test closing the threadpool
-	// 	tmp.parameters.AsyncWorkComputation = func(f func()) error {
-	// 		select {
-	// 		// signaling we reached an async function
-	// 		case chanReceivedAsyncTask <- struct{}{}:
-	// 		default:
-	// 		}
+	for i := 0; i < len(parties); i++ {
+		for dgst := range digestSet {
+			fpSign(a, parties[i], SigningTask{
+				Digest: dgst,
+			})
+		}
+	}
 
-	// 		<-barrier
-	// 		atomic.AddInt32(&visitedFlag, 1)
-	// 		return fnc(f)
-	// 	}
-	// }
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
 
-	// a.Equal(
-	// 	len(parties)*(numCryptoWorker+numHandlerWorkers+1)+goroutinesstart,
-	// 	runtime.NumGoroutine(),
-	// 	"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
-	// )
+	// stopping everyone to close the threadpools.
+	for _, party := range parties {
+		party.(*Impl).cancelFunc()
+	}
 
-	// for i := 0; i < len(parties); i++ {
-	// 	fpSign(a, parties[i], SigningTask{
-	// 		Digest: hash,
-	// 	})
-	// }
+	<-donechan
 
-	// donechan := make(chan struct{})
-	// go func() {
-	// 	defer close(donechan)
-	// 	n.run(a)
-	// }()
+	for _, party := range parties {
+		party.Stop()
+	}
 
-	// // stopping everyone to close the threadpools.
-	// <-chanReceivedAsyncTask
-	// for _, party := range parties {
-	// 	party.(*Impl).cancelFunc()
-	// }
-	// close(barrier)
-	// <-donechan
+	for _, fp := range parties {
+		p := fp.(*Impl)
+		<-p.ctx.Done()
+	}
 
-	// for _, party := range parties {
-	// 	party.Stop()
-	// }
-
-	// a.True(atomic.LoadInt32(&visitedFlag) > 0, "expected to visit the async function")
-
-	// a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
+	a.Equal(goroutinesstart, runtime.NumGoroutine(), "expected same number of goroutines at the end")
 }
 
 func TestTrailingZerosInDigests(t *testing.T) {
