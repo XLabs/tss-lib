@@ -172,23 +172,19 @@ func (p *Impl) startSigner(signer *singleSession) {
 	}
 
 	// the first round doesn't have to wait for messages, so we can advance it right away.
-	p.sessionAdvance(signer)
+	p.advanceSession(signer)
 }
 
-// session advance will consume messages, and attempt to finalize the session.
-func (p *Impl) sessionAdvance(signer *singleSession) UpdateMeta {
+// advanceSession will consume messages, and attempt to finalize the session.
+func (p *Impl) advanceSession(signer *singleSession) UpdateMeta {
 	var err *common.Error
 	var report finalizeReport
 
 	// do while loop:
-	// if advanced one round -> see if there is more to advance.
-	for ok := true; ok; ok = report.advancedRound {
+	// if advanced one round -> attempt to do so again(unless session is completed).
+	for ok := true; ok; ok = report.advancedRound && !report.isSessionComplete {
 		if report, err = signer.advanceOnce(); err != nil {
 			return UpdateMeta{Error: err}
-		}
-
-		if report.isSessionComplete {
-			break // session is complete, no need to advance further.
 		}
 	}
 
@@ -397,7 +393,7 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 		return
 	}
 
-	task.result <- p.sessionAdvance(signer)
+	task.result <- p.advanceSession(signer)
 
 }
 

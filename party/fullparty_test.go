@@ -764,7 +764,6 @@ func TestChangingCommittee(t *testing.T) {
 		for nremoved := 1; nremoved < 5; nremoved++ {
 			fmt.Println("changing comittee, starting signing process again.")
 
-			// time.Sleep(time.Millisecond * 50) // letting the current signature run for a bit.
 			faulties := make([]*common.PartyID, nremoved)
 			for i := 0; i < nremoved; i++ {
 				faulties[i] = parties[i].(*Impl).self
