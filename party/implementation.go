@@ -1,7 +1,6 @@
 package party
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -207,21 +206,13 @@ func (p *Impl) advanceSession(signer *singleSession) UpdateMeta {
 	}
 
 	// since a signature was produced, and delivered, we can delete the session now.
-	p.sessionMap.DeleteSession(signer)
+	p.sessionMap.deleteSession(signer)
 
 	return UpdateMeta{
 		AdvancedRound:      report.advancedRound,
 		CurrentRoundNumber: int(signer.getRound()),
 		SignerState:        set.String(),
 	}
-}
-
-func pidToDigest(pid *common.PartyID) Digest {
-	bf := bytes.NewBuffer(nil)
-
-	bf.WriteString(pid.GetID())
-
-	return hash(bf.Bytes())
 }
 
 // assumes locked by the caller.
@@ -277,7 +268,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		session: nil,
 
 		// first round doesn't receive messages (only round number 2,3)
-		messages: make(map[round.Number]map[Digest]common.ParsedMessage, frost.NumRounds-1),
+		messages: make(map[round.Number]map[strPartyID]common.ParsedMessage, frost.NumRounds-1),
 
 		outputchan: p.outChan,
 		peersmap:   p.peersmap,

@@ -1,6 +1,7 @@
 package party
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"log/slog"
@@ -710,6 +711,14 @@ func createDigests(numDigests int) map[Digest]bool {
 		digestSet[hash] = false
 	}
 	return digestSet
+}
+
+func pidToDigest(pid *common.PartyID) Digest {
+	bf := bytes.NewBuffer(nil)
+
+	bf.WriteString(pid.GetID())
+
+	return hash(bf.Bytes())
 }
 
 func TestChangingCommittee(t *testing.T) {

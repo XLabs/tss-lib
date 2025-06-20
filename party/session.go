@@ -22,6 +22,8 @@ const (
 	notInCommittee
 )
 
+type strPartyID string
+
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
@@ -35,7 +37,7 @@ type singleSession struct {
 	// this index is unique, and is used to identify the signer.
 	trackingId *common.TrackingID
 
-	messages map[round.Number]map[Digest]common.ParsedMessage
+	messages map[round.Number]map[strPartyID]common.ParsedMessage
 
 	committee common.SortedPartyIDs
 	self      *common.PartyID
@@ -111,12 +113,12 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	}
 
 	if _, ok := signer.messages[msgRnd]; !ok {
-		signer.messages[msgRnd] = make(map[Digest]common.ParsedMessage)
+		signer.messages[msgRnd] = make(map[strPartyID]common.ParsedMessage)
 	}
 
-	dgst := pidToDigest(message.GetFrom())
-	if _, ok := signer.messages[msgRnd][dgst]; !ok {
-		signer.messages[msgRnd][dgst] = message
+	from := strPartyID(message.GetFrom().ToString())
+	if _, ok := signer.messages[msgRnd][from]; !ok {
+		signer.messages[msgRnd][from] = message
 	}
 
 	return nil
@@ -150,7 +152,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	if _, ok := signer.messages[rnd]; !ok {
-		signer.messages[rnd] = make(map[Digest]common.ParsedMessage)
+		signer.messages[rnd] = make(map[strPartyID]common.ParsedMessage)
 	}
 
 	mp := signer.messages[rnd]
@@ -181,7 +183,6 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		if err := r.StoreBroadcastMessage(m); err != nil {
 			return common.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
 		}
-
 	}
 
 	return nil
