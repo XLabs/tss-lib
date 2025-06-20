@@ -12,6 +12,7 @@ import (
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/round"
 
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
@@ -64,7 +65,7 @@ func (p *Impl) cleanupWorker() {
 }
 
 func (p *Impl) GetPublic() curve.Point {
-	return p.config.PublicKey
+	return p.config.PublicKey.Clone()
 }
 
 // The worker serves as messages courier to all singelSession instances.
@@ -205,17 +206,15 @@ func (p *Impl) advanceSession(signer *singleSession) UpdateMeta {
 		return UpdateMeta{Error: err}
 	}
 
+	// since a signature was produced, and delivered, we can delete the session now.
+	p.sessionMap.DeleteSession(signer)
+
 	return UpdateMeta{
 		AdvancedRound:      report.advancedRound,
 		CurrentRoundNumber: int(signer.getRound()),
 		SignerState:        set.String(),
 	}
 }
-
-var (
-	errNilSigner              = errors.New("nil signer")
-	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
-)
 
 func pidToDigest(pid *common.PartyID) Digest {
 	bf := bytes.NewBuffer(nil)
@@ -278,7 +277,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		session: nil,
 
 		// first round doesn't receive messages (only round number 2,3)
-		messages: make([]map[Digest]common.ParsedMessage, frost.NumRounds-1),
+		messages: make(map[round.Number]map[Digest]common.ParsedMessage, frost.NumRounds-1),
 
 		outputchan: p.outChan,
 		peersmap:   p.peersmap,

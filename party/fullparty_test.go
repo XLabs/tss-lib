@@ -172,7 +172,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	// unless request to sign something, LocalParty should remain nil.
 	singleSigner.mtx.Lock()
 	a.Nil(singleSigner.session)
-	a.Greater(len(singleSigner.messages[0]), 1)
+	a.Greater(len(singleSigner.messages[2]), 1) // in frost, 2 is the first round which receives messages from others.
 	singleSigner.mtx.Unlock()
 	// a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
 
@@ -421,8 +421,6 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 			a.True(ok)
 
 			if !verified {
-
-				// TODO: validate signature using the results from frost.
 				a.True(validateSignature(anyParty.GetPublic(), m, d[:]))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m)
@@ -544,7 +542,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 		id := party.ID(pid.GetID())
 
 		ps[i] = Parameters{
-			InitConfigs: &frost.Config{
+			FrostSecrets: &frost.Config{
 				ID:                 id,
 				Threshold:          threshold,
 				PrivateShare:       privateShares[id],

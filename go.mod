@@ -12,7 +12,7 @@ require (
 	github.com/ipfs/go-log v1.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
-	github.com/xlabs/multi-party-sig v1.0.1
+	github.com/xlabs/multi-party-sig v0.0.2-0.20250620055457-77c3534e0352
 	github.com/xlabs/tss-common v0.0.0-20250619055827-614f1b58c4a0
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.22.0

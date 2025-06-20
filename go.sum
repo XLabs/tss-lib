@@ -68,6 +68,8 @@ github.com/xlabs/multi-party-sig v0.0.0-20250529064923-23479a0245d4 h1:arfYeoWlt
 github.com/xlabs/multi-party-sig v0.0.0-20250529064923-23479a0245d4/go.mod h1:AfnSsoRveu+yZ0udw153VGlpkMf5x9sXbWyABSR2uhk=
 github.com/xlabs/multi-party-sig v0.0.0-20250618102020-4ed822e1321d h1:xvO4PI+WRCTVMHZpZEGGI5o2ujeIlOYxSPNkTosbwrI=
 github.com/xlabs/multi-party-sig v0.0.0-20250618102020-4ed822e1321d/go.mod h1:gRrDbdGdfv0tHpHlfKmcS3wNJu0ULE1B1Z7vBZ386tk=
+github.com/xlabs/multi-party-sig v0.0.2-0.20250620055457-77c3534e0352 h1:Ifl9NDDT3WmMb1WgcQsAYdnhGsXusHq4VmRrcBxB34U=
+github.com/xlabs/multi-party-sig v0.0.2-0.20250620055457-77c3534e0352/go.mod h1:6G0p9VBo+JqeaRNbn/UdpZi44PnTcBDHPPle6u737J8=
 github.com/xlabs/multi-party-sig v1.0.0 h1:IKCoQ2x2fsuB0htLqsGpuEOUK36sAkf64d7mTShDfY4=
 github.com/xlabs/multi-party-sig v1.0.0/go.mod h1:pgIE5Mz2HDtsnZMkbPYBcuH+ypb0WOESUSI4NgDS2GY=
 github.com/xlabs/multi-party-sig v1.0.1 h1:xd/SXxoDjj5GFmKgBKVJMNH8oKmFVbGx0cl2xOsvKhg=

@@ -13,8 +13,7 @@ import (
 )
 
 type Parameters struct {
-	// for simplicity of testing:
-	InitConfigs *frost.Config // maybe store this in a file
+	FrostSecrets *frost.Config // maybe store this in a file
 
 	PartyIDs []*common.PartyID // should have the same string IDs as the ones that created the initConfigs.
 	Self     *common.PartyID
@@ -111,7 +110,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		peersmap: peersMap,
 		peerIDs:  pids2IDs(p.PartyIDs),
 
-		config:     p.InitConfigs,
+		config:     p.FrostSecrets,
 		sessionMap: &sessionMap{Map: sync.Map{}},
 
 		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),

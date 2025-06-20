@@ -138,3 +138,7 @@ func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSess
 	_signer, loaded := s.Map.LoadOrStore(key, toload)
 	return _signer.(*singleSession), loaded
 }
+
+func (s *sessionMap) DeleteSession(session *singleSession) {
+	s.Map.Delete(session.trackingId.ToString())
+}

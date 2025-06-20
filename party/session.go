@@ -35,7 +35,7 @@ type singleSession struct {
 	// this index is unique, and is used to identify the signer.
 	trackingId *common.TrackingID
 
-	messages []map[Digest]common.ParsedMessage
+	messages map[round.Number]map[Digest]common.ParsedMessage
 
 	committee common.SortedPartyIDs
 	self      *common.PartyID
@@ -72,10 +72,14 @@ func (s *singleSession) getInitTime() time.Time {
 var (
 	errRoundTooLarge = errors.New("message round is greater than the session's final round")
 	errRoundTooSmall = errors.New("message round is smaller than smallest round that receives messages")
+
+	errNilSigner              = errors.New("nil signer")
+	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
+	errSignerNotSet           = errors.New("signer is not set")
 )
 
-// storeMessage used before one can consume it.
-// this ensures that if the singleSession is not yet ready/ set, it won't miss messages.
+// storeMessage sets the message in internal storage, allowing the session time to consume
+// the message later, when it is ready to do so.
 func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	slog.Debug("storing message",
 		slog.String("ID", signer.self.GetID()),
@@ -86,12 +90,12 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	signerRound := 0
+	signerRound := round.Number(0)
 	if signer.session != nil {
-		signerRound = int(signer.session.Number())
+		signerRound = signer.session.Number()
 	}
 
-	msgRnd := message.Content().RoundNumber()
+	msgRnd := round.Number(message.Content().RoundNumber())
 
 	if msgRnd > frost.NumRounds {
 		return errRoundTooLarge
@@ -106,15 +110,13 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 		return errRoundTooSmall
 	}
 
-	storePosition := msgRnd - 2
-
-	if signer.messages[storePosition] == nil {
-		signer.messages[storePosition] = make(map[Digest]common.ParsedMessage)
+	if _, ok := signer.messages[msgRnd]; !ok {
+		signer.messages[msgRnd] = make(map[Digest]common.ParsedMessage)
 	}
 
 	dgst := pidToDigest(message.GetFrom())
-	if _, ok := signer.messages[storePosition][dgst]; !ok {
-		signer.messages[storePosition][dgst] = message
+	if _, ok := signer.messages[msgRnd][dgst]; !ok {
+		signer.messages[msgRnd][dgst] = message
 	}
 
 	return nil
@@ -124,13 +126,20 @@ func (signer *singleSession) getState() signerState {
 	return signerState(signer.state.Load())
 }
 
-// consumeStoredMessages will attempt to consume all messages stored for the current round.
+// consumeStoredMessages is thread-UNSAFE will attempt to consume all messages stored for the current round.
 func (signer *singleSession) consumeStoredMessages() *common.Error {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
 	if signer.session == nil {
 		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
+	}
+
+	if signer.getState() != set {
+		return common.NewError(
+			errSignerNotSet,
+			"consumeStoredMessages:statecheck",
+			int(signer.session.Number()),
+			nil,
+			signer.self,
+		)
 	}
 
 	rnd := signer.session.Number()
@@ -140,8 +149,11 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		return nil // nothing to do.
 	}
 
-	storePosition := rnd - 2
-	mp := signer.messages[storePosition]
+	if _, ok := signer.messages[rnd]; !ok {
+		signer.messages[rnd] = make(map[Digest]common.ParsedMessage)
+	}
+
+	mp := signer.messages[rnd]
 
 	for key, msg := range mp {
 		if msg == nil {
@@ -164,6 +176,8 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 			TrackingID: msg.WireMsg().TrackingID,
 		}
 
+		// StoreBroadcastMessage will perform the necessary checks and might even run
+		// some cryptographic computations (depending on the protocol).
 		if err := r.StoreBroadcastMessage(m); err != nil {
 			return common.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
 		}
@@ -171,18 +185,6 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	return nil
-}
-
-// culpritsToPartyIDs converts a slice of party ids as strings to a slice of *common.PartyID.
-// it is used to convert captured culprits of the frost protocols to the common.PartyID type.
-func (signer *singleSession) culpritsToPartyIDs(culprits []party.ID) []*common.PartyID {
-	partyIDs := make([]*common.PartyID, len(culprits))
-
-	for i, culprit := range culprits {
-		partyIDs[i] = signer.peersmap[culprit]
-	}
-
-	return partyIDs
 }
 
 func (signer *singleSession) getRound() round.Number {
@@ -204,11 +206,9 @@ type finalizeReport struct {
 
 var errFirstRoundCantFinalize = errors.New("first round can't finalize")
 
-// Attempt to finalize the round. if the round was the protocol's final round,
+// attemptRoundFinalize is a thread-UNSAFE attempt to finalize the round. if the round was the protocol's final round,
 // return true.
 func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Error) {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
 
 	if signer.session == nil {
 		return finalizeReport{}, common.NewTrackableError(
@@ -217,6 +217,16 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 			-1,
 			signer.self,
 			signer.trackingId,
+		)
+	}
+
+	if signer.getState() != set {
+		return finalizeReport{}, common.NewError(
+			errSignerNotSet,
+			"attemptRoundFinalize:statecheck",
+			int(signer.session.Number()),
+			nil,
+			signer.self,
 		)
 	}
 
@@ -251,13 +261,18 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	newRound, err := signer.session.Finalize(signer.outputchan)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
+			culprits := make(common.UnSortedPartyIDs, len(b.Culprits))
+			for i, culprit := range b.Culprits {
+				culprits[i] = culprit.ToTssPartyID()
+			}
+
 			return report, common.NewTrackableError(
 				b.Err,
 				"attemptRoundFinalize:abort",
 				int(rnd),
 				signer.self,
 				signer.trackingId,
-				signer.culpritsToPartyIDs(b.Culprits)...,
+				culprits...,
 			)
 		}
 
@@ -293,6 +308,16 @@ func (signer *singleSession) extractSignature() (frost.Signature, *common.Error)
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	if signer.session == nil {
+		return frost.Signature{}, common.NewTrackableError(
+			errNilSigner,
+			"extractSignature:sessionNil",
+			-1,
+			signer.self,
+			signer.trackingId,
+		)
+	}
+
 	// checking for output.
 	var sig frost.Signature
 
@@ -321,7 +346,11 @@ func (signer *singleSession) extractSignature() (frost.Signature, *common.Error)
 	return sig, nil
 }
 
+// advanceOnce is a thread-SAFE method that will attempt to finalize the current round.
 func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
+	signer.mtx.Lock()
+	defer signer.mtx.Unlock()
+
 	if err := signer.consumeStoredMessages(); err != nil {
 		return finalizeReport{}, err
 	}
