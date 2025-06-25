@@ -26,7 +26,6 @@ type Impl struct {
 	config   *frost.Config
 	peers    []*common.PartyID
 	peersmap map[party.ID]*common.PartyID
-	peerIDs  []party.ID
 
 	self *common.PartyID
 
@@ -38,6 +37,7 @@ type Impl struct {
 	errorChannel           chan<- *common.Error
 	outChan                chan common.ParsedMessage
 	signatureOutputChannel chan *common.SignatureData
+	keygenout              chan *frost.Config
 
 	maxTTl               time.Duration
 	loadDistributionSeed []byte
@@ -74,9 +74,9 @@ func (p *Impl) worker() {
 	for {
 		select {
 		case task := <-p.incomingMessagesChannel:
-			switch findProtocolType(task.message) {
-			case signingProtocolType:
-				p.handleIncomingSigningMessage(task)
+			switch task.message.Content().GetProtocol() {
+			case common.ProtocolFROST:
+				p.handleFrostMessage(task)
 			default:
 				p.errorChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
 			}
@@ -94,14 +94,17 @@ var (
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
-func (p *Impl) Start(outChannel chan common.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *common.Error) error {
-	if outChannel == nil || signatureOutputChannel == nil || errChannel == nil {
+func (p *Impl) Start(params StartParams) error {
+	if params.OutChannel == nil ||
+		params.SignatureOutputChannel == nil ||
+		params.ErrChannel == nil {
 		return errors.New("nil channel passed to Start()")
 	}
 
-	p.errorChannel = errChannel
-	p.signatureOutputChannel = signatureOutputChannel
-	p.outChan = outChannel
+	p.errorChannel = params.ErrChannel
+	p.signatureOutputChannel = params.SignatureOutputChannel
+	p.outChan = params.OutChannel
+	p.keygenout = params.KeygenOutputChannel
 
 	p.workersWg.Add(numHandlerWorkers + 1) // +1 for cleanup worker.
 
@@ -121,7 +124,13 @@ func (p *Impl) Stop() {
 	p.workersWg.Wait()
 }
 
+var errNoConfig = errors.New("signing protocol not configured")
+
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
+	if p.config == nil {
+		return nil, errNoConfig
+	}
+
 	trackid := p.createTrackingID(s)
 
 	// fast lock.
@@ -155,7 +164,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 	// The following method initiates the singleSession (if it’s a committee
 	// member). Depending on the protocol, this function might be
 	// compute intensive (frost is cheap, gg18 is not).
-	if err := p.setSession(config, signer); err != nil {
+	if err := p.setSigningSession(config, signer); err != nil {
 		p.reportError(common.NewTrackableError(
 			err,
 			"startSigner",
@@ -176,14 +185,14 @@ func (p *Impl) startSigner(signer *singleSession) {
 }
 
 // advanceSession will consume messages, and attempt to finalize the session.
-func (p *Impl) advanceSession(signer *singleSession) UpdateMeta {
+func (p *Impl) advanceSession(session *singleSession) UpdateMeta {
 	var err *common.Error
 	var report finalizeReport
 
 	// do while loop:
 	// if advanced one round -> attempt to do so again(unless session is completed).
 	for ok := true; ok; ok = report.advancedRound && !report.isSessionComplete {
-		if report, err = signer.advanceOnce(); err != nil {
+		if report, err = session.advanceOnce(); err != nil {
 			return UpdateMeta{Error: err}
 		}
 	}
@@ -196,28 +205,50 @@ func (p *Impl) advanceSession(signer *singleSession) UpdateMeta {
 		}
 	}
 
-	sig, err := signer.extractSignature()
+	// Finalizing the session.
+	out, err := session.extractOutput()
 	if err != nil {
 		return UpdateMeta{Error: err}
 	}
 
-	if err := p.outputSig(sig, signer); err != nil {
-		return UpdateMeta{Error: err}
+	switch res := out.(type) {
+	case *frost.Config:
+		p.outputKeygen(res)
+	case frost.Signature:
+		err = p.outputSig(res, session)
+	default:
+		err = common.NewTrackableError(
+			fmt.Errorf("unknown output type: %T", out),
+			"advanceSession:output",
+			-1,
+			session.self,
+			session.trackingId,
+		)
 	}
 
-	// since a signature was produced, and delivered, we can delete the session now.
-	p.sessionMap.deleteSession(signer)
+	// after session end, either with success or error, we remove it from the session map.
+	p.sessionMap.deleteSession(session)
 
 	return UpdateMeta{
 		AdvancedRound:      report.advancedRound,
-		CurrentRoundNumber: int(signer.getRound()),
+		CurrentRoundNumber: int(session.getRound()),
 		SignerState:        set.String(),
+
+		Error: err,
+	}
+}
+
+func (p *Impl) outputKeygen(res *frost.Config) {
+	select {
+	case p.keygenout <- res:
+	case <-p.ctx.Done():
+		// nothing to report.
 	}
 }
 
 // assumes locked by the caller.
 // This is the only method that changes the session state.
-func (p *Impl) setSession(config *frost.Config, signer *singleSession) error {
+func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
@@ -338,7 +369,7 @@ func (p *Impl) Update(message common.ParsedMessage) (<-chan UpdateMeta, error) {
 	}
 }
 
-func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
+func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	// assumes the message has a tracking ID.
 	message := task.message
 	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
@@ -346,7 +377,7 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 		task.result <- UpdateMeta{
 			Error: common.NewTrackableError(
 				err,
-				"handleIncomingSigningMessage",
+				"handleFrostMessage",
 				-1,
 				message.GetFrom(),
 				message.WireMsg().GetTrackingID(),
@@ -361,9 +392,7 @@ func (p *Impl) handleIncomingSigningMessage(task feedMessageTask) {
 		// no need to store the message since the signer is not in the committee.
 
 		task.result <- UpdateMeta{ // updating the task result.
-			AdvancedRound:      false,
-			CurrentRoundNumber: 0,
-			SignerState:        unset.String(),
+			SignerState: unset.String(),
 		}
 
 		return
@@ -491,6 +520,66 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 	case <-p.ctx.Done():
 		// nothing to report.
 	}
+
+	return nil
+}
+
+var errDKGIssue = errors.New("FullParty has bad configurations. Cannot start DKG protocol")
+
+func (p *Impl) StartDKG(threshold int, seed Digest) error {
+	if p.keygenout == nil {
+		return errDKGIssue
+	}
+
+	if len(p.peers) < threshold {
+		return fmt.Errorf("not enough parties to start DKG: %d < %d", len(p.peers), threshold+1)
+	}
+
+	// TODO: Consider renaming `SigningTask` struct?
+	tid := p.createTrackingID(SigningTask{
+		Digest:       seed,
+		AuxilaryData: nil, // auxilary data is not used in DKG.
+		Faulties:     nil, // no faulties in DKG.
+	})
+
+	s, err := p.getOrCreateSingleSession(tid)
+
+	if err != nil {
+		return common.NewError(
+			err,
+			"StartDKG",
+			-1,
+			p.self,
+		)
+	}
+
+	if err := p.setKeygenSession(s, threshold); err != nil {
+		return err
+	}
+
+	_ = p.advanceSession(s) // ignoring the metaupdate.
+	return nil
+}
+
+// ensures the session can advance. An unset session doesn't consume messages.
+func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	s.isKeygenSession = true
+
+	s.committee = common.SortPartyIDs(p.peers)
+
+	sessionCreator := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
+
+	session, err := sessionCreator(s.trackingId.ToByteString())
+	if err != nil {
+		return err
+	}
+
+	s.session = session
+
+	s.state.Store(int64(set))
 
 	return nil
 }

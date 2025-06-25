@@ -6,27 +6,10 @@ import (
 	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/party"
-	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
 )
-
-type protocolType int
-
-const (
-	unknownProtocolType protocolType = iota
-	signingProtocolType
-)
-
-func findProtocolType(message common.ParsedMessage) protocolType {
-	switch message.Content().(type) {
-	case *sign.Broadcast2, *sign.Broadcast3:
-		return signingProtocolType
-	default: // unrecognised message, just ignore!
-		return unknownProtocolType
-	}
-}
 
 type prng struct {
 	shake sha3.ShakeHash

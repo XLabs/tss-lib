@@ -29,6 +29,8 @@ type singleSession struct {
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
 	startTime time.Time
 
+	isKeygenSession bool
+
 	// the state of the signer. can be one of { unset, set, notInCommittee }.
 	state atomic.Int64
 
@@ -78,6 +80,7 @@ var (
 	errNilSigner              = errors.New("nil signer")
 	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
 	errSignerNotSet           = errors.New("signer is not set")
+	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
 
 // storeMessage sets the message in internal storage, allowing the session time to consume
@@ -88,6 +91,17 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 		slog.String("type", message.Type()),
 		slog.String("from", message.GetFrom().GetID()),
 	)
+	if !message.ValidateBasic() {
+		return common.NewTrackableError(
+			errInvalidMessage,
+			"storeMessage:validate",
+			int(signer.getRound()),
+			signer.self,
+			signer.trackingId,
+
+			message.GetFrom(), // culprit
+		)
+	}
 
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
@@ -164,28 +178,47 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 
 		delete(mp, key) // remove the message from the map.
 
-		// TODO: support non-broadcast messages.
-		r, ok := signer.session.(round.BroadcastRound)
-		if !ok {
-			return common.NewError(errShouldBeBroadcastRound, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
-		}
+		if err := signer.consumeMessage(msg); err != nil {
+			return common.NewTrackableError(
+				err,
+				"consumeStoredMessages:consume",
+				int(signer.session.Number()),
+				signer.self,
+				signer.trackingId,
 
-		m := round.Message{
-			From:       party.ID(msg.GetFrom().GetID()),
-			To:         "",
-			Broadcast:  true,
-			Content:    msg.Content(),
-			TrackingID: msg.WireMsg().TrackingID,
-		}
-
-		// StoreBroadcastMessage will perform the necessary checks and might even run
-		// some cryptographic computations (depending on the protocol).
-		if err := r.StoreBroadcastMessage(m); err != nil {
-			return common.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
+				msg.GetFrom(), // possible culprit
+			)
 		}
 	}
 
 	return nil
+}
+
+// consumeMessage is thread-UNSAFE and will attempt to consume the given message.
+func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
+	// Since FROST.keygen and FROST.signing are both broadcast rounds,
+	// we can safely cast the session to BroadcastRound.
+	// TODO: Support non-broadcast sessions in the future.
+	r, ok := signer.session.(round.BroadcastRound)
+	if !ok {
+		return errShouldBeBroadcastRound
+	}
+
+	m := round.Message{
+		From:       party.ID(msg.GetFrom().GetID()),
+		Broadcast:  msg.IsBroadcast(),
+		Content:    msg.Content(),
+		TrackingID: msg.WireMsg().TrackingID,
+	}
+
+	// The following storing (Both StoreMessage and StoreBroadcastMessage methods) of
+	//  messages may perform some necessary checks and might even run
+	// some cryptographic computations (depending on the protocol).
+	if m.Broadcast {
+		return r.StoreBroadcastMessage(m)
+	}
+
+	return r.StoreMessage(m)
 }
 
 func (signer *singleSession) getRound() round.Number {
@@ -305,12 +338,12 @@ var (
 	errSigNotOfCorrectType        = errors.New("session final round failed: not of type frost.Signature")
 )
 
-func (signer *singleSession) extractSignature() (frost.Signature, *common.Error) {
+func (signer *singleSession) extractOutput() (any, *common.Error) {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
 	if signer.session == nil {
-		return frost.Signature{}, common.NewTrackableError(
+		return nil, common.NewTrackableError(
 			errNilSigner,
 			"extractSignature:sessionNil",
 			-1,
@@ -319,12 +352,9 @@ func (signer *singleSession) extractSignature() (frost.Signature, *common.Error)
 		)
 	}
 
-	// checking for output.
-	var sig frost.Signature
-
 	r, ok := signer.session.(*round.Output)
 	if !ok {
-		return sig, common.NewTrackableError(
+		return nil, common.NewTrackableError(
 			errFinalRoundNotOfCorrectType,
 			"extractSignature:roundConvert",
 			-1,
@@ -333,18 +363,8 @@ func (signer *singleSession) extractSignature() (frost.Signature, *common.Error)
 		)
 	}
 
-	sig, ok = r.Result.(frost.Signature)
-	if !ok {
-		return sig, common.NewTrackableError(
-			errSigNotOfCorrectType,
-			"extractSignature:sigConvert",
-			int(-1),
-			signer.self,
-			signer.trackingId,
-		)
-	}
+	return r.Result, nil
 
-	return sig, nil
 }
 
 // advanceOnce is a thread-SAFE method that will attempt to finalize the current round.
