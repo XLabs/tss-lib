@@ -43,14 +43,6 @@ type SigningInfo struct {
 	IsSigner         bool
 }
 
-type UpdateMeta struct {
-	AdvancedRound      bool
-	CurrentRoundNumber int
-	SignerState        string
-
-	Error error
-}
-
 // StartParams Contains the channels the FullParty will use to
 // communicate with the outside world.
 type StartParams struct {
@@ -84,7 +76,7 @@ type FullParty interface {
 	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
-	Update(common.ParsedMessage) (<-chan UpdateMeta, error)
+	Update(common.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() curve.Point

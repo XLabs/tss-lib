@@ -3,7 +3,6 @@ package party
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,21 +84,15 @@ var (
 
 // storeMessage sets the message in internal storage, allowing the session time to consume
 // the message later, when it is ready to do so.
-func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
-	slog.Debug("storing message",
-		slog.String("ID", signer.self.GetID()),
-		slog.String("type", message.Type()),
-		slog.String("from", message.GetFrom().GetID()),
-	)
+func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.Error {
 	if !message.ValidateBasic() {
 		return common.NewTrackableError(
 			errInvalidMessage,
-			"storeMessage:validate",
+			"storeMessage",
 			int(signer.getRound()),
 			signer.self,
 			signer.trackingId,
-
-			message.GetFrom(), // culprit
+			message.GetFrom(), // possible culprit
 		)
 	}
 
@@ -114,16 +107,30 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 	msgRnd := round.Number(message.Content().RoundNumber())
 
 	if msgRnd > frost.NumRounds {
-		return errRoundTooLarge
+		return common.NewTrackableError(
+			errRoundTooLarge,
+			"storeMessage:roundcheck",
+			int(signerRound),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
 	}
 
 	if msgRnd < signerRound {
-		return nil // nothing need to store.
+		return nil // nothing to store.
 	}
 
 	if msgRnd <= 1 {
 		// no messages are received for round 1.
-		return errRoundTooSmall
+		return common.NewTrackableError(
+			errRoundTooSmall,
+			"storeMessage:roundcheck",
+			int(signerRound),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
 	}
 
 	if _, ok := signer.messages[msgRnd]; !ok {
@@ -243,7 +250,6 @@ var errFirstRoundCantFinalize = errors.New("first round can't finalize")
 // attemptRoundFinalize is a thread-UNSAFE attempt to finalize the round. if the round was the protocol's final round,
 // return true.
 func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Error) {
-
 	if signer.session == nil {
 		return finalizeReport{}, common.NewTrackableError(
 			errNilSigner,
@@ -319,11 +325,15 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 		)
 	}
 
+	advanced := roundNumberBeforeFinalization != newRound.Number()
+	if !sessionComplete && roundNumberBeforeFinalization == 2 {
+		fmt.Println("")
+	}
 	// Updating the report.
 	report = finalizeReport{
 		// if the session was in final round, and advanced -> this session is done.
 		isSessionComplete: sessionComplete,
-		advancedRound:     roundNumberBeforeFinalization != newRound.Number(),
+		advancedRound:     advanced,
 		currentRound:      newRound.Number(),
 	}
 
@@ -335,7 +345,6 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 
 var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
-	errSigNotOfCorrectType        = errors.New("session final round failed: not of type frost.Signature")
 )
 
 func (signer *singleSession) extractOutput() (any, *common.Error) {

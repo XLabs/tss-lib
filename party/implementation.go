@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -185,7 +186,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 }
 
 // advanceSession will consume messages, and attempt to finalize the session.
-func (p *Impl) advanceSession(session *singleSession) UpdateMeta {
+func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	var err *common.Error
 	var report finalizeReport
 
@@ -193,27 +194,29 @@ func (p *Impl) advanceSession(session *singleSession) UpdateMeta {
 	// if advanced one round -> attempt to do so again(unless session is completed).
 	for ok := true; ok; ok = report.advancedRound && !report.isSessionComplete {
 		if report, err = session.advanceOnce(); err != nil {
-			return UpdateMeta{Error: err}
+			return err
 		}
+
+		p.logReport(session, report)
 	}
 
 	if !report.isSessionComplete {
-		return UpdateMeta{
-			AdvancedRound:      report.advancedRound,
-			CurrentRoundNumber: int(report.currentRound),
-			SignerState:        set.String(),
-		}
+		return nil
 	}
+
+	// after session end, either with success or error, we remove it from the session map.
+	p.sessionMap.deleteSession(session)
 
 	// Finalizing the session.
 	out, err := session.extractOutput()
 	if err != nil {
-		return UpdateMeta{Error: err}
+		return err
 	}
 
 	switch res := out.(type) {
 	case *frost.Config:
 		p.outputKeygen(res)
+
 	case frost.Signature:
 		err = p.outputSig(res, session)
 	default:
@@ -226,16 +229,7 @@ func (p *Impl) advanceSession(session *singleSession) UpdateMeta {
 		)
 	}
 
-	// after session end, either with success or error, we remove it from the session map.
-	p.sessionMap.deleteSession(session)
-
-	return UpdateMeta{
-		AdvancedRound:      report.advancedRound,
-		CurrentRoundNumber: int(session.getRound()),
-		SignerState:        set.String(),
-
-		Error: err,
-	}
+	return err
 }
 
 func (p *Impl) outputKeygen(res *frost.Config) {
@@ -353,36 +347,30 @@ func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
 
 type feedMessageTask struct {
 	message common.ParsedMessage
-	result  chan UpdateMeta
 }
 
-func (p *Impl) Update(message common.ParsedMessage) (<-chan UpdateMeta, error) {
-	answerChan := make(chan UpdateMeta, 1)
-
+func (p *Impl) Update(message common.ParsedMessage) error {
 	select {
-	case p.incomingMessagesChannel <- feedMessageTask{message: message, result: answerChan}:
-		return answerChan, nil
+	case p.incomingMessagesChannel <- feedMessageTask{message: message}:
+		return nil
 	case <-p.ctx.Done():
-		close(answerChan) // ensures no one will block waiting on the channel.
-
-		return answerChan, p.ctx.Err()
+		return p.ctx.Err()
 	}
 }
 
 func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	// assumes the message has a tracking ID.
 	message := task.message
+
 	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
 	if err != nil {
-		task.result <- UpdateMeta{
-			Error: common.NewTrackableError(
-				err,
-				"handleFrostMessage",
-				-1,
-				message.GetFrom(),
-				message.WireMsg().GetTrackingID(),
-			),
-		}
+		p.outputErr(common.NewTrackableError(
+			err,
+			"handleFrostMessage",
+			-1,
+			message.GetFrom(),
+			message.WireMsg().GetTrackingID(),
+		))
 
 		return
 	}
@@ -391,29 +379,49 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	if state == notInCommittee {
 		// no need to store the message since the signer is not in the committee.
 
-		task.result <- UpdateMeta{ // updating the task result.
-			SignerState: unset.String(),
-		}
+		return // no issues, and nothing to report.
+	}
+
+	if err := signer.storeMessage(message); err != nil {
+		p.outputErr(err)
 
 		return
 	}
-
-	signer.storeMessage(message)
 
 	if state != set {
 		// not allowed to consume/ finalize messages.
-
-		task.result <- UpdateMeta{
-			AdvancedRound:      false,
-			CurrentRoundNumber: 0,
-			SignerState:        state.String(),
-		}
-
 		return
 	}
 
-	task.result <- p.advanceSession(signer)
+	if err := p.advanceSession(signer); err != nil {
+		p.reportError(err)
 
+		return
+	}
+}
+
+func (p *Impl) logReport(signer *singleSession, report finalizeReport) {
+	if report.isSessionComplete {
+		slog.Debug("session completed",
+			slog.String("trackingID", signer.trackingId.ToString()),
+		)
+	} else if report.advancedRound {
+		slog.Debug("session advanced",
+			slog.String("trackingID", signer.trackingId.ToString()),
+			slog.Int64("round", int64(signer.getRound())),
+		)
+	}
+}
+
+func (p *Impl) outputErr(err *common.Error) {
+	if err == nil {
+		return // nothing to report.
+	}
+
+	select {
+	case p.errorChannel <- err:
+	case <-p.ctx.Done():
+	}
 }
 
 func (p *Impl) reportError(newError *common.Error) {
@@ -543,7 +551,6 @@ func (p *Impl) StartDKG(threshold int, seed Digest) error {
 	})
 
 	s, err := p.getOrCreateSingleSession(tid)
-
 	if err != nil {
 		return common.NewError(
 			err,
@@ -557,7 +564,12 @@ func (p *Impl) StartDKG(threshold int, seed Digest) error {
 		return err
 	}
 
-	_ = p.advanceSession(s) // ignoring the metaupdate.
+	// checking for nil since returning a nil *common.Error via error interface isn't treated
+	// as nil by go interface semantics.
+	if err := p.advanceSession(s); err != nil {
+		return err
+	}
+
 	return nil
 }
 

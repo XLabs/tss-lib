@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
-	"github.com/xlabs/multi-party-sig/protocols/frost/keygen"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 
@@ -458,7 +457,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 			if !verified {
 				a.True(validateSignature(anyParty.GetPublic(), m, d[:]))
 				n.digestsToVerify[d] = true
-				fmt.Println("Signature validated correctly.", m)
+				fmt.Println("Signature validated correctly.", m.TrackingId)
 				continue
 			}
 
@@ -494,9 +493,6 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 		panic("invalid message received, can't store it, or process it further")
 	}
 
-	if _, ok := newMsg.Content().(*keygen.Message3); ok {
-		fmt.Println("")
-	}
 	bz, routing, err := newMsg.WireBytes()
 	if expectErr && err != nil {
 		return
@@ -513,7 +509,8 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 			if routing.From.GetID() == pID {
 				continue
 			}
-			_, err = p.Update(parsedMsg)
+
+			err = p.Update(parsedMsg)
 			if expectErr && err != nil {
 				continue
 			}
@@ -529,7 +526,8 @@ func passMsg(a *assert.Assertions, newMsg common.ParsedMessage, idToParty map[st
 	}
 
 	to := routing.To
-	_, err = idToParty[to.GetID()].Update(parsedMsg)
+
+	err = idToParty[to.GetID()].Update(parsedMsg)
 	if expectErr && err != nil {
 		return
 	}
@@ -974,23 +972,18 @@ func TestErrorsInUpdate(t *testing.T) {
 				p := p
 				m := m
 				go func() {
-					Update, err := p.Update(m)
-					if err != nil {
+					if err := p.Update(m); err != nil {
 						return
 					}
-
-					meta := <-Update
-					if meta.Error != nil {
-						success.Store(true)
-					}
-
-					fmt.Println("update:", <-Update)
 				}()
 			}
+
+		case err := <-errchan:
+			fmt.Println("sucess, received error:", err)
+			// this is a sucess.
+			return
 		}
-
 	}
-
 }
 
 func TestKeygen(t *testing.T) {
@@ -1015,7 +1008,7 @@ func TestKeygen(t *testing.T) {
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: map[Digest]bool{},
 
-		Timeout:   time.Second * 40000,
+		Timeout:   time.Second * 10,
 		expectErr: false,
 	}
 
@@ -1042,5 +1035,4 @@ func TestKeygen(t *testing.T) {
 
 	<-donechn
 	fmt.Println("Waiting for DKG to finish...")
-
 }
