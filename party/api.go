@@ -84,12 +84,13 @@ type FullParty interface {
 	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
 	GetSigningInfo(s SigningTask) (*SigningInfo, error)
 
-	// StartDKG starts the DKG protocol with the given seed as
+	// StartDKG starts the DKG protocol.
 	//
 	// threshold represents the maximal number that will not be able to sign. For instance,
 	// if threshold is 2, then 3 or more parties will be able to sign.
-	// Seed is used to give an identifier to the running DKG protocol (more than one can run at the same time).
-	StartDKG(threshold int, seed Digest) error // TODO: consider returning more information, like trackingID.
+	// Seed is used to give generate a trackingID as an identifier to
+	// the running DKG protocol (more than one can run at the same time).
+	StartDKG(threshold int, seed Digest) error // TODO: consider returning more information, like the trackingID.
 }
 
 // NewFullParty returns a new FullParty instance.
