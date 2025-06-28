@@ -325,15 +325,11 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 		)
 	}
 
-	advanced := roundNumberBeforeFinalization != newRound.Number()
-	if !sessionComplete && roundNumberBeforeFinalization == 2 {
-		fmt.Println("")
-	}
 	// Updating the report.
 	report = finalizeReport{
 		// if the session was in final round, and advanced -> this session is done.
 		isSessionComplete: sessionComplete,
-		advancedRound:     advanced,
+		advancedRound:     roundNumberBeforeFinalization != newRound.Number(),
 		currentRound:      newRound.Number(),
 	}
 

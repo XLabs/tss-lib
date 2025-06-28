@@ -448,7 +448,6 @@ func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
 	dgst := Digest{}
 	copy(dgst[:], s.Digest[:])
 
-	// TODO: Discuss what happens upon config change. maybe trackID should contain the hash of config? (sessions with the tracking ID but unmatching configs will fail.)
 	tid := &common.TrackingID{
 		Digest:       dgst[:],
 		PartiesState: common.ConvertBoolArrayToByteArray(pids),
