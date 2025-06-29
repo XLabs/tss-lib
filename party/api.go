@@ -59,7 +59,7 @@ type StartParams struct {
 	KeygenOutputChannel chan *frost.Config
 
 	// ErrChannel reports any errors that occur during the protocol execution.
-	ErrChannel chan<- *common.Error
+	ErrChannel chan *common.Error
 }
 
 type FullParty interface {
