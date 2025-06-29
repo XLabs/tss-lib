@@ -25,6 +25,11 @@ type strPartyID string
 
 type messageKeep [2]common.ParsedMessage
 
+// SingleSession represents a single invocation of a distributed protocol.
+// It handles the state of the session (whether it is set, unset, or not in committee) and can start advancing rounds.
+// It ensures safe concurrent access, and easy to use methods for storing or consuming messages.
+// The SingleSession holds metadata, along a round.Session interface. This interface represents the current round of a running
+// protocol, once a round is finalized, the session will be updated to the next round.
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
@@ -247,14 +252,6 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 
 // consumeMessage is thread-UNSAFE and will attempt to consume the given message.
 func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
-	// Since frost.keygen and frost.signing are both broadcast rounds,
-	// we can safely cast the session to BroadcastRound.
-	// TODO: Support non-broadcast sessions in the future.
-	r, ok := signer.session.(round.BroadcastRound)
-	if !ok {
-		return errShouldBeBroadcastRound
-	}
-
 	m := round.Message{
 		From:       party.ID(msg.GetFrom().GetID()),
 		Broadcast:  msg.IsBroadcast(),
@@ -265,11 +262,17 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 	// The following storing (Both StoreMessage and StoreBroadcastMessage methods) of
 	//  messages may perform some necessary checks and might even run
 	// some cryptographic computations (depending on the protocol).
-	if m.Broadcast {
-		return r.StoreBroadcastMessage(m)
+	if !m.Broadcast {
+		return signer.session.StoreMessage(m)
 	}
 
-	return r.StoreMessage(m)
+	// extends round.Round and can accept broadcast messages.
+	r, ok := signer.session.(round.BroadcastRound)
+	if !ok {
+		return errShouldBeBroadcastRound
+	}
+
+	return r.StoreBroadcastMessage(m)
 }
 
 func (signer *singleSession) getRound() round.Number {
