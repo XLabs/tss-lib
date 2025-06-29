@@ -177,7 +177,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 		return
 	}
 
-	if signer.getState() != set {
+	if signer.getState() != activated {
 		return // not in committee, or, any other reason
 	}
 
@@ -238,7 +238,7 @@ func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) er
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	if signer.getState() != unset {
+	if signer.getState() != awaitingActivation {
 		return nil
 	}
 
@@ -249,7 +249,7 @@ func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) er
 	}
 
 	// set the state to "set" (in committee).
-	signer.state.Store(int64(set))
+	signer.state.Store(int64(activated))
 
 	sessionCreator := frost.Sign(config, pids2IDs(signer.committee), signer.digest[:])
 
@@ -380,7 +380,7 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 		return
 	}
 
-	if state != set {
+	if state != activated {
 		// not allowed to consume/ finalize messages.
 		return
 	}
@@ -551,7 +551,7 @@ func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
 
 	s.session = session
 
-	s.state.Store(int64(set))
+	s.state.Store(int64(activated))
 
 	return nil
 }

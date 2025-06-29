@@ -15,18 +15,12 @@ import (
 
 type signerState int
 
-const (
-	unset signerState = iota
-	set
-	notInCommittee
-)
-
 type strPartyID string
 
 type messageKeep [2]common.ParsedMessage
 
 // SingleSession represents a single invocation of a distributed protocol.
-// It handles the state of the session (whether it is set, unset, or not in committee) and can start advancing rounds.
+// It handles the state of the session (whether it is activated, awaitingActivation, or not in committee) and can start advancing rounds.
 // It ensures safe concurrent access, and easy to use methods for storing or consuming messages.
 // The SingleSession holds metadata, along a round.Session interface. This interface represents the current round of a running
 // protocol, once a round is finalized, the session will be updated to the next round.
@@ -37,7 +31,7 @@ type singleSession struct {
 
 	isKeygenSession bool
 
-	// the state of the signer. can be one of { unset, set, notInCommittee }.
+	// the state of the signer. can be one of { awaitingActivation, activated, notInCommittee }.
 	state atomic.Int64
 
 	digest Digest
@@ -64,10 +58,10 @@ type singleSession struct {
 
 func (s signerState) String() string {
 	switch s {
-	case unset:
-		return "unset"
-	case set:
-		return "set"
+	case awaitingActivation:
+		return "awaitingActivation"
+	case activated:
+		return "activated"
 	case notInCommittee:
 		return "notInCommittee"
 	default:
@@ -111,7 +105,7 @@ var (
 
 	errNilSigner              = errors.New("nil signer")
 	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
-	errSignerNotSet           = errors.New("signer is not set")
+	errSignerNotactivated     = errors.New("signer is not activated")
 	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
 
@@ -200,9 +194,9 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
 	}
 
-	if signer.getState() != set {
+	if signer.getState() != activated {
 		return common.NewError(
-			errSignerNotSet,
+			errSignerNotactivated,
 			"consumeStoredMessages:statecheck",
 			int(signer.session.Number()),
 			nil,
@@ -307,9 +301,9 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 		)
 	}
 
-	if signer.getState() != set {
+	if signer.getState() != activated {
 		return finalizeReport{}, common.NewError(
-			errSignerNotSet,
+			errSignerNotactivated,
 			"attemptRoundFinalize:statecheck",
 			int(signer.session.Number()),
 			nil,

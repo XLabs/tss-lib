@@ -19,3 +19,9 @@ const (
 	directMessagePos    = 0
 	broadcastMessagePos = 1
 )
+
+const (
+	awaitingActivation signerState = iota
+	activated
+	notInCommittee
+)
