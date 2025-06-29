@@ -208,28 +208,20 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	p.sessionMap.deleteSession(session)
 
 	// Finalizing the session.
-	out, err := session.extractOutput()
+	conf, sig, err := session.extractOutput()
 	if err != nil {
 		return err
 	}
 
-	switch res := out.(type) {
-	case *frost.Config:
-		p.outputKeygen(res)
-
-	case frost.Signature:
-		err = p.outputSig(res, session)
-	default:
-		err = common.NewTrackableError(
-			fmt.Errorf("unknown output type: %T", out),
-			"advanceSession:output",
-			unknownRound,
-			session.self,
-			session.trackingId,
-		)
+	if conf != nil {
+		p.outputKeygen(conf)
 	}
 
-	return err
+	if sig != nil {
+		return p.outputSig(*sig, session)
+	}
+
+	return nil
 }
 
 func (p *Impl) outputKeygen(res *frost.Config) {

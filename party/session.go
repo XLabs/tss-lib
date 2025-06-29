@@ -387,33 +387,45 @@ var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
 )
 
-func (signer *singleSession) extractOutput() (any, *common.Error) {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
+func (session *singleSession) extractOutput() (*frost.Config, *frost.Signature, *common.Error) {
+	session.mtx.Lock()
+	defer session.mtx.Unlock()
 
-	if signer.session == nil {
-		return nil, common.NewTrackableError(
+	if session.session == nil {
+		return nil, nil, common.NewTrackableError(
 			errNilSigner,
 			"extractSignature:sessionNil",
 			-1,
-			signer.self,
-			signer.trackingId,
+			session.self,
+			session.trackingId,
 		)
 	}
 
-	r, ok := signer.session.(*round.Output)
+	r, ok := session.session.(*round.Output)
 	if !ok {
-		return nil, common.NewTrackableError(
+		return nil, nil, common.NewTrackableError(
 			errFinalRoundNotOfCorrectType,
 			"extractSignature:roundConvert",
 			-1,
-			signer.self,
-			signer.trackingId,
+			session.self,
+			session.trackingId,
 		)
 	}
 
-	return r.Result, nil
-
+	switch res := r.Result.(type) {
+	case *frost.Config:
+		return res, nil, nil
+	case frost.Signature:
+		return nil, &res, nil
+	default:
+		return nil, nil, common.NewTrackableError(
+			fmt.Errorf("unknown output type: %T", res),
+			"advanceSession:output",
+			unknownRound,
+			session.self,
+			session.trackingId,
+		)
+	}
 }
 
 // advanceOnce is a thread-SAFE method that will attempt to finalize the current round.
