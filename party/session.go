@@ -247,7 +247,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 
 // consumeMessage is thread-UNSAFE and will attempt to consume the given message.
 func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
-	// Since FROST.keygen and FROST.signing are both broadcast rounds,
+	// Since frost.keygen and frost.signing are both broadcast rounds,
 	// we can safely cast the session to BroadcastRound.
 	// TODO: Support non-broadcast sessions in the future.
 	r, ok := signer.session.(round.BroadcastRound)

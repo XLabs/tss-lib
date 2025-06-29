@@ -95,7 +95,7 @@ var (
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
-func (p *Impl) Start(params StartParams) error {
+func (p *Impl) Start(params OutputChannels) error {
 	if params.OutChannel == nil ||
 		params.SignatureOutputChannel == nil ||
 		params.ErrChannel == nil {
@@ -431,32 +431,6 @@ func (p *Impl) reportError(newError *common.Error) {
 	}
 }
 
-func (p *Impl) createTrackingID(s SigningTask) *common.TrackingID {
-	offlineMap := map[string]bool{}
-	for _, v := range s.Faulties {
-		offlineMap[string(v.GetID())] = true
-	}
-
-	pids := make([]bool, len(p.peers))
-
-	for i, v := range p.peers {
-		if !offlineMap[string(v.GetID())] {
-			pids[i] = true
-		}
-	}
-
-	dgst := Digest{}
-	copy(dgst[:], s.Digest[:])
-
-	tid := &common.TrackingID{
-		Digest:       dgst[:],
-		PartiesState: common.ConvertBoolArrayToByteArray(pids),
-		AuxilaryData: s.AuxilaryData,
-	}
-
-	return tid
-}
-
 var errInvalidTrackingID = errors.New("invalid tracking id")
 
 // returns the parties that can still be part of the committee.
@@ -533,21 +507,16 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 
 var errDKGIssue = errors.New("FullParty has bad configurations. Cannot start DKG protocol")
 
-func (p *Impl) StartDKG(threshold int, seed Digest) error {
+func (p *Impl) StartDKG(task DkgTask) error {
 	if p.keygenout == nil {
 		return errDKGIssue
 	}
 
-	if len(p.peers) < threshold {
-		return fmt.Errorf("not enough parties to start DKG: %d < %d", len(p.peers), threshold+1)
+	if len(p.peers) < task.Threshold {
+		return fmt.Errorf("not enough parties to start DKG. Need at least: %d", task.Threshold+1)
 	}
 
-	// TODO: Consider renaming `SigningTask` struct?
-	tid := p.createTrackingID(SigningTask{
-		Digest:       seed,
-		AuxilaryData: nil, // auxilary data is not used in DKG.
-		Faulties:     nil, // no faulties in DKG.
-	})
+	tid := p.createTrackingID(task)
 
 	s, err := p.getOrCreateSingleSession(tid)
 	if err != nil {
@@ -559,7 +528,7 @@ func (p *Impl) StartDKG(threshold int, seed Digest) error {
 		)
 	}
 
-	if err := p.setKeygenSession(s, threshold); err != nil {
+	if err := p.setKeygenSession(s, task.Threshold); err != nil {
 		return err
 	}
 

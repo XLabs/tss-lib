@@ -93,7 +93,7 @@ func (st *signerTester) run(t *testing.T) {
 
 	for _, p := range parties {
 		a.NoError(
-			p.Start(StartParams{
+			p.Start(OutputChannels{
 				OutChannel:             n.outchan,
 				SignatureOutputChannel: n.sigchan,
 				KeygenOutputChannel:    make(chan *frost.Config),
@@ -150,7 +150,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -219,7 +219,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -280,7 +280,7 @@ func testLateParties(t *testing.T, numLate int) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -348,7 +348,7 @@ func TestCleanup(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -649,7 +649,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	goroutinesstart := runtime.NumGoroutine()
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -719,7 +719,7 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -791,7 +791,7 @@ func TestChangingCommittee(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -930,7 +930,7 @@ func TestErrorsInUpdate(t *testing.T) {
 	errchan := make(chan *common.Error, 1)
 
 	for _, v := range parties {
-		v.Start(StartParams{
+		v.Start(OutputChannels{
 			OutChannel:             outchan,
 			SignatureOutputChannel: sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config),
@@ -1018,7 +1018,7 @@ func testKeygen(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config, 100),
@@ -1035,7 +1035,10 @@ func testKeygen(t *testing.T) {
 	}()
 
 	for _, p := range parties {
-		if err := p.StartDKG(threshold, Digest{1, 2, 3, 4}); err != nil {
+		if err := p.StartDKG(DkgTask{
+			Threshold: threshold,
+			Seed:      Digest{1, 2, 3, 4},
+		}); err != nil {
 			panic(err)
 		}
 	}
@@ -1074,7 +1077,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(StartParams{
+		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
 			KeygenOutputChannel:    make(chan *frost.Config, 100),
@@ -1092,14 +1095,20 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	}()
 
 	for _, p := range parties[:participants-1] {
-		if err := p.StartDKG(threshold, Digest{1, 2, 3, 4}); err != nil {
+		if err := p.StartDKG(DkgTask{
+			Threshold: threshold,
+			Seed:      Digest{1, 2, 3, 4},
+		}); err != nil {
 			panic(err)
 		}
 	}
 
 	time.Sleep(time.Second * 5)
 	for _, p := range parties[participants-1:] {
-		if err := p.StartDKG(threshold, Digest{1, 2, 3, 4}); err != nil {
+		if err := p.StartDKG(DkgTask{
+			Threshold: threshold,
+			Seed:      Digest{1, 2, 3, 4},
+		}); err != nil {
 			panic(err)
 		}
 	}

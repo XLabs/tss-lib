@@ -37,15 +37,24 @@ type SigningTask struct {
 	AuxilaryData []byte            // can be nil
 }
 
+type DkgTask struct {
+	Threshold int
+
+	// used to generate a trackingID for the DKG protocol.
+	// should match the seed used by all FullParties that run the DKG protocol.
+	Seed Digest
+}
+
 type SigningInfo struct {
 	SigningCommittee common.SortedPartyIDs
 	TrackingID       *common.TrackingID
 	IsSigner         bool
 }
 
-// StartParams Contains the channels the FullParty will use to
+// OutputChannels Contains the channels the FullParty will use to
 // communicate with the outside world.
-type StartParams struct {
+// the FullParty expects these channels to be listened to by the user.
+type OutputChannels struct {
 	// OutChannel delivers messages that should be sent over the network—
 	// either broadcast using the Reliable Broadcast protocol (or Hash-Broadcast)
 	// or uni-cast.
@@ -65,7 +74,7 @@ type StartParams struct {
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
 	// goroutines).
-	Start(StartParams) error
+	Start(OutputChannels) error
 
 	// Stop stops the FullParty, and closes its sub-components.
 	Stop()
@@ -90,7 +99,7 @@ type FullParty interface {
 	// if threshold is 2, then 3 or more parties will be able to sign.
 	// Seed is used to give generate a trackingID as an identifier to
 	// the running DKG protocol (more than one can run at the same time).
-	StartDKG(threshold int, seed Digest) error // TODO: consider returning more information, like the trackingID.
+	StartDKG(DkgTask) error // TODO: consider returning more information, like the trackingID.
 }
 
 // NewFullParty returns a new FullParty instance.
