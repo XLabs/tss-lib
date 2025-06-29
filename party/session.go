@@ -77,9 +77,9 @@ func (s *singleSession) getInitTime() time.Time {
 var errMessageEntryFull = errors.New("message entry already contains something")
 
 func (r *messageKeep) addMsg(message common.ParsedMessage) error {
-	cell := 0
+	cell := directMessagePos
 	if message.IsBroadcast() {
-		cell += 1 // chose arbitrary cell position for the broadcast messages.
+		cell = broadcastMessagePos
 	}
 
 	// ensure cell is empty
@@ -110,7 +110,7 @@ var (
 	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
 
-// storeMessage sets the message in internal storage, allowing the session time to consume
+// storeMessage stores the message in internal storage, allowing the session time to consume
 // the message later, when it is ready to do so.
 func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.Error {
 	if !message.ValidateBasic() {
@@ -118,6 +118,31 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 			errInvalidMessage,
 			"storeMessage",
 			int(signer.getRound()),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
+	}
+
+	msgRnd := round.Number(message.Content().RoundNumber())
+
+	if msgRnd > frost.NumRounds {
+		return common.NewTrackableError(
+			errRoundTooLarge,
+			"storeMessage:roundcheck",
+			unknownRound,
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
+	}
+
+	if msgRnd <= 1 {
+		// no messages are received for round 1.
+		return common.NewTrackableError(
+			errRoundTooSmall,
+			"storeMessage:roundcheck",
+			unknownRound,
 			signer.self,
 			signer.trackingId,
 			message.GetFrom(), // possible culprit
@@ -132,33 +157,8 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 		signerRound = signer.session.Number()
 	}
 
-	msgRnd := round.Number(message.Content().RoundNumber())
-
-	if msgRnd > frost.NumRounds {
-		return common.NewTrackableError(
-			errRoundTooLarge,
-			"storeMessage:roundcheck",
-			int(signerRound),
-			signer.self,
-			signer.trackingId,
-			message.GetFrom(), // possible culprit
-		)
-	}
-
 	if msgRnd < signerRound {
 		return nil // nothing to store.
-	}
-
-	if msgRnd <= 1 {
-		// no messages are received for round 1.
-		return common.NewTrackableError(
-			errRoundTooSmall,
-			"storeMessage:roundcheck",
-			int(signerRound),
-			signer.self,
-			signer.trackingId,
-			message.GetFrom(), // possible culprit
-		)
 	}
 
 	if _, ok := signer.messages[msgRnd]; !ok {

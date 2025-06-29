@@ -223,7 +223,7 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 		err = common.NewTrackableError(
 			fmt.Errorf("unknown output type: %T", out),
 			"advanceSession:output",
-			-1,
+			unknownRound,
 			session.self,
 			session.trackingId,
 		)
@@ -367,7 +367,7 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 		p.outputErr(common.NewTrackableError(
 			err,
 			"handleFrostMessage",
-			-1,
+			unknownRound,
 			message.GetFrom(),
 			message.WireMsg().GetTrackingID(),
 		))
@@ -474,7 +474,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 		return common.NewTrackableError(
 			err,
 			"outputSig",
-			-1,
+			unknownRound,
 			signer.self,
 			signer.trackingId,
 		)
@@ -485,7 +485,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 		return common.NewTrackableError(
 			err,
 			"outputSig",
-			-1,
+			unknownRound,
 			signer.self,
 			signer.trackingId,
 		)
