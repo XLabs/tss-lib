@@ -23,6 +23,8 @@ const (
 
 type strPartyID string
 
+type messageKeep [2]common.ParsedMessage
+
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
@@ -38,7 +40,7 @@ type singleSession struct {
 	// this index is unique, and is used to identify the signer.
 	trackingId *common.TrackingID
 
-	messages map[round.Number]map[strPartyID]common.ParsedMessage
+	messages map[round.Number]map[strPartyID]*messageKeep
 
 	committee common.SortedPartyIDs
 	self      *common.PartyID
@@ -70,6 +72,32 @@ func (s signerState) String() string {
 
 func (s *singleSession) getInitTime() time.Time {
 	return s.startTime // read only value.
+}
+
+var errMessageEntryFull = errors.New("message entry already contains something")
+
+func (r *messageKeep) addMsg(message common.ParsedMessage) error {
+	cell := 0
+	if message.IsBroadcast() {
+		cell += 1 // chose arbitrary cell position for the broadcast messages.
+	}
+
+	// ensure cell is empty
+	if r[cell] != nil {
+		return errMessageEntryFull
+	}
+
+	r[cell] = message
+
+	return nil
+}
+
+func (r *messageKeep) getMsgs() []common.ParsedMessage {
+	if r == nil {
+		return nil // no messages stored.
+	}
+
+	return (*r)[:]
 }
 
 var (
@@ -134,12 +162,24 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 	}
 
 	if _, ok := signer.messages[msgRnd]; !ok {
-		signer.messages[msgRnd] = make(map[strPartyID]common.ParsedMessage)
+		signer.messages[msgRnd] = make(map[strPartyID]*messageKeep)
 	}
 
 	from := strPartyID(message.GetFrom().ToString())
+
 	if _, ok := signer.messages[msgRnd][from]; !ok {
-		signer.messages[msgRnd][from] = message
+		signer.messages[msgRnd][from] = &messageKeep{}
+	}
+
+	if err := signer.messages[msgRnd][from].addMsg(message); err != nil {
+		return common.NewTrackableError(
+			err,
+			"storeMessage",
+			int(signerRound),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
 	}
 
 	return nil
@@ -173,28 +213,32 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	if _, ok := signer.messages[rnd]; !ok {
-		signer.messages[rnd] = make(map[strPartyID]common.ParsedMessage)
+		signer.messages[rnd] = make(map[strPartyID]*messageKeep)
 	}
 
 	mp := signer.messages[rnd]
 
-	for key, msg := range mp {
-		if msg == nil {
-			continue
-		}
+	for key, msgs := range mp {
+		msgs.getMsgs()
 
-		delete(mp, key) // remove the message from the map.
+		delete(mp, key) // remove the message store from the map.
 
-		if err := signer.consumeMessage(msg); err != nil {
-			return common.NewTrackableError(
-				err,
-				"consumeStoredMessages:consume",
-				int(signer.session.Number()),
-				signer.self,
-				signer.trackingId,
+		for _, msg := range msgs.getMsgs() {
+			if msg == nil {
+				continue // skip nil messages.
+			}
 
-				msg.GetFrom(), // possible culprit
-			)
+			if err := signer.consumeMessage(msg); err != nil {
+				return common.NewTrackableError(
+					err,
+					"consumeStoredMessages:consume",
+					int(signer.session.Number()),
+					signer.self,
+					signer.trackingId,
+
+					msg.GetFrom(), // possible culprit
+				)
+			}
 		}
 	}
 

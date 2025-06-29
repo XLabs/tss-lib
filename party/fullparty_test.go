@@ -383,9 +383,9 @@ func getLen(m *sync.Map) int {
 }
 
 type networkSimulator struct {
-	outchan         chan common.ParsedMessage
-	sigchan         chan *common.SignatureData
-	dkgChan         chan *frost.Config
+	outchan chan common.ParsedMessage
+	sigchan chan *common.SignatureData
+
 	errchan         chan *common.Error
 	idToFullParty   map[string]FullParty
 	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
@@ -414,11 +414,15 @@ func idToParty(parties []FullParty) map[string]FullParty {
 	return idToFullParty
 }
 
-func (n *networkSimulator) run(a *assert.Assertions) {
+func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) {
 	var anyParty FullParty
 	for _, p := range n.idToFullParty {
 		anyParty = p
 		break
+	}
+	var dnchn chan struct{} = nil
+	if len(donechan) > 0 {
+		dnchn = donechan[0]
 	}
 
 	a.NotNil(anyParty)
@@ -443,10 +447,7 @@ func (n *networkSimulator) run(a *assert.Assertions) {
 		case newMsg := <-n.outchan:
 			passMsg(a, newMsg, n.idToFullParty, n.expectErr)
 
-		case m := <-n.dkgChan:
-			// DKG message received, end of test.
-			fmt.Println(m)
-
+		case <-dnchn:
 			return
 		case m := <-n.sigchan:
 			d := Digest{}
@@ -987,6 +988,11 @@ func TestErrorsInUpdate(t *testing.T) {
 }
 
 func TestKeygen(t *testing.T) {
+	t.Run("keygen", testKeygen)
+
+	t.Run("keygen with one late party", testKeygenWithOneLateParty)
+}
+func testKeygen(t *testing.T) {
 	a := assert.New(t)
 
 	participants := 5
@@ -994,7 +1000,7 @@ func TestKeygen(t *testing.T) {
 
 	parties, _ := createFullParties(a, participants, threshold)
 
-	maxTTL := time.Second * 1
+	maxTTL := time.Minute * 1
 	for _, impl := range parties {
 		impl.(*Impl).maxTTl = maxTTL
 	}
@@ -1002,13 +1008,12 @@ func TestKeygen(t *testing.T) {
 	n := networkSimulator{
 		outchan: make(chan common.ParsedMessage, len(parties)*20),
 		sigchan: make(chan *common.SignatureData),
-		dkgChan: make(chan *frost.Config, len(parties)),
 		errchan: make(chan *common.Error, len(parties)),
 
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: map[Digest]bool{},
 
-		Timeout:   time.Second * 10,
+		Timeout:   0,
 		expectErr: false,
 	}
 
@@ -1016,15 +1021,17 @@ func TestKeygen(t *testing.T) {
 		a.NoError(p.Start(StartParams{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    n.dkgChan,
+			KeygenOutputChannel:    make(chan *frost.Config, 100),
 			ErrChannel:             n.errchan,
 		}))
 	}
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	donechn := make(chan struct{})
 	go func() {
-		n.run(a)
-		close(donechn)
+		defer wg.Done()
+		n.run(a, donechn)
 	}()
 
 	for _, p := range parties {
@@ -1033,6 +1040,90 @@ func TestKeygen(t *testing.T) {
 		}
 	}
 
-	<-donechn
+	waitforDKG(parties, a)
+	close(donechn)
+	wg.Wait()
+
+}
+
+func testKeygenWithOneLateParty(t *testing.T) {
+
+	a := assert.New(t)
+
+	participants := 5
+	threshold := 2
+
+	parties, _ := createFullParties(a, participants, threshold)
+
+	maxTTL := time.Minute * 5
+	for _, impl := range parties {
+		impl.(*Impl).maxTTl = maxTTL
+	}
+
+	n := networkSimulator{
+		outchan: make(chan common.ParsedMessage, len(parties)*20),
+		sigchan: make(chan *common.SignatureData),
+
+		errchan: make(chan *common.Error, len(parties)),
+
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: map[Digest]bool{},
+
+		Timeout:   0, // no timeout on network.
+		expectErr: false,
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(StartParams{
+			OutChannel:             n.outchan,
+			SignatureOutputChannel: n.sigchan,
+			KeygenOutputChannel:    make(chan *frost.Config, 100),
+			ErrChannel:             n.errchan,
+		}))
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	donechn := make(chan struct{})
+	go func() {
+		defer wg.Done()
+
+		n.run(a, donechn)
+	}()
+
+	for _, p := range parties[:participants-1] {
+		if err := p.StartDKG(threshold, Digest{1, 2, 3, 4}); err != nil {
+			panic(err)
+		}
+	}
+
+	time.Sleep(time.Second * 5)
+	for _, p := range parties[participants-1:] {
+		if err := p.StartDKG(threshold, Digest{1, 2, 3, 4}); err != nil {
+			panic(err)
+		}
+	}
 	fmt.Println("Waiting for DKG to finish...")
+
+	waitforDKG(parties, a)
+	close(donechn)
+	wg.Wait()
+}
+
+func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
+	timeout := time.After(time.Second * 10)
+	for _, p := range parties {
+		select {
+
+		case cnfg := <-p.(*Impl).keygenout:
+			if cnfg == nil {
+				a.FailNow("received nil config from keygen")
+			}
+		case <-timeout:
+			a.FailNow("timeout waiting for keygen to finish")
+
+			return true
+		}
+	}
+	return false
 }

@@ -293,7 +293,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		session: nil,
 
 		// first round doesn't receive messages (only round number 2,3)
-		messages: make(map[round.Number]map[strPartyID]common.ParsedMessage, frost.NumRounds-1),
+		messages: make(map[round.Number]map[strPartyID]*messageKeep, frost.NumRounds-1),
 
 		outputchan: p.outChan,
 		peersmap:   p.peersmap,
