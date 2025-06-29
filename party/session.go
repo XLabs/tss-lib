@@ -3,7 +3,6 @@ package party
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,20 +15,24 @@ import (
 
 type signerState int
 
-const (
-	unset signerState = iota
-	set
-	notInCommittee
-)
-
 type strPartyID string
 
+type messageKeep [2]common.ParsedMessage
+
+// SingleSession represents a single invocation of a distributed protocol.
+// It handles the protocol from start to finish. It holds the state of the protocol (whether it is
+// activated, awaiting activation, or not in committee).
+// The SingleSession offer thread-safe methods to store and consume messages, and to advance the protocol rounds.
+// It does so, by holding a round.Session interface (from the multi-part-sig package), which represents the
+// execution of a round-based protocol, and once a round is finalized, the session is advanced to the next round.
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
 	startTime time.Time
 
-	// the state of the signer. can be one of { unset, set, notInCommittee }.
+	isKeygenSession bool
+
+	// the state of the signer. can be one of { awaitingActivation, activated, notInCommittee }.
 	state atomic.Int64
 
 	digest Digest
@@ -37,7 +40,7 @@ type singleSession struct {
 	// this index is unique, and is used to identify the signer.
 	trackingId *common.TrackingID
 
-	messages map[round.Number]map[strPartyID]common.ParsedMessage
+	messages map[round.Number]map[strPartyID]*messageKeep
 
 	committee common.SortedPartyIDs
 	self      *common.PartyID
@@ -56,10 +59,10 @@ type singleSession struct {
 
 func (s signerState) String() string {
 	switch s {
-	case unset:
-		return "unset"
-	case set:
-		return "set"
+	case awaitingActivation:
+		return "awaitingActivation"
+	case activated:
+		return "activated"
 	case notInCommittee:
 		return "notInCommittee"
 	default:
@@ -71,23 +74,80 @@ func (s *singleSession) getInitTime() time.Time {
 	return s.startTime // read only value.
 }
 
+var errMessageEntryFull = errors.New("message entry already contains something")
+
+func (r *messageKeep) addMsg(message common.ParsedMessage) error {
+	cell := directMessagePos
+	if message.IsBroadcast() {
+		cell = broadcastMessagePos
+	}
+
+	// ensure cell is empty
+	if r[cell] != nil {
+		return errMessageEntryFull
+	}
+
+	r[cell] = message
+
+	return nil
+}
+
+func (r *messageKeep) getMsgs() []common.ParsedMessage {
+	if r == nil {
+		return nil // no messages stored.
+	}
+
+	return (*r)[:]
+}
+
 var (
 	errRoundTooLarge = errors.New("message round is greater than the session's final round")
 	errRoundTooSmall = errors.New("message round is smaller than smallest round that receives messages")
 
 	errNilSigner              = errors.New("nil signer")
 	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
-	errSignerNotSet           = errors.New("signer is not set")
+	errSignerNotactivated     = errors.New("signer is not activated")
+	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
 
-// storeMessage sets the message in internal storage, allowing the session time to consume
+// storeMessage stores the message in internal storage, allowing the session time to consume
 // the message later, when it is ready to do so.
-func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
-	slog.Debug("storing message",
-		slog.String("ID", signer.self.GetID()),
-		slog.String("type", message.Type()),
-		slog.String("from", message.GetFrom().GetID()),
-	)
+func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.Error {
+	if !message.ValidateBasic() {
+		return common.NewTrackableError(
+			errInvalidMessage,
+			"storeMessage",
+			int(signer.getRound()),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
+	}
+
+	msgRnd := round.Number(message.Content().RoundNumber())
+
+	if msgRnd > frost.NumRounds {
+		return common.NewTrackableError(
+			errRoundTooLarge,
+			"storeMessage:roundcheck",
+			unknownRound,
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
+	}
+
+	if msgRnd <= 1 {
+		// no messages are received for round 1.
+		return common.NewTrackableError(
+			errRoundTooSmall,
+			"storeMessage:roundcheck",
+			unknownRound,
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
+	}
 
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
@@ -97,28 +157,29 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) error {
 		signerRound = signer.session.Number()
 	}
 
-	msgRnd := round.Number(message.Content().RoundNumber())
-
-	if msgRnd > frost.NumRounds {
-		return errRoundTooLarge
-	}
-
 	if msgRnd < signerRound {
-		return nil // nothing need to store.
-	}
-
-	if msgRnd <= 1 {
-		// no messages are received for round 1.
-		return errRoundTooSmall
+		return nil // nothing to store.
 	}
 
 	if _, ok := signer.messages[msgRnd]; !ok {
-		signer.messages[msgRnd] = make(map[strPartyID]common.ParsedMessage)
+		signer.messages[msgRnd] = make(map[strPartyID]*messageKeep)
 	}
 
 	from := strPartyID(message.GetFrom().ToString())
+
 	if _, ok := signer.messages[msgRnd][from]; !ok {
-		signer.messages[msgRnd][from] = message
+		signer.messages[msgRnd][from] = &messageKeep{}
+	}
+
+	if err := signer.messages[msgRnd][from].addMsg(message); err != nil {
+		return common.NewTrackableError(
+			err,
+			"storeMessage",
+			int(signerRound),
+			signer.self,
+			signer.trackingId,
+			message.GetFrom(), // possible culprit
+		)
 	}
 
 	return nil
@@ -134,9 +195,9 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
 	}
 
-	if signer.getState() != set {
+	if signer.getState() != activated {
 		return common.NewError(
-			errSignerNotSet,
+			errSignerNotactivated,
 			"consumeStoredMessages:statecheck",
 			int(signer.session.Number()),
 			nil,
@@ -152,40 +213,61 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	if _, ok := signer.messages[rnd]; !ok {
-		signer.messages[rnd] = make(map[strPartyID]common.ParsedMessage)
+		signer.messages[rnd] = make(map[strPartyID]*messageKeep)
 	}
 
 	mp := signer.messages[rnd]
 
-	for key, msg := range mp {
-		if msg == nil {
-			continue
-		}
+	for key, msgs := range mp {
+		msgs.getMsgs()
 
-		delete(mp, key) // remove the message from the map.
+		delete(mp, key) // remove the message store from the map.
 
-		// TODO: support non-broadcast messages.
-		r, ok := signer.session.(round.BroadcastRound)
-		if !ok {
-			return common.NewError(errShouldBeBroadcastRound, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
-		}
+		for _, msg := range msgs.getMsgs() {
+			if msg == nil {
+				continue // skip nil messages.
+			}
 
-		m := round.Message{
-			From:       party.ID(msg.GetFrom().GetID()),
-			To:         "",
-			Broadcast:  true,
-			Content:    msg.Content(),
-			TrackingID: msg.WireMsg().TrackingID,
-		}
+			if err := signer.consumeMessage(msg); err != nil {
+				return common.NewTrackableError(
+					err,
+					"consumeStoredMessages:consume",
+					int(signer.session.Number()),
+					signer.self,
+					signer.trackingId,
 
-		// StoreBroadcastMessage will perform the necessary checks and might even run
-		// some cryptographic computations (depending on the protocol).
-		if err := r.StoreBroadcastMessage(m); err != nil {
-			return common.NewError(err, "consumeStoredMessages", int(signer.session.Number()), nil, signer.self)
+					msg.GetFrom(), // possible culprit
+				)
+			}
 		}
 	}
 
 	return nil
+}
+
+// consumeMessage is thread-UNSAFE and will attempt to consume the given message.
+func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
+	m := round.Message{
+		From:       party.ID(msg.GetFrom().GetID()),
+		Broadcast:  msg.IsBroadcast(),
+		Content:    msg.Content(),
+		TrackingID: msg.WireMsg().TrackingID,
+	}
+
+	// The following storing (Both StoreMessage and StoreBroadcastMessage methods) of
+	//  messages may perform some necessary checks and might even run
+	// some cryptographic computations (depending on the protocol).
+	if !m.Broadcast {
+		return signer.session.StoreMessage(m)
+	}
+
+	// extends round.Round and can accept broadcast messages.
+	r, ok := signer.session.(round.BroadcastRound)
+	if !ok {
+		return errShouldBeBroadcastRound
+	}
+
+	return r.StoreBroadcastMessage(m)
 }
 
 func (signer *singleSession) getRound() round.Number {
@@ -210,7 +292,6 @@ var errFirstRoundCantFinalize = errors.New("first round can't finalize")
 // attemptRoundFinalize is a thread-UNSAFE attempt to finalize the round. if the round was the protocol's final round,
 // return true.
 func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Error) {
-
 	if signer.session == nil {
 		return finalizeReport{}, common.NewTrackableError(
 			errNilSigner,
@@ -221,9 +302,9 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 		)
 	}
 
-	if signer.getState() != set {
+	if signer.getState() != activated {
 		return finalizeReport{}, common.NewError(
-			errSignerNotSet,
+			errSignerNotactivated,
 			"attemptRoundFinalize:statecheck",
 			int(signer.session.Number()),
 			nil,
@@ -302,49 +383,47 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 
 var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
-	errSigNotOfCorrectType        = errors.New("session final round failed: not of type frost.Signature")
 )
 
-func (signer *singleSession) extractSignature() (frost.Signature, *common.Error) {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
+func (session *singleSession) extractOutput() (*frost.Config, *frost.Signature, *common.Error) {
+	session.mtx.Lock()
+	defer session.mtx.Unlock()
 
-	if signer.session == nil {
-		return frost.Signature{}, common.NewTrackableError(
+	if session.session == nil {
+		return nil, nil, common.NewTrackableError(
 			errNilSigner,
 			"extractSignature:sessionNil",
 			-1,
-			signer.self,
-			signer.trackingId,
+			session.self,
+			session.trackingId,
 		)
 	}
 
-	// checking for output.
-	var sig frost.Signature
-
-	r, ok := signer.session.(*round.Output)
+	r, ok := session.session.(*round.Output)
 	if !ok {
-		return sig, common.NewTrackableError(
+		return nil, nil, common.NewTrackableError(
 			errFinalRoundNotOfCorrectType,
 			"extractSignature:roundConvert",
 			-1,
-			signer.self,
-			signer.trackingId,
+			session.self,
+			session.trackingId,
 		)
 	}
 
-	sig, ok = r.Result.(frost.Signature)
-	if !ok {
-		return sig, common.NewTrackableError(
-			errSigNotOfCorrectType,
-			"extractSignature:sigConvert",
-			int(-1),
-			signer.self,
-			signer.trackingId,
+	switch res := r.Result.(type) {
+	case *frost.Config:
+		return res, nil, nil
+	case frost.Signature:
+		return nil, &res, nil
+	default:
+		return nil, nil, common.NewTrackableError(
+			fmt.Errorf("unknown output type: %T", res),
+			"advanceSession:output",
+			unknownRound,
+			session.self,
+			session.trackingId,
 		)
 	}
-
-	return sig, nil
 }
 
 // advanceOnce is a thread-SAFE method that will attempt to finalize the current round.

@@ -37,27 +37,44 @@ type SigningTask struct {
 	AuxilaryData []byte            // can be nil
 }
 
+type DkgTask struct {
+	Threshold int
+
+	// used to generate a trackingID for the DKG protocol.
+	// should match the seed used by all FullParties that run the DKG protocol.
+	Seed Digest
+}
+
 type SigningInfo struct {
 	SigningCommittee common.SortedPartyIDs
 	TrackingID       *common.TrackingID
 	IsSigner         bool
 }
 
-type UpdateMeta struct {
-	AdvancedRound      bool
-	CurrentRoundNumber int
-	SignerState        string
+// OutputChannels Contains the channels the FullParty will use to
+// communicate with the outside world.
+// the FullParty expects these channels to be listened to by the user.
+type OutputChannels struct {
+	// OutChannel delivers messages that should be sent over the network—
+	// either broadcast using the Reliable Broadcast protocol (or Hash-Broadcast)
+	// or uni-cast.
+	// NOTICE: Users should ensure that the network layer is secure (e.g., using TLS).
+	OutChannel chan common.ParsedMessage
 
-	Error error
+	// SignatureOutputChannel delivers the final output of a signature session.
+	SignatureOutputChannel chan *common.SignatureData
+
+	// Can be nil. Used when the fullParty will run the key generation protocol.
+	KeygenOutputChannel chan *frost.Config
+
+	// ErrChannel reports any errors that occur during the protocol execution.
+	ErrChannel chan *common.Error
 }
 
 type FullParty interface {
 	// Start sets up the FullParty and a few sub-components (including a few
-	// goroutines). outChannel: this channel delivers messages that should be broadcast (using Reliable
-	// Broadcast protocol) or Uni-cast over the network (messages should be signed and encrypted).
-	// signatureOutputChannel: this channel delivers the final output of a signature protocol (a usable signature).
-	// errChannel: this channel delivers any error during the protocol.
-	Start(outChannel chan common.ParsedMessage, signatureOutputChannel chan *common.SignatureData, errChannel chan<- *common.Error) error
+	// goroutines).
+	Start(OutputChannels) error
 
 	// Stop stops the FullParty, and closes its sub-components.
 	Stop()
@@ -68,13 +85,21 @@ type FullParty interface {
 	AsyncRequestNewSignature(SigningTask) (*SigningInfo, error)
 
 	// Update updates the FullParty with messages from other FullParties.
-	Update(common.ParsedMessage) (<-chan UpdateMeta, error)
+	Update(common.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
 	GetPublic() curve.Point
 
 	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
 	GetSigningInfo(s SigningTask) (*SigningInfo, error)
+
+	// StartDKG starts the DKG protocol.
+	//
+	// threshold represents the maximal number that will not be able to sign. For instance,
+	// if threshold is 2, then 3 or more parties will be able to sign.
+	// Seed is used to give generate a trackingID as an identifier to
+	// the running DKG protocol (more than one can run at the same time).
+	StartDKG(DkgTask) error // TODO: consider returning more information, like the trackingID.
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -108,7 +133,6 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		self:     p.Self,
 		peers:    p.PartyIDs,
 		peersmap: peersMap,
-		peerIDs:  pids2IDs(p.PartyIDs),
 
 		config:     p.FrostSecrets,
 		sessionMap: &sessionMap{Map: sync.Map{}},

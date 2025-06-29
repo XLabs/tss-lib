@@ -12,3 +12,16 @@ import (
 
 const signerMaxTTL = time.Minute * 5
 const DigestSize = 32
+
+const unknownRound = -1
+
+const (
+	directMessagePos    = 0
+	broadcastMessagePos = 1
+)
+
+const (
+	awaitingActivation signerState = iota
+	activated
+	notInCommittee
+)
