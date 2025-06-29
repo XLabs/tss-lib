@@ -20,10 +20,11 @@ type strPartyID string
 type messageKeep [2]common.ParsedMessage
 
 // SingleSession represents a single invocation of a distributed protocol.
-// It handles the state of the session (whether it is activated, awaitingActivation, or not in committee) and can start advancing rounds.
-// It ensures safe concurrent access, and easy to use methods for storing or consuming messages.
-// The SingleSession holds metadata, along a round.Session interface. This interface represents the current round of a running
-// protocol, once a round is finalized, the session will be updated to the next round.
+// It handles the protocol from start to finish. It holds the state of the protocol (whether it is
+// activated, awaiting activation, or not in committee).
+// The SingleSession offer thread-safe methods to store and consume messages, and to advance the protocol rounds.
+// It does so, by holding a round.Session interface (from the multi-part-sig package), which represents the
+// execution of a round-based protocol, and once a round is finalized, the session is advanced to the next round.
 type singleSession struct {
 	// time represents the moment this singleSession is created.
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
