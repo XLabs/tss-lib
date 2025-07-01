@@ -88,7 +88,7 @@ type FullParty interface {
 	Update(common.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
-	GetPublic() curve.Point
+	GetPublic() (curve.Point, error)
 
 	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
 	GetSigningInfo(s SigningTask) (*SigningInfo, error)

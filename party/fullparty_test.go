@@ -456,7 +456,10 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 			a.True(ok)
 
 			if !verified {
-				a.True(validateSignature(anyParty.GetPublic(), m, d[:]))
+				pk, err := anyParty.GetPublic()
+				a.NoError(err, "failed to get public key for signature validation")
+
+				a.True(validateSignature(pk, m, d[:]))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m.TrackingId)
 				continue
@@ -990,6 +993,8 @@ func TestErrorsInUpdate(t *testing.T) {
 func TestKeygen(t *testing.T) {
 	t.Run("keygen", testKeygen)
 
+	t.Run("keygen with nil config", testNilConfigKeyGen)
+
 	t.Run("keygen with one late party", testKeygenWithOneLateParty)
 }
 func testKeygen(t *testing.T) {
@@ -1047,6 +1052,66 @@ func testKeygen(t *testing.T) {
 	close(donechn)
 	wg.Wait()
 
+}
+
+func testNilConfigKeyGen(t *testing.T) {
+	a := assert.New(t)
+
+	participants := 5
+	threshold := 3
+
+	parties, _ := createFullParties(a, participants, threshold)
+
+	for _, p := range parties {
+		p.(*Impl).config = nil
+
+	}
+	maxTTL := time.Minute * 1
+	for _, impl := range parties {
+		impl.(*Impl).maxTTl = maxTTL
+	}
+
+	n := networkSimulator{
+		outchan: make(chan common.ParsedMessage, len(parties)*20),
+		sigchan: make(chan *common.SignatureData),
+		errchan: make(chan *common.Error, len(parties)),
+
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: map[Digest]bool{},
+
+		Timeout:   0,
+		expectErr: false,
+	}
+
+	for _, p := range parties {
+		a.NoError(p.Start(OutputChannels{
+			OutChannel:             n.outchan,
+			SignatureOutputChannel: n.sigchan,
+			KeygenOutputChannel:    make(chan *frost.Config, 100),
+			ErrChannel:             n.errchan,
+		}))
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	donechn := make(chan struct{})
+	go func() {
+		defer wg.Done()
+		n.run(a, donechn)
+	}()
+
+	for _, p := range parties {
+		if err := p.StartDKG(DkgTask{
+			Threshold: threshold,
+			Seed:      Digest{1, 2, 3, 4},
+		}); err != nil {
+			panic(err)
+		}
+	}
+
+	waitforDKG(parties, a)
+	close(donechn)
+	wg.Wait()
 }
 
 func testKeygenWithOneLateParty(t *testing.T) {

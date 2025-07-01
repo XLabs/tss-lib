@@ -64,10 +64,6 @@ func (p *Impl) cleanupWorker() {
 	}
 }
 
-func (p *Impl) GetPublic() curve.Point {
-	return p.config.PublicKey.Clone()
-}
-
 // The worker serves as messages courier to all singelSession instances.
 func (p *Impl) worker() {
 	defer p.workersWg.Done()
@@ -125,11 +121,19 @@ func (p *Impl) Stop() {
 	p.workersWg.Wait()
 }
 
-var errNoConfig = errors.New("signing protocol not configured")
+var ErrNoConfig = errors.New("signing protocol not configured")
+
+func (p *Impl) GetPublic() (curve.Point, error) {
+	if p.config == nil {
+		return nil, ErrNoConfig
+	}
+
+	return p.config.PublicKey.Clone(), nil
+}
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	if p.config == nil {
-		return nil, errNoConfig
+		return nil, ErrNoConfig
 	}
 
 	trackid := p.createTrackingID(s)
@@ -238,9 +242,18 @@ func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) er
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
+	// this function sets the state. once set, it cannot be changed.
 	if signer.getState() != awaitingActivation {
 		return nil
 	}
+
+	// compute committee, then check if the signer is in the committee.
+	committee, err := p.computeCommittee(signer.trackingId)
+	if err != nil {
+		return err
+	}
+
+	signer.committee = committee
 
 	if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(p.self) {
 		signer.state.Store(int64(notInCommittee))
@@ -270,7 +283,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	dgst := Digest{}
 	copy(dgst[:], trackingId.Digest)
 
-	signer, loaded := s.LoadOrStore(trackingId.ToString(), &singleSession{
+	signer, _ := s.LoadOrStore(trackingId.ToString(), &singleSession{
 		startTime: time.Now(),
 		state:     atomic.Int64{},
 
@@ -291,19 +304,6 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		peersmap:   p.peersmap,
 	})
 
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	// Only a single concurrent run of this method will pass this point (due to the syncMap output).
-	if !loaded {
-		committee, err := p.computeCommittee(signer.trackingId)
-		if err != nil {
-			return nil, err
-		}
-
-		signer.committee = committee
-	}
-
 	return signer, nil
 }
 
@@ -313,10 +313,12 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 		return nil, err
 	}
 
-	if len(validParties) < p.committeeSize() {
+	committeeSize := p.committeeSize()
+
+	if len(validParties) < committeeSize {
 		return nil, fmt.Errorf("not enough valid parties in signer committee: %d < %d",
 			len(validParties),
-			p.committeeSize(),
+			committeeSize,
 		)
 	}
 
@@ -329,6 +331,10 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 }
 
 func (p *Impl) committeeSize() int {
+	if p.config == nil {
+		return len(p.peers) // default to all peers.
+	}
+
 	return p.config.Threshold + 1
 }
 
