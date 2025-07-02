@@ -385,7 +385,7 @@ var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
 )
 
-func (session *singleSession) extractOutput() (*frost.Config, *frost.Signature, *common.Error) {
+func (session *singleSession) extractOutput() (*TSSSecrets, *frost.Signature, *common.Error) {
 	session.mtx.Lock()
 	defer session.mtx.Unlock()
 
@@ -412,7 +412,7 @@ func (session *singleSession) extractOutput() (*frost.Config, *frost.Signature, 
 
 	switch res := r.Result.(type) {
 	case *frost.Config:
-		return res, nil, nil
+		return &TSSSecrets{res, session.trackingId}, nil, nil
 	case frost.Signature:
 		return nil, &res, nil
 	default:

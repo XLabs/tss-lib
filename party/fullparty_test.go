@@ -96,7 +96,7 @@ func (st *signerTester) run(t *testing.T) {
 			p.Start(OutputChannels{
 				OutChannel:             n.outchan,
 				SignatureOutputChannel: n.sigchan,
-				KeygenOutputChannel:    make(chan *frost.Config),
+				KeygenOutputChannel:    make(chan *TSSSecrets),
 				ErrChannel:             n.errchan,
 			}),
 		)
@@ -153,7 +153,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -222,7 +222,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -283,7 +283,7 @@ func testLateParties(t *testing.T, numLate int) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -351,7 +351,7 @@ func TestCleanup(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -655,7 +655,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -725,7 +725,7 @@ func TestTrailingZerosInDigests(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -797,7 +797,7 @@ func TestChangingCommittee(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -936,7 +936,7 @@ func TestErrorsInUpdate(t *testing.T) {
 		v.Start(OutputChannels{
 			OutChannel:             outchan,
 			SignatureOutputChannel: sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config),
+			KeygenOutputChannel:    make(chan *TSSSecrets),
 			ErrChannel:             errchan,
 		})
 	}
@@ -1026,7 +1026,7 @@ func testKeygen(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config, 100),
+			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -1087,7 +1087,7 @@ func testNilConfigKeyGen(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config, 100),
+			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
 			ErrChannel:             n.errchan,
 		}))
 	}
@@ -1145,7 +1145,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 		a.NoError(p.Start(OutputChannels{
 			OutChannel:             n.outchan,
 			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *frost.Config, 100),
+			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
 			ErrChannel:             n.errchan,
 		}))
 	}

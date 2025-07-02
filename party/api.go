@@ -51,6 +51,14 @@ type SigningInfo struct {
 	IsSigner         bool
 }
 
+// the output of running the DKG protocol.
+// It contains the frost.Config that can be used to run the signing protocol,
+// and the TrackingID that can be used to distinguish between different DKG sessions.
+type TSSSecrets struct {
+	*frost.Config
+	*common.TrackingID
+}
+
 // OutputChannels Contains the channels the FullParty will use to
 // communicate with the outside world.
 // the FullParty expects these channels to be listened to by the user.
@@ -65,7 +73,7 @@ type OutputChannels struct {
 	SignatureOutputChannel chan *common.SignatureData
 
 	// Can be nil. Used when the fullParty will run the key generation protocol.
-	KeygenOutputChannel chan *frost.Config
+	KeygenOutputChannel chan *TSSSecrets
 
 	// ErrChannel reports any errors that occur during the protocol execution.
 	ErrChannel chan *common.Error
@@ -143,6 +151,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		errorChannel:           nil,
 		outChan:                nil,
 		signatureOutputChannel: nil,
+		keygenout:              nil,
 
 		maxTTl:               p.MaxSignerTTL,
 		loadDistributionSeed: p.LoadDistributionSeed,

@@ -38,7 +38,7 @@ type Impl struct {
 	errorChannel           chan<- *common.Error
 	outChan                chan common.ParsedMessage
 	signatureOutputChannel chan *common.SignatureData
-	keygenout              chan *frost.Config
+	keygenout              chan *TSSSecrets
 
 	maxTTl               time.Duration
 	loadDistributionSeed []byte
@@ -228,7 +228,7 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	return nil
 }
 
-func (p *Impl) outputKeygen(res *frost.Config) {
+func (p *Impl) outputKeygen(res *TSSSecrets) {
 	select {
 	case p.keygenout <- res:
 	case <-p.ctx.Done():
