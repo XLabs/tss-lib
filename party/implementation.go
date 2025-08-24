@@ -186,7 +186,15 @@ func (p *Impl) startSigner(signer *singleSession) {
 	}
 
 	// the first round doesn't have to wait for messages, so we can advance it right away.
-	p.advanceSession(signer)
+	if err := p.advanceSession(signer); err != nil {
+		p.reportError(common.NewTrackableError(
+			err,
+			"startSigner:advanceSession",
+			-1,
+			nil,
+			signer.trackingId,
+		))
+	}
 }
 
 // advanceSession will consume messages, and attempt to finalize the session.
