@@ -25,6 +25,7 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/math/polynomial"
 	"github.com/xlabs/multi-party-sig/pkg/math/sample"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/round"
 
 	"github.com/xlabs/tss-lib/v2/test"
 	"google.golang.org/protobuf/proto"
@@ -1200,4 +1201,78 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 		}
 	}
 	return false
+}
+
+type safeBuffer struct {
+	buffer bytes.Buffer
+	mu     sync.Mutex
+}
+
+func (sb *safeBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buffer.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buffer.String()
+}
+
+func TestMessageFromNonCommitteeIsReported(t *testing.T) {
+	a := assert.New(t)
+
+	// preparing to capture slog output in a buffer (so we can read from it later).
+	var buf safeBuffer // need safe buffer to ensure race doesn't happen.
+
+	old := slog.Default()
+	slog.SetDefault(slog.New(
+		slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}),
+	))
+	defer slog.SetDefault(old)
+
+	// actual test:
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	_, hash := createSingleDigest()
+
+	outchan := make(chan common.ParsedMessage, len(parties)*20)
+	sigchan := make(chan *common.SignatureData, test.TestParticipants)
+	errchan := make(chan *common.Error, 1)
+
+	for _, p := range parties {
+		a.NoError(p.Start(OutputChannels{
+			OutChannel:             outchan,
+			SignatureOutputChannel: sigchan,
+			KeygenOutputChannel:    nil,
+			ErrChannel:             errchan,
+		}))
+	}
+
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self},
+	})
+
+	p := (&round.Message{
+		From:      party.ID(parties[1].(*Impl).self.ID),
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: info.TrackingID,
+	}).ToParsed()
+
+	// Trigger the code path that should warn
+	go parties[0].Update(p)
+
+	//  Assert the warning appears
+	a.Eventually(func() bool {
+		return strings.Contains(buf.String(), "message from non-committee member dropped")
+	}, 4*time.Second, 10*time.Millisecond, "expected slog warning not observed")
 }

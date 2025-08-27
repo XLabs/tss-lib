@@ -3,6 +3,7 @@ package party
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -226,6 +227,16 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 		for _, msg := range msgs.getMsgs() {
 			if msg == nil {
 				continue // skip nil messages.
+			}
+
+			if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(msg.GetFrom()) {
+				slog.Warn("message from non-committee member dropped",
+					slog.String("from", msg.GetFrom().ToString()),
+					slog.String("tracking_id", msg.WireMsg().TrackingID.ToString()),
+					slog.Int("round", int(rnd)),
+				)
+
+				continue
 			}
 
 			if err := signer.consumeMessage(msg); err != nil {
