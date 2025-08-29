@@ -25,6 +25,7 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/math/polynomial"
 	"github.com/xlabs/multi-party-sig/pkg/math/sample"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/round"
 
 	"github.com/xlabs/tss-lib/v2/test"
 	"google.golang.org/protobuf/proto"
@@ -38,6 +39,17 @@ func init() {
 
 	// Set the logger as the default logger
 	slog.SetDefault(logger)
+}
+
+func newOutChannels() OutputChannels {
+	return OutputChannels{
+		OutChannel:             make(chan common.ParsedMessage, 1000*1000),
+		SignatureOutputChannel: make(chan *common.SignatureData, 1000*1000),
+		KeygenOutputChannel:    make(chan *TSSSecrets, 1),
+		ErrChannel:             make(chan *common.Error, 1),
+		WarningChannel:         make(chan *Warning, 1),
+	}
+
 }
 
 func TestSigning(t *testing.T) {
@@ -83,9 +95,8 @@ func (st *signerTester) run(t *testing.T) {
 	digestSet := createDigests(st.numSignatures)
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, st.numSignatures*len(parties)),
-		errchan:         make(chan *common.Error, 1),
+		chans: newOutChannels(),
+
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         st.maxNetworkSimulationTime,
@@ -93,12 +104,7 @@ func (st *signerTester) run(t *testing.T) {
 
 	for _, p := range parties {
 		a.NoError(
-			p.Start(OutputChannels{
-				OutChannel:             n.outchan,
-				SignatureOutputChannel: n.sigchan,
-				KeygenOutputChannel:    make(chan *TSSSecrets),
-				ErrChannel:             n.errchan,
-			}),
+			p.Start(n.chans),
 		)
 	}
 
@@ -141,21 +147,14 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 3,
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	donechan := make(chan struct{})
@@ -210,21 +209,14 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 	digestSet, _ := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, 5),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 30 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	for digest := range digestSet {
@@ -271,21 +263,14 @@ func testLateParties(t *testing.T, numLate int) {
 	digestSet, hash := createSingleDigest()
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 3,
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	donechan := make(chan struct{})
@@ -342,18 +327,11 @@ func TestCleanup(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 	n := networkSimulator{
-		outchan: make(chan common.ParsedMessage, len(parties)*20),
-		sigchan: make(chan *common.SignatureData, test.TestParticipants),
-		errchan: make(chan *common.Error, 1),
+		chans: newOutChannels(),
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
@@ -383,10 +361,7 @@ func getLen(m *sync.Map) int {
 }
 
 type networkSimulator struct {
-	outchan chan common.ParsedMessage
-	sigchan chan *common.SignatureData
-
-	errchan         chan *common.Error
+	chans           OutputChannels
 	idToFullParty   map[string]FullParty
 	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
 
@@ -434,7 +409,7 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 
 	for {
 		select {
-		case err := <-n.errchan:
+		case err := <-n.chans.ErrChannel:
 			if n.expectErr {
 				fmt.Println("Received expected error:", err)
 				return
@@ -444,12 +419,12 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 			a.FailNow("unexpected error")
 
 		// simulating the network:
-		case newMsg := <-n.outchan:
+		case newMsg := <-n.chans.OutChannel:
 			passMsg(a, newMsg, n.idToFullParty, n.expectErr)
 
 		case <-dnchn:
 			return
-		case m := <-n.sigchan:
+		case m := <-n.chans.SignatureOutputChannel:
 			d := Digest{}
 			copy(d[:], m.M)
 			verified, ok := n.digestsToVerify[d]
@@ -640,9 +615,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	digestSet := createDigests(200) // 200 digests to sign
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*20),
-		sigchan:         make(chan *common.SignatureData, test.TestParticipants),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 5,
@@ -652,12 +625,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	goroutinesstart := runtime.NumGoroutine()
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	a.Equal(
@@ -713,21 +681,14 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	digestSet[hash2] = false
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*1000),
-		sigchan:         make(chan *common.SignatureData, 5),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	for digest := range digestSet {
@@ -785,21 +746,14 @@ func TestChangingCommittee(t *testing.T) {
 	fmt.Println("old digest:", hash)
 
 	n := networkSimulator{
-		outchan:         make(chan common.ParsedMessage, len(parties)*10000), // 10k messages per party should be enough.
-		sigchan:         make(chan *common.SignatureData, len(parties)),
-		errchan:         make(chan *common.Error, 1),
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: digestSet,
 		Timeout:         time.Second * 120 * time.Duration(len(digestSet)),
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	threadsWait := sync.WaitGroup{}
@@ -928,17 +882,9 @@ func TestErrorsInUpdate(t *testing.T) {
 	a := assert.New(t)
 	parties, _ := createFullParties(a, 5, 4)
 
-	outchan := make(chan common.ParsedMessage, len(parties)*20)
-	sigchan := make(chan *common.SignatureData, test.TestParticipants)
-	errchan := make(chan *common.Error, 1)
-
+	chans := newOutChannels()
 	for _, v := range parties {
-		v.Start(OutputChannels{
-			OutChannel:             outchan,
-			SignatureOutputChannel: sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets),
-			ErrChannel:             errchan,
-		})
+		v.Start(chans)
 	}
 
 	_, hash := createSingleDigest()
@@ -961,7 +907,7 @@ func TestErrorsInUpdate(t *testing.T) {
 			}
 			return
 
-		case m := <-outchan:
+		case m := <-chans.OutChannel:
 			if m.GetFrom().GetID() == parties[0].(*Impl).self.GetID() {
 				// this is the party that will send rubbish.
 				switch msg := m.Content().(type) {
@@ -982,7 +928,7 @@ func TestErrorsInUpdate(t *testing.T) {
 				}()
 			}
 
-		case err := <-errchan:
+		case err := <-chans.ErrChannel:
 			fmt.Println("sucess, received error:", err)
 			// this is a sucess.
 			return
@@ -1011,10 +957,7 @@ func testKeygen(t *testing.T) {
 	}
 
 	n := networkSimulator{
-		outchan: make(chan common.ParsedMessage, len(parties)*20),
-		sigchan: make(chan *common.SignatureData),
-		errchan: make(chan *common.Error, len(parties)),
-
+		chans:           newOutChannels(),
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: map[Digest]bool{},
 
@@ -1023,12 +966,7 @@ func testKeygen(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	wg := sync.WaitGroup{}
@@ -1072,9 +1010,7 @@ func testNilConfigKeyGen(t *testing.T) {
 	}
 
 	n := networkSimulator{
-		outchan: make(chan common.ParsedMessage, len(parties)*20),
-		sigchan: make(chan *common.SignatureData),
-		errchan: make(chan *common.Error, len(parties)),
+		chans: newOutChannels(),
 
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: map[Digest]bool{},
@@ -1084,12 +1020,7 @@ func testNilConfigKeyGen(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	wg := sync.WaitGroup{}
@@ -1129,10 +1060,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	}
 
 	n := networkSimulator{
-		outchan: make(chan common.ParsedMessage, len(parties)*20),
-		sigchan: make(chan *common.SignatureData),
-
-		errchan: make(chan *common.Error, len(parties)),
+		chans: newOutChannels(),
 
 		idToFullParty:   idToParty(parties),
 		digestsToVerify: map[Digest]bool{},
@@ -1142,12 +1070,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	}
 
 	for _, p := range parties {
-		a.NoError(p.Start(OutputChannels{
-			OutChannel:             n.outchan,
-			SignatureOutputChannel: n.sigchan,
-			KeygenOutputChannel:    make(chan *TSSSecrets, 100),
-			ErrChannel:             n.errchan,
-		}))
+		a.NoError(p.Start(n.chans))
 	}
 
 	wg := sync.WaitGroup{}
@@ -1189,7 +1112,7 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 	for _, p := range parties {
 		select {
 
-		case cnfg := <-p.(*Impl).keygenout:
+		case cnfg := <-p.(*Impl).outputChannels.KeygenOutputChannel:
 			if cnfg == nil {
 				a.FailNow("received nil config from keygen")
 			}
@@ -1200,4 +1123,63 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 		}
 	}
 	return false
+}
+
+type safeBuffer struct {
+	buffer bytes.Buffer
+	mu     sync.Mutex
+}
+
+func (sb *safeBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buffer.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buffer.String()
+}
+
+func TestMessageFromNonCommitteeIsReported(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	_, hash := createSingleDigest()
+
+	for _, p := range parties {
+		a.NoError(p.Start(newOutChannels()))
+	}
+
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self},
+	})
+
+	p := (&round.Message{
+		From:      party.ID(parties[1].(*Impl).self.ID),
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: info.TrackingID,
+	}).ToParsed()
+
+	// Trigger the code path that should warn
+	go parties[0].Update(p)
+
+	//  Assert the warning appears
+
+	select {
+	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+		return
+	case <-time.After(5 * time.Second):
+		a.FailNow("timeout waiting for warning to be sent")
+	}
 }
