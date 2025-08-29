@@ -8,6 +8,7 @@ import (
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/round"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 )
@@ -59,6 +60,14 @@ type TSSSecrets struct {
 	*common.TrackingID
 }
 
+type Warning struct {
+	Message         string
+	TrackingID      *common.TrackingID
+	PossibleCulprit *common.PartyID
+	Protocol        common.ProtocolType
+	SessionRound    round.Number
+}
+
 // OutputChannels Contains the channels the FullParty will use to
 // communicate with the outside world.
 // the FullParty expects these channels to be listened to by the user.
@@ -77,6 +86,9 @@ type OutputChannels struct {
 
 	// ErrChannel reports any errors that occur during the protocol execution.
 	ErrChannel chan *common.Error
+
+	// Reports that are not critical but may be of interest.
+	WarningChannel chan *Warning
 }
 
 type FullParty interface {
@@ -148,10 +160,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),
 		startSignerTaskChan:     make(chan *singleSession),
 		// the following fields should be provided in Start()
-		errorChannel:           nil,
-		outChan:                nil,
-		signatureOutputChannel: nil,
-		keygenout:              nil,
+		outputChannels: OutputChannels{},
 
 		maxTTl:               p.MaxSignerTTL,
 		loadDistributionSeed: p.LoadDistributionSeed,

@@ -3,7 +3,6 @@ package party
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,8 +53,8 @@ type singleSession struct {
 
 	// the following fields are references from the FullParty,
 	// used for easy access to the FullParty's components.
-	outputchan chan<- common.ParsedMessage
-	peersmap   map[party.ID]*common.PartyID
+	outputChannels *OutputChannels
+	peersmap       map[party.ID]*common.PartyID
 }
 
 func (s signerState) String() string {
@@ -230,11 +229,16 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 			}
 
 			if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(msg.GetFrom()) {
-				slog.Warn("message from non-committee member dropped",
-					slog.String("from", msg.GetFrom().ToString()),
-					slog.String("tracking_id", msg.WireMsg().TrackingID.ToString()),
-					slog.Int("round", int(rnd)),
-				)
+				select {
+				case signer.outputChannels.WarningChannel <- &Warning{
+					Message:         "message from non-committee member dropped",
+					TrackingID:      signer.trackingId,
+					PossibleCulprit: msg.GetFrom(),
+					Protocol:        common.ProtocolFROST, // TODO support more than just frost
+					SessionRound:    rnd,
+				}:
+				default: // in case no one is listening/ channel is full, drop the warning.
+				}
 
 				continue
 			}
@@ -351,7 +355,7 @@ func (signer *singleSession) attemptRoundFinalize() (finalizeReport, *common.Err
 	sessionComplete = rnd == signer.session.FinalRoundNumber()
 
 	roundNumberBeforeFinalization := signer.session.Number()
-	newRound, err := signer.session.Finalize(signer.outputchan)
+	newRound, err := signer.session.Finalize(signer.outputChannels.OutChannel)
 	if err != nil {
 		if b, ok := signer.session.(*round.Abort); ok {
 			culprits := make(common.UnSortedPartyIDs, len(b.Culprits))

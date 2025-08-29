@@ -35,10 +35,7 @@ type Impl struct {
 	incomingMessagesChannel chan feedMessageTask
 	startSignerTaskChan     chan *singleSession
 
-	errorChannel           chan<- *common.Error
-	outChan                chan common.ParsedMessage
-	signatureOutputChannel chan *common.SignatureData
-	keygenout              chan *TSSSecrets
+	outputChannels OutputChannels
 
 	maxTTl               time.Duration
 	loadDistributionSeed []byte
@@ -75,7 +72,7 @@ func (p *Impl) worker() {
 			case common.ProtocolFROST:
 				p.handleFrostMessage(task)
 			default:
-				p.errorChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
+				p.outputChannels.ErrChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
 			}
 
 		case signer := <-p.startSignerTaskChan:
@@ -91,17 +88,15 @@ var (
 	numHandlerWorkers = runtime.NumCPU() * 2
 )
 
-func (p *Impl) Start(params OutputChannels) error {
-	if params.OutChannel == nil ||
-		params.SignatureOutputChannel == nil ||
-		params.ErrChannel == nil {
+func (p *Impl) Start(out OutputChannels) error {
+	if out.OutChannel == nil ||
+		out.SignatureOutputChannel == nil ||
+		out.ErrChannel == nil ||
+		out.WarningChannel == nil {
 		return errors.New("nil channel passed to Start()")
 	}
 
-	p.errorChannel = params.ErrChannel
-	p.signatureOutputChannel = params.SignatureOutputChannel
-	p.outChan = params.OutChannel
-	p.keygenout = params.KeygenOutputChannel
+	p.outputChannels = out
 
 	p.workersWg.Add(numHandlerWorkers + 1) // +1 for cleanup worker.
 
@@ -170,7 +165,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 	// member). Depending on the protocol, this function might be
 	// compute intensive (frost is cheap, gg18 is not).
 	if err := p.setSigningSession(config, signer); err != nil {
-		p.reportError(common.NewTrackableError(
+		p.outputErr(common.NewTrackableError(
 			err,
 			"startSigner",
 			-1,
@@ -187,7 +182,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 
 	// the first round doesn't have to wait for messages, so we can advance it right away.
 	if err := p.advanceSession(signer); err != nil {
-		p.reportError(common.NewTrackableError(
+		p.outputErr(common.NewTrackableError(
 			err,
 			"startSigner:advanceSession",
 			-1,
@@ -238,7 +233,7 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 
 func (p *Impl) outputKeygen(res *TSSSecrets) {
 	select {
-	case p.keygenout <- res:
+	case p.outputChannels.KeygenOutputChannel <- res:
 	case <-p.ctx.Done():
 		// nothing to report.
 	}
@@ -308,8 +303,8 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		// first round doesn't receive messages (only round number 2,3)
 		messages: make(map[round.Number]map[strPartyID]*messageKeep, frost.NumRounds-1),
 
-		outputchan: p.outChan,
-		peersmap:   p.peersmap,
+		outputChannels: &p.outputChannels,
+		peersmap:       p.peersmap,
 	})
 
 	return signer, nil
@@ -400,7 +395,7 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	}
 
 	if err := p.advanceSession(signer); err != nil {
-		p.reportError(err)
+		p.outputErr(err)
 
 		return
 	}
@@ -425,15 +420,8 @@ func (p *Impl) outputErr(err *common.Error) {
 	}
 
 	select {
-	case p.errorChannel <- err:
+	case p.outputChannels.ErrChannel <- err:
 	case <-p.ctx.Done():
-	}
-}
-
-func (p *Impl) reportError(newError *common.Error) {
-	select {
-	case p.errorChannel <- newError:
-	default: // no one is waiting on error reporting channel/ no buffer.
 	}
 }
 
@@ -498,7 +486,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 	}
 
 	select {
-	case p.signatureOutputChannel <- &common.SignatureData{
+	case p.outputChannels.SignatureOutputChannel <- &common.SignatureData{
 		R:          rbits,
 		S:          sbits,
 		M:          signer.digest[:],
@@ -514,7 +502,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 var errDKGIssue = errors.New("FullParty has bad configurations. Cannot start DKG protocol")
 
 func (p *Impl) StartDKG(task DkgTask) error {
-	if p.keygenout == nil {
+	if p.outputChannels.KeygenOutputChannel == nil {
 		return errDKGIssue
 	}
 
