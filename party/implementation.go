@@ -295,7 +295,10 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
 
-		// set after store or load of the singleSession.
+		// Since signer can be created by receiving a message from a peer,
+		// which we can't assume is honest, we don't set the committee until we have
+		// more information regarding the protocol and its committee configuration
+		// (e.g., DKG has different committee setup).
 		committee: nil,
 		// session is once allowed to sign (AsyncRequestNewSignature).
 		session: nil,
