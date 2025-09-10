@@ -57,7 +57,6 @@ type singleSession struct {
 	// the following fields are references from the FullParty,
 	// used for easy access to the FullParty's components.
 	outputChannels *OutputChannels
-	peersmap       map[party.ID]*common.PartyID
 }
 
 func (s signerState) String() string {

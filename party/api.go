@@ -19,7 +19,8 @@ type Parameters struct {
 	PartyIDs []*common.PartyID // should have the same string IDs as the ones that created the initConfigs.
 	Self     *common.PartyID
 
-	MaxSignerTTL time.Duration
+	MaxSignerTTL      time.Duration
+	MaxActiveSessions int // max number of active sessions a peer can be involved in.
 
 	// LoadDistributionSeed doesn't affect the security of the protocol. Instead, it is used to ensure malicious clients
 	// can't target the load-balancing mechanisms of FullParty.
@@ -120,6 +121,10 @@ type FullParty interface {
 	// Seed is used to give generate a trackingID as an identifier to
 	// the running DKG protocol (more than one can run at the same time).
 	StartDKG(DkgTask) error // TODO: consider returning more information, like the trackingID.
+
+	// TODO: Consider an ABORT(trackingID) function which sets the session as aborted, and drops any incoming message.
+	// Why would we need this? for instance, a session had an error, and the user, after inspecting the
+	// error decides the sessions shouldn't continue and kept in memory (until TTL expires).
 }
 
 // NewFullParty returns a new FullParty instance.
@@ -128,12 +133,9 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		return nil, errors.New("nil parameters")
 	}
 
+	// validate peers
 	if !p.ensurePartiesContainsSelf() {
 		return nil, errors.New("self partyID not found in PartyIDs list")
-	}
-
-	if p.MaxSignerTTL == 0 {
-		p.MaxSignerTTL = signerMaxTTL
 	}
 
 	peersMap := make(map[party.ID]*common.PartyID, len(p.PartyIDs))
@@ -143,6 +145,15 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 	if len(peersMap) != len(p.PartyIDs) {
 		return nil, errors.New("duplicate partyIDs found")
+	}
+
+	// set default values if not provided.
+	if p.MaxSignerTTL == 0 {
+		p.MaxSignerTTL = signerMaxTTL
+	}
+
+	if p.MaxActiveSessions <= 0 {
+		p.MaxActiveSessions = maxActiveSessions
 	}
 
 	ctx, cancelF := context.WithCancel(context.Background())
@@ -164,6 +175,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 		maxTTl:               p.MaxSignerTTL,
 		loadDistributionSeed: p.LoadDistributionSeed,
+
+		rateLimiter: newRateLimiter(p.MaxActiveSessions),
 	}
 
 	return imp, nil

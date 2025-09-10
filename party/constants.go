@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const signerMaxTTL = time.Minute * 5
+const (
+	signerMaxTTL      = time.Minute * 5
+	maxActiveSessions = 1000
+)
+
 const DigestSize = 32
 
 const unknownRound = -1
