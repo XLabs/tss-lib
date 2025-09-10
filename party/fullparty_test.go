@@ -1183,3 +1183,50 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 		a.FailNow("timeout waiting for warning to be sent")
 	}
 }
+
+func TestSessionRejectsMessageSentTwice(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	_, hash := createSingleDigest()
+
+	for _, p := range parties {
+		a.NoError(p.Start(newOutChannels()))
+	}
+
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+	})
+
+	p := (&round.Message{
+		From:      party.ID(parties[3].(*Impl).self.ID), // party 3 is in committee
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: info.TrackingID,
+	}).ToParsed()
+
+	// Trigger the code path that should warn
+	go parties[0].Update(p)
+
+	// check no warning yet
+	select {
+	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+		a.FailNow("did not expect a warning the first time")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	//  Assert the warning appears after sending similar message type for the same session and round again
+	go parties[0].Update(p) // sending the same message again.
+	select {
+	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+		return
+	case <-time.After(1 * time.Second):
+		a.FailNow("timeout waiting for warning to be sent")
+	}
+}

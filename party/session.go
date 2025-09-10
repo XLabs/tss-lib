@@ -17,7 +17,10 @@ type signerState int
 
 type strPartyID string
 
-type messageKeep [2]common.ParsedMessage
+type messageKeep struct {
+	cells      [2]common.ParsedMessage
+	alreadySet [2]bool
+}
 
 // SingleSession represents a single invocation of a distributed protocol.
 // It handles the protocol from start to finish. It holds the state of the protocol (whether it is
@@ -76,28 +79,37 @@ func (s *singleSession) getInitTime() time.Time {
 
 var errMessageEntryFull = errors.New("message entry already contains something")
 
-func (r *messageKeep) addMsg(message common.ParsedMessage) error {
+func (r *messageKeep) addMessages(message common.ParsedMessage) error {
 	cell := directMessagePos
 	if message.IsBroadcast() {
 		cell = broadcastMessagePos
 	}
 
 	// ensure cell is empty
-	if r[cell] != nil {
+	if r.alreadySet[cell] {
 		return errMessageEntryFull
 	}
 
-	r[cell] = message
+	r.cells[cell] = message
+	r.alreadySet[cell] = true
 
 	return nil
 }
 
-func (r *messageKeep) getMsgs() []common.ParsedMessage {
+func (r *messageKeep) getMessages() []common.ParsedMessage {
 	if r == nil {
 		return nil // no messages stored.
 	}
 
-	return (*r)[:]
+	return r.cells[:]
+}
+
+// will clear the stored messages, but not the alreadySet flags,
+// ensuring new messages do not overwrite existing ones.
+func (r *messageKeep) clearMessages() {
+	for i := range r.cells {
+		r.cells[i] = nil
+	}
 }
 
 var (
@@ -171,15 +183,20 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 		signer.messages[msgRnd][from] = &messageKeep{}
 	}
 
-	if err := signer.messages[msgRnd][from].addMsg(message); err != nil {
-		return common.NewTrackableError(
-			err,
-			"storeMessage",
-			int(signerRound),
-			signer.self,
-			signer.trackingId,
-			message.GetFrom(), // possible culprit
-		)
+	if err := signer.messages[msgRnd][from].addMessages(message); err != nil {
+		// make warning, and drop the message.
+		w := Warning{
+			Message:         "Received more messages than expected from a party; dropping the incoming message",
+			TrackingID:      signer.trackingId,
+			PossibleCulprit: message.GetFrom(),
+			Protocol:        common.ProtocolType(signer.session.ProtocolID()),
+			SessionRound:    signerRound,
+		}
+		select {
+		case signer.outputChannels.WarningChannel <- &w:
+		default: // in case no one is listening/ channel is full, drop the warning.
+		}
+		return nil
 	}
 
 	return nil
@@ -218,12 +235,8 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 
 	mp := signer.messages[rnd]
 
-	for key, msgs := range mp {
-		msgs.getMsgs()
-
-		delete(mp, key) // remove the message store from the map.
-
-		for _, msg := range msgs.getMsgs() {
+	for _, msgs := range mp {
+		for _, msg := range msgs.getMessages() {
 			if msg == nil {
 				continue // skip nil messages.
 			}
@@ -255,6 +268,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 				)
 			}
 		}
+		msgs.clearMessages() // clear messages after consuming them.
 	}
 
 	return nil
@@ -450,5 +464,11 @@ func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
 		return finalizeReport{}, err
 	}
 
-	return signer.attemptRoundFinalize()
+	report, err := signer.attemptRoundFinalize()
+	if report.advancedRound {
+		// clear messages for the previous round.
+		delete(signer.messages, signer.session.Number()-1)
+	}
+
+	return report, err
 }
