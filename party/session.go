@@ -286,6 +286,10 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 	//  messages may perform some necessary checks and might even run
 	// some cryptographic computations (depending on the protocol).
 	if !m.Broadcast {
+		if err := signer.session.VerifyMessage(m); err != nil {
+			return err
+		}
+
 		return signer.session.StoreMessage(m)
 	}
 
@@ -295,6 +299,7 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 		return errShouldBeBroadcastRound
 	}
 
+	// verifyBroadcastMessage doesn't exist, the following does both verify and store.
 	return r.StoreBroadcastMessage(m)
 }
 
