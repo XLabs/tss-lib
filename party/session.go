@@ -20,6 +20,7 @@ type strPartyID string
 type messageKeep struct {
 	cells      [2]common.ParsedMessage
 	alreadySet [2]bool
+	delivered  [2]bool
 }
 
 // SingleSession represents a single invocation of a distributed protocol.
@@ -93,14 +94,6 @@ func (r *messageKeep) addMessages(message common.ParsedMessage) error {
 	r.alreadySet[cell] = true
 
 	return nil
-}
-
-func (r *messageKeep) getMessages() []common.ParsedMessage {
-	if r == nil {
-		return nil // no messages stored.
-	}
-
-	return r.cells[:]
 }
 
 // will clear the stored messages, but not the alreadySet flags,
@@ -234,8 +227,9 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 
 	mp := signer.messages[rnd]
 
-	for _, msgs := range mp {
-		for _, msg := range msgs.getMessages() {
+	for _, msgkeep := range mp {
+		msgs := signer.extractMessages(msgkeep)
+		for _, msg := range msgs {
 			if msg == nil {
 				continue // skip nil messages.
 			}
@@ -267,10 +261,48 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 				)
 			}
 		}
-		msgs.clearMessages() // clear messages after consuming them.
 	}
 
 	return nil
+}
+
+// extractMessages will extract messages from the given messageKeep, if possible.
+// will consider the type of round (broadcast or not) to determine the order of messages.
+// after this method, the msgkeep will have its delivered flags updated, and the messages would
+// be nilled out.
+func (signer *singleSession) extractMessages(msgkeep *messageKeep) []common.ParsedMessage {
+	if msgkeep == nil {
+		return nil // nothing to extract.
+	}
+
+	// we can have at most 2 messages to deliver.
+	msgs := make([]common.ParsedMessage, 0, 2)
+
+	// if the round is a broadcast round, we need to receive broadcast before we accept direct messages.
+	// this is because some broadcast messages may contain verification information for direct messages.
+	if _, ok := signer.session.(round.BroadcastRound); ok {
+		// if we don't have a broadcast message, we can't proceed to direct messages.
+		if !msgkeep.alreadySet[broadcastMessagePos] {
+			return nil
+		}
+
+		if !msgkeep.delivered[broadcastMessagePos] {
+			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
+			msgkeep.delivered[broadcastMessagePos] = true
+
+			msgkeep.cells[broadcastMessagePos] = nil // clear the message after delivering it.
+		}
+	}
+
+	// after dealing with broadcast messages, we can deal with direct messages.
+	if msgkeep.alreadySet[directMessagePos] && !msgkeep.delivered[directMessagePos] {
+		msgs = append(msgs, msgkeep.cells[directMessagePos])
+		msgkeep.delivered[directMessagePos] = true
+
+		msgkeep.cells[directMessagePos] = nil // clear the message after delivering it.
+	}
+
+	return msgs
 }
 
 // consumeMessage is thread-UNSAFE and will attempt to consume the given message.
