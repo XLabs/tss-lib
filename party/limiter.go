@@ -107,7 +107,7 @@ func (r *rateLimiter) cleanSelf(maxDuration time.Duration) {
 	defer r.mtx.Unlock()
 
 	for k, v := range r.firstSeen {
-		if time.Since(v).Abs() > maxDuration {
+		if time.Since(v) > maxDuration {
 			r.unlockedRemover(k)
 		}
 	}

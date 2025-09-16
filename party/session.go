@@ -18,9 +18,10 @@ type signerState int
 type strPartyID string
 
 type messageKeep struct {
-	cells      [2]common.ParsedMessage
-	alreadySet [2]bool
-	delivered  [2]bool
+	cells [2]common.ParsedMessage
+	// The following flags doen't change when messages are set as nil to save space.
+	alreadySet [2]bool // indicates whether a message was set, even if it is nil now
+	delivered  [2]bool // indicates whether a message was consumed. helps order broadcast before direct messages.
 }
 
 // SingleSession represents a single invocation of a distributed protocol.
@@ -79,7 +80,7 @@ func (s *singleSession) getInitTime() time.Time {
 
 var errMessageEntryFull = errors.New("message entry already contains something")
 
-func (r *messageKeep) addMessages(message common.ParsedMessage) error {
+func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 	cell := directMessagePos
 	if message.IsBroadcast() {
 		cell = broadcastMessagePos
@@ -96,12 +97,41 @@ func (r *messageKeep) addMessages(message common.ParsedMessage) error {
 	return nil
 }
 
-// will clear the stored messages, but not the alreadySet flags,
-// ensuring new messages do not overwrite existing ones.
-func (r *messageKeep) clearMessages() {
+// will clear delivered messages, but not any of their flags.
+func (r *messageKeep) clearDeliveredMessages() {
 	for i := range r.cells {
-		r.cells[i] = nil
+		if r.delivered[i] {
+			r.cells[i] = nil
+		}
 	}
+}
+
+// getMessages returns messages ordered according to the round type (broadcast or not).
+func (msgkeep *messageKeep) getMessages(isBroadcastRound bool) []common.ParsedMessage {
+	// we can have at most 2 messages to deliver.
+	msgs := make([]common.ParsedMessage, 0, 2)
+
+	// if the round is a broadcast round, we need to receive broadcast before we accept direct messages.
+	// this is because some broadcast messages may contain verification information for direct messages.
+	if isBroadcastRound {
+		// if we don't have a broadcast message, we can't proceed to direct messages.
+		if !msgkeep.alreadySet[broadcastMessagePos] {
+			return nil
+		}
+
+		if !msgkeep.delivered[broadcastMessagePos] {
+			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
+			msgkeep.delivered[broadcastMessagePos] = true
+		}
+	}
+
+	// after dealing with broadcast messages, we can deal with direct messages.
+	if msgkeep.alreadySet[directMessagePos] && !msgkeep.delivered[directMessagePos] {
+		msgs = append(msgs, msgkeep.cells[directMessagePos])
+		msgkeep.delivered[directMessagePos] = true
+	}
+
+	return msgs
 }
 
 var (
@@ -175,7 +205,7 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 		signer.messages[msgRnd][from] = &messageKeep{}
 	}
 
-	if err := signer.messages[msgRnd][from].addMessages(message); err != nil {
+	if err := signer.messages[msgRnd][from].addMessage(message); err != nil {
 		// make warning, and drop the message.
 		w := Warning{
 			Message:         "Received more messages than expected from a party; dropping the incoming message",
@@ -226,10 +256,14 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	mp := signer.messages[rnd]
+	_, isBroadcastRound := signer.session.(round.BroadcastRound)
 
 	for _, msgkeep := range mp {
-		msgs := signer.extractMessages(msgkeep)
-		for _, msg := range msgs {
+		if msgkeep == nil {
+			continue
+		}
+
+		for _, msg := range msgkeep.getMessages(isBroadcastRound) {
 			if msg == nil {
 				continue // skip nil messages.
 			}
@@ -261,48 +295,11 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 				)
 			}
 		}
+
+		msgkeep.clearDeliveredMessages()
 	}
 
 	return nil
-}
-
-// extractMessages will extract messages from the given messageKeep, if possible.
-// will consider the type of round (broadcast or not) to determine the order of messages.
-// after this method, the msgkeep will have its delivered flags updated, and the messages would
-// be nilled out.
-func (signer *singleSession) extractMessages(msgkeep *messageKeep) []common.ParsedMessage {
-	if msgkeep == nil {
-		return nil // nothing to extract.
-	}
-
-	// we can have at most 2 messages to deliver.
-	msgs := make([]common.ParsedMessage, 0, 2)
-
-	// if the round is a broadcast round, we need to receive broadcast before we accept direct messages.
-	// this is because some broadcast messages may contain verification information for direct messages.
-	if _, ok := signer.session.(round.BroadcastRound); ok {
-		// if we don't have a broadcast message, we can't proceed to direct messages.
-		if !msgkeep.alreadySet[broadcastMessagePos] {
-			return nil
-		}
-
-		if !msgkeep.delivered[broadcastMessagePos] {
-			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
-			msgkeep.delivered[broadcastMessagePos] = true
-
-			msgkeep.cells[broadcastMessagePos] = nil // clear the message after delivering it.
-		}
-	}
-
-	// after dealing with broadcast messages, we can deal with direct messages.
-	if msgkeep.alreadySet[directMessagePos] && !msgkeep.delivered[directMessagePos] {
-		msgs = append(msgs, msgkeep.cells[directMessagePos])
-		msgkeep.delivered[directMessagePos] = true
-
-		msgkeep.cells[directMessagePos] = nil // clear the message after delivering it.
-	}
-
-	return msgs
 }
 
 // consumeMessage is thread-UNSAFE and will attempt to consume the given message.
@@ -502,7 +499,8 @@ func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
 
 	report, err := signer.attemptRoundFinalize()
 	if report.advancedRound {
-		// clear messages for the previous round.
+		// Since we advanced the round, we can clear any messages from the previous round.
+		// messages for the the current round (signer.session.Number()) are still needed.
 		delete(signer.messages, signer.session.Number()-1)
 	}
 

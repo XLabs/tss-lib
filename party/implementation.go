@@ -305,14 +305,15 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
 
-		// Since signer can be created by receiving a message from a peer,
-		// which we can't assume is honest, we don't set the committee until we have
-		// more information regarding the protocol and its committee configuration
-		// (e.g., DKG has different committee setup).
+		// A SingleSession may be created in response to a message from a peer whose honesty
+		// cannot be assumed. Therefore, any data provided alongside the trackingID
+		// (the identifier for this new session) must be considered untrusted.
+		// In particular, we cannot rely on it to determine the session type or committee.
+		// To establish these safely, we wait for the operator/user to explicitly request
+		// a new signing or DKG via AsyncRequestNewSignature/StartDKG, which updates both
+		// the session type and the committee.
 		committee: nil,
-		// session is once allowed to sign (AsyncRequestNewSignature).
-		session: nil,
-
+		session:   nil,
 		// first round doesn't receive messages (only round number 2,3)
 		messages: make(map[round.Number]map[strPartyID]*messageKeep, frost.NumRounds-1),
 

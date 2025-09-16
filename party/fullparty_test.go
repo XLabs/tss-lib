@@ -142,7 +142,6 @@ func (st *signerTester) run(t *testing.T) {
 			if ok {
 				fmt.Println("session still present for key", trackidkey, "session:", v)
 			}
-			_ = v
 		}
 		p.rateLimiter.mtx.Unlock()
 
