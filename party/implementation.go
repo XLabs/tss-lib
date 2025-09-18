@@ -561,7 +561,7 @@ func (p *Impl) StartDKG(task DkgTask) error {
 		return errDKGIssue
 	}
 
-	if len(p.peers) < task.Threshold {
+	if len(p.peers) <= task.Threshold {
 		return fmt.Errorf("not enough parties to start DKG. Need at least: %d", task.Threshold+1)
 	}
 
