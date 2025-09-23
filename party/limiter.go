@@ -14,8 +14,8 @@ type trackidString string
 // rateLimiter is a helper struct to keep track of active sessions.
 // Each session has a digest, and each peer is allowed to be active
 // for a certain number of sessions.
-// a peer is allowed to send how many messages it want per session, but not allowed to
-// participate in more than maxActiveSignaturesPerGuardian sessions at a time.
+// a peer is allowed to send how many messages it wants per session, but not allowed to
+// participate in more than maxActiveSessions sessions at a time.
 type rateLimiter struct {
 	maxActiveSessions int
 	mtx               sync.Mutex
@@ -43,33 +43,33 @@ func (r *rateLimiter) add(trackId *common.TrackingID, peer *common.PartyID) bool
 		return false
 	}
 
+	sgkey := trackidString(trackId.ToString())
+	strPartyId := strPartyID(peer.ToString())
+
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
-
-	sgkey := trackidString(trackId.ToString())
 
 	if _, ok := r.digestToPeer[sgkey]; !ok {
 		r.digestToPeer[sgkey] = make(set[strPartyID])
 	}
 
-	strPartyId := strPartyID(peer.ToString())
-
 	if _, ok := r.peerToDigest[strPartyId]; !ok {
 		r.peerToDigest[strPartyId] = make(set[trackidString])
 	}
 
-	// if already an active signature for this guardian, then it doesn't count as an additional signature
+	// if already an active signature for this participant, then it doesn't count as an additional signature
 	if _, ok := r.peerToDigest[strPartyId][sgkey]; ok {
 		return true
 	}
 
-	// the guardian hasn't yet participated in this signing for the digest, we must ensure an additional signature is allowed
+	// the participant hasn't yet participated in this signing for the digest, we must ensure an additional signature is allowed
 	if len(r.peerToDigest[strPartyId])+1 > r.maxActiveSessions {
 		return false
 	}
 
 	r.digestToPeer[sgkey][strPartyId] = struct{}{}
 	r.peerToDigest[strPartyId][sgkey] = struct{}{}
+
 	if _, ok := r.firstSeen[sgkey]; !ok {
 		r.firstSeen[sgkey] = time.Now()
 	}
@@ -87,11 +87,11 @@ func (r *rateLimiter) remove(trackid *common.TrackingID) {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	r.unlockedRemover(key)
+	r.unsafeRemove(key)
 
 }
 
-func (r *rateLimiter) unlockedRemover(key trackidString) {
+func (r *rateLimiter) unsafeRemove(key trackidString) {
 	peers := r.digestToPeer[key]
 	delete(r.digestToPeer, key)
 
@@ -108,7 +108,7 @@ func (r *rateLimiter) cleanSelf(maxDuration time.Duration) {
 
 	for k, v := range r.firstSeen {
 		if time.Since(v) > maxDuration {
-			r.unlockedRemover(k)
+			r.unsafeRemove(k)
 		}
 	}
 }

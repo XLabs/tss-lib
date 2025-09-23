@@ -133,15 +133,11 @@ func (st *signerTester) run(t *testing.T) {
 
 		p := party.(*Impl)
 		l := p.rateLimiter.lenDigestMap()
-		trackidkey := ""
+
 		p.rateLimiter.mtx.Lock()
 		for key := range p.rateLimiter.digestToPeer {
-			trackidkey = string(key)
-
-			v, ok := p.sessionMap.Load(trackidkey)
-			if ok {
-				fmt.Println("session still present for key", trackidkey, "session:", v)
-			}
+			_, ok := p.sessionMap.Load(string(key))
+			a.False(ok, "expected session to be removed from session map")
 		}
 		p.rateLimiter.mtx.Unlock()
 
@@ -1286,7 +1282,7 @@ func TestRateLimiting(t *testing.T) {
 	a.ErrorContains(parties[0].Update(p), "reached the maximum")
 
 	// waiting for the rate limiter to cleanup.
-	time.Sleep(parties[0].(*Impl).maxTTl * 2)
+	time.Sleep(parties[0].(*Impl).maxTTl * 3)
 	a.NoError(parties[0].Update(p))
 }
 

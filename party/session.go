@@ -19,7 +19,7 @@ type strPartyID string
 
 type messageKeep struct {
 	cells [2]common.ParsedMessage
-	// The following flags doen't change when messages are set as nil to save space.
+	// The following flags doesn't change when messages are set as nil to save space.
 	alreadySet [2]bool // indicates whether a message was set, even if it is nil now
 	delivered  [2]bool // indicates whether a message was consumed. helps order broadcast before direct messages.
 }
