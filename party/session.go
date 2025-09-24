@@ -104,11 +104,17 @@ func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 }
 
 // will clear delivered messages, but not any of their flags.
-func (r *messageKeep) clearDeliveredMessages() {
+func (r *messageKeep) clearDeliveredMessages(isBroadcastRound bool) {
+
 	for i := range r.cells {
 		if r.state[i] == cellDelivered {
 			r.cells[i] = nil
 		}
+	}
+
+	if !isBroadcastRound {
+		// clear broadcast message even if not deliverd: direct messages only round.
+		r.cells[broadcastMessagePos] = nil
 	}
 }
 
@@ -301,7 +307,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 			}
 		}
 
-		msgkeep.clearDeliveredMessages()
+		msgkeep.clearDeliveredMessages(isBroadcastRound)
 	}
 
 	return nil

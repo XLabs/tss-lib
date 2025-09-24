@@ -1323,3 +1323,132 @@ func TestUpdateChecks(t *testing.T) {
 	tmp.(*common.MessageImpl).From = nil
 	a.ErrorIs(parties[0].Update(tmp), errNilSender)
 }
+
+func TestMessageKeep(t *testing.T) {
+
+	msg := &round.Message{
+		From:      party.ID("UNKNOWN"),
+		To:        party.ID("UNKNOWN"),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: nil,
+	}
+
+	broadcast := msg.ToParsed()
+
+	msg.Broadcast = false
+	direct := msg.ToParsed()
+
+	t.Run("keep blocks adding to full cell", func(t *testing.T) {
+		a := assert.New(t)
+
+		keep := messageKeep{}
+
+		a.NoError(keep.addMessage(broadcast))
+		a.Error(keep.addMessage(broadcast))
+
+		a.NoError(keep.addMessage(direct))
+		a.Error(keep.addMessage(direct))
+
+		// shouldn't do anything as cells are not full yet.
+		keep.clearDeliveredMessages(true)
+		a.Error(keep.addMessage(direct))
+		a.Error(keep.addMessage(broadcast))
+
+		for _, v := range keep.cells {
+			a.NotNil(v)
+		}
+
+		// filling the cells
+
+		keep.getMessages(true) // changing the stage for the cells
+
+		a.Error(keep.addMessage(msg.ToParsed()))
+		msg.Broadcast = true
+		a.Error(keep.addMessage(msg.ToParsed()))
+
+		// Now clearing the cells
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.Nil(v)
+		}
+
+		// not allowing adding messages, even though the cells are empty, as they are in delivered state.
+		a.Error(keep.addMessage(direct))
+		a.Error(keep.addMessage(broadcast))
+	})
+
+	t.Run("order of messages", func(t *testing.T) {
+		a := assert.New(t)
+
+		keep := messageKeep{}
+
+		// Test direct message not returned before a broadcast message is added.
+		keep.addMessage(direct)
+		a.Len(keep.getMessages(true), 0, "expected no message to be returned, since we inspect a broadcast round")
+
+		keep.addMessage(broadcast)
+		a.Len(keep.getMessages(true), 2, "expected both messages to be returned, since we inspect a broadcast round")
+
+		// Test that broadcast is returned on demand for broadcast round.
+		keep = messageKeep{}
+		msg.Broadcast = true
+		keep.addMessage(broadcast)
+		msgs := keep.getMessages(true)
+		a.Len(msgs, 1)
+
+		a.True(msgs[0].IsBroadcast())
+
+		// check that we don't return the broadcast message again. Just the direct one.
+		keep.addMessage(direct)
+		msgs = keep.getMessages(true)
+		a.Len(msgs, 1)
+		a.False(msgs[0].IsBroadcast(), "expected direct message to be returned.")
+
+		// Check broadcast message is not returned in a direct round.
+		keep = messageKeep{}
+		msg.Broadcast = true
+		keep.addMessage(broadcast)
+		msgs = keep.getMessages(false)
+		a.Len(msgs, 0, "expected no message to be returned, since we inspect a direct round")
+
+		keep.addMessage(direct)
+		msgs = keep.getMessages(false)
+		a.Len(msgs, 1, "expected only direct message to be returned.")
+		a.False(msgs[0].IsBroadcast())
+	})
+
+	t.Run("clear messages logic", func(t *testing.T) {
+		a := assert.New(t)
+
+		// broadcast case, check delivery
+		keep := messageKeep{}
+		keep.addMessage(broadcast)
+		keep.addMessage(direct)
+
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.NotNil(v) // not delivered yet, so should not be cleared.
+		}
+
+		keep.getMessages(true) // changing the stage for the cells
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.Nil(v)
+		}
+
+		// inspect direct round drops broadcast messages always.
+		keep = messageKeep{}
+		keep.addMessage(broadcast)
+		keep.addMessage(direct)
+
+		keep.clearDeliveredMessages(false)
+		a.Nil(keep.cells[broadcastMessagePos])
+		a.NotNil(keep.cells[directMessagePos])
+
+		a.Len(keep.getMessages(false), 1)
+	})
+}
