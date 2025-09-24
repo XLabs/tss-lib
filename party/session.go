@@ -17,11 +17,17 @@ type signerState int
 
 type strPartyID string
 
+type messageCellState int
+
+const (
+	cellEmpty, cellSet, cellDelivered messageCellState = 0, 1, 2
+)
+
 type messageKeep struct {
 	cells [2]common.ParsedMessage
-	// The following flags doesn't change when messages are set as nil to save space.
-	alreadySet [2]bool // indicates whether a message was set, even if it is nil now
-	delivered  [2]bool // indicates whether a message was consumed. helps order broadcast before direct messages.
+
+	// used to state whether a cell was previouslt set, delivered, or cleared.
+	state [2]messageCellState
 }
 
 // SingleSession represents a single invocation of a distributed protocol.
@@ -87,12 +93,12 @@ func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 	}
 
 	// ensure cell is empty
-	if r.alreadySet[cell] {
+	if r.state[cell] != cellEmpty {
 		return errMessageEntryFull
 	}
 
 	r.cells[cell] = message
-	r.alreadySet[cell] = true
+	r.state[cell] = cellSet
 
 	return nil
 }
@@ -100,7 +106,7 @@ func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 // will clear delivered messages, but not any of their flags.
 func (r *messageKeep) clearDeliveredMessages() {
 	for i := range r.cells {
-		if r.delivered[i] {
+		if r.state[i] == cellDelivered {
 			r.cells[i] = nil
 		}
 	}
@@ -114,21 +120,20 @@ func (msgkeep *messageKeep) getMessages(isBroadcastRound bool) []common.ParsedMe
 	// if the round is a broadcast round, we need to receive broadcast before we accept direct messages.
 	// this is because some broadcast messages may contain verification information for direct messages.
 	if isBroadcastRound {
-		// if we don't have a broadcast message, we can't proceed to direct messages.
-		if !msgkeep.alreadySet[broadcastMessagePos] {
+		switch msgkeep.state[broadcastMessagePos] {
+		case cellEmpty: // nothing to deliver, can't proceed to direct messages.
 			return nil
-		}
-
-		if !msgkeep.delivered[broadcastMessagePos] {
+		case cellSet: // we have a message to deliver. then proceed to direct messages.
 			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
-			msgkeep.delivered[broadcastMessagePos] = true
+			msgkeep.state[broadcastMessagePos] = cellDelivered
+		case cellDelivered: // already delivered, can proceed to direct messages.
 		}
 	}
 
 	// after dealing with broadcast messages, we can deal with direct messages.
-	if msgkeep.alreadySet[directMessagePos] && !msgkeep.delivered[directMessagePos] {
+	if msgkeep.state[directMessagePos] == cellSet {
 		msgs = append(msgs, msgkeep.cells[directMessagePos])
-		msgkeep.delivered[directMessagePos] = true
+		msgkeep.state[directMessagePos] = cellDelivered
 	}
 
 	return msgs
@@ -143,6 +148,13 @@ var (
 	errSignerNotactivated     = errors.New("signer is not activated")
 	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
+
+func (s *singleSession) tryWarn(w *Warning) {
+	select {
+	case s.outputChannels.WarningChannel <- w:
+	default:
+	}
+}
 
 // storeMessage stores the message in internal storage, allowing the session time to consume
 // the message later, when it is ready to do so.
@@ -206,18 +218,14 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 	}
 
 	if err := signer.messages[msgRnd][from].addMessage(message); err != nil {
-		// make warning, and drop the message.
-		w := Warning{
+		signer.tryWarn(&Warning{
 			Message:         "Received more messages than expected from a party; dropping the incoming message",
 			TrackingID:      signer.trackingId,
 			PossibleCulprit: message.GetFrom(),
 			Protocol:        common.ProtocolType(signer.session.ProtocolID()),
 			SessionRound:    signerRound,
-		}
-		select {
-		case signer.outputChannels.WarningChannel <- &w:
-		default: // in case no one is listening/ channel is full, drop the warning.
-		}
+		})
+
 		return nil
 	}
 
@@ -230,7 +238,7 @@ func (signer *singleSession) getState() signerState {
 
 // consumeStoredMessages is thread-UNSAFE will attempt to consume all messages stored for the current round.
 func (signer *singleSession) consumeStoredMessages() *common.Error {
-	if signer.session == nil {
+	if signer == nil || signer.session == nil {
 		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
 	}
 
@@ -269,16 +277,13 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 			}
 
 			if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(msg.GetFrom()) {
-				select {
-				case signer.outputChannels.WarningChannel <- &Warning{
+				signer.tryWarn(&Warning{
 					Message:         "message from non-committee member dropped",
 					TrackingID:      signer.trackingId,
 					PossibleCulprit: msg.GetFrom(),
 					Protocol:        common.ProtocolFROST, // TODO support more than just frost
 					SessionRound:    rnd,
-				}:
-				default: // in case no one is listening/ channel is full, drop the warning.
-				}
+				})
 
 				continue
 			}
