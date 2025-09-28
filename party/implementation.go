@@ -41,6 +41,8 @@ type Impl struct {
 	loadDistributionSeed []byte
 
 	workersWg sync.WaitGroup
+
+	rateLimiter rateLimiter
 }
 
 func hash(msg []byte) Digest {
@@ -57,6 +59,7 @@ func (p *Impl) cleanupWorker() {
 
 		case <-time.After(p.maxTTl):
 			p.sessionMap.cleanup(p.maxTTl)
+			p.rateLimiter.cleanSelf(p.maxTTl)
 		}
 	}
 }
@@ -214,6 +217,9 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	// after session end, either with success or error, we remove it from the session map.
 	p.sessionMap.deleteSession(session)
 
+	// also remove it from the rate limiter.
+	p.rateLimiter.remove(session.trackingId)
+
 	// Finalizing the session.
 	conf, sig, err := session.extractOutput()
 	if err != nil {
@@ -239,7 +245,6 @@ func (p *Impl) outputKeygen(res *TSSSecrets) {
 	}
 }
 
-// assumes locked by the caller.
 // This is the only method that changes the session state.
 func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) error {
 	signer.mtx.Lock()
@@ -260,6 +265,10 @@ func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) er
 
 	if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(p.self) {
 		signer.state.Store(int64(notInCommittee))
+
+		// not in committee, so we can remove it from the rate limiter.
+		// we will not store any messages for this session anymore.
+		p.rateLimiter.remove(signer.trackingId)
 
 		return nil
 	}
@@ -295,16 +304,19 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
 
-		// set after store or load of the singleSession.
+		// A SingleSession may be created in response to a message from a peer whose honesty
+		// cannot be assumed. Therefore, any data provided alongside the trackingID
+		// (the identifier for this new session) must be considered untrusted.
+		// In particular, we cannot rely on it to determine the session type or committee.
+		// To establish these safely, we wait for the operator/user to explicitly request
+		// a new signing or DKG via AsyncRequestNewSignature/StartDKG, which updates both
+		// the session type and the committee.
 		committee: nil,
-		// session is once allowed to sign (AsyncRequestNewSignature).
-		session: nil,
-
+		session:   nil,
 		// first round doesn't receive messages (only round number 2,3)
 		messages: make(map[round.Number]map[strPartyID]*messageKeep, frost.NumRounds-1),
 
 		outputChannels: &p.outputChannels,
-		peersmap:       p.peersmap,
 	})
 
 	return signer, nil
@@ -350,7 +362,46 @@ type feedMessageTask struct {
 	message common.ParsedMessage
 }
 
+var (
+	errNilMessage = errors.New("nil message")
+	errNilSender  = errors.New("nil sender in message")
+)
+
 func (p *Impl) Update(message common.ParsedMessage) error {
+	if message == nil {
+		return errNilMessage
+	}
+
+	wiremsg := message.WireMsg()
+	if wiremsg == nil {
+		return errNilMessage
+	}
+
+	trackid := wiremsg.GetTrackingID()
+	if trackid == nil {
+		return errInvalidTrackingID
+	}
+
+	peer := message.GetFrom()
+	if peer == nil {
+		return errNilSender
+	}
+	if !wiremsg.GetFrom().Equals(peer) {
+		return fmt.Errorf("mismatched sender in message: %s != %s", wiremsg.GetFrom().ToString(), peer.ToString())
+	}
+
+	peerID := party.ID(peer.GetID())
+
+	// ensure known sender.
+	if _, ok := p.peersmap[peerID]; !ok {
+		return fmt.Errorf("unknown sender: %s", message.GetFrom().ToString())
+	}
+
+	canFeed := p.rateLimiter.add(message.WireMsg().GetTrackingID(), peer)
+	if !canFeed {
+		return fmt.Errorf("peer %v has reached the maximum number of simultaneous sessions", peerID)
+	}
+
 	select {
 	case p.incomingMessagesChannel <- feedMessageTask{message: message}:
 		return nil
@@ -380,7 +431,10 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	if state == notInCommittee {
 		// no need to store the message since the signer is not in the committee.
 
-		return // no issues, and nothing to report.
+		// ensuring we remove this trackid from the rate limiter.
+		p.rateLimiter.remove(signer.trackingId)
+
+		return
 	}
 
 	if err := signer.storeMessage(message); err != nil {
@@ -506,7 +560,7 @@ func (p *Impl) StartDKG(task DkgTask) error {
 		return errDKGIssue
 	}
 
-	if len(p.peers) < task.Threshold {
+	if len(p.peers) <= task.Threshold {
 		return fmt.Errorf("not enough parties to start DKG. Need at least: %d", task.Threshold+1)
 	}
 

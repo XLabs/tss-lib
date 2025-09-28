@@ -13,11 +13,20 @@ import (
 	common "github.com/xlabs/tss-common"
 )
 
+// states for a session. defined as constants.
 type signerState int
+
+// states for message cells. defined as constants.
+type messageCellState int
 
 type strPartyID string
 
-type messageKeep [2]common.ParsedMessage
+type messageKeep struct {
+	cells [2]common.ParsedMessage
+
+	// used to state whether a cell was previouslt set, delivered, or cleared.
+	state [2]messageCellState
+}
 
 // SingleSession represents a single invocation of a distributed protocol.
 // It handles the protocol from start to finish. It holds the state of the protocol (whether it is
@@ -54,7 +63,6 @@ type singleSession struct {
 	// the following fields are references from the FullParty,
 	// used for easy access to the FullParty's components.
 	outputChannels *OutputChannels
-	peersmap       map[party.ID]*common.PartyID
 }
 
 func (s signerState) String() string {
@@ -76,28 +84,63 @@ func (s *singleSession) getInitTime() time.Time {
 
 var errMessageEntryFull = errors.New("message entry already contains something")
 
-func (r *messageKeep) addMsg(message common.ParsedMessage) error {
+func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 	cell := directMessagePos
 	if message.IsBroadcast() {
 		cell = broadcastMessagePos
 	}
 
 	// ensure cell is empty
-	if r[cell] != nil {
+	if r.state[cell] != empty {
 		return errMessageEntryFull
 	}
 
-	r[cell] = message
+	r.cells[cell] = message
+	r.state[cell] = assigned
 
 	return nil
 }
 
-func (r *messageKeep) getMsgs() []common.ParsedMessage {
-	if r == nil {
-		return nil // no messages stored.
+// will clear delivered messages, but not any of their flags.
+func (r *messageKeep) clearDeliveredMessages(isBroadcastRound bool) {
+
+	for i := range r.cells {
+		if r.state[i] == delivered {
+			r.cells[i] = nil
+		}
 	}
 
-	return (*r)[:]
+	if !isBroadcastRound {
+		// clear broadcast message even if not deliverd: direct messages only round.
+		r.cells[broadcastMessagePos] = nil
+	}
+}
+
+// getMessages returns messages ordered according to the round type (broadcast or not).
+func (msgkeep *messageKeep) getMessages(isBroadcastRound bool) []common.ParsedMessage {
+	// we can have at most 2 messages to deliver.
+	msgs := make([]common.ParsedMessage, 0, 2)
+
+	// if the round is a broadcast round, we need to receive broadcast before we accept direct messages.
+	// this is because some broadcast messages may contain verification information for direct messages.
+	if isBroadcastRound {
+		switch msgkeep.state[broadcastMessagePos] {
+		case empty: // nothing to deliver, can't proceed to direct messages.
+			return nil
+		case assigned: // we have a message to deliver. then proceed to direct messages.
+			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
+			msgkeep.state[broadcastMessagePos] = delivered
+		case delivered: // already delivered, can proceed to direct messages.
+		}
+	}
+
+	// after dealing with broadcast messages, we can deal with direct messages.
+	if msgkeep.state[directMessagePos] == assigned {
+		msgs = append(msgs, msgkeep.cells[directMessagePos])
+		msgkeep.state[directMessagePos] = delivered
+	}
+
+	return msgs
 }
 
 var (
@@ -109,6 +152,13 @@ var (
 	errSignerNotactivated     = errors.New("signer is not activated")
 	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )
+
+func (s *singleSession) tryWarn(w *Warning) {
+	select {
+	case s.outputChannels.WarningChannel <- w:
+	default:
+	}
+}
 
 // storeMessage stores the message in internal storage, allowing the session time to consume
 // the message later, when it is ready to do so.
@@ -171,15 +221,16 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 		signer.messages[msgRnd][from] = &messageKeep{}
 	}
 
-	if err := signer.messages[msgRnd][from].addMsg(message); err != nil {
-		return common.NewTrackableError(
-			err,
-			"storeMessage",
-			int(signerRound),
-			signer.self,
-			signer.trackingId,
-			message.GetFrom(), // possible culprit
-		)
+	if err := signer.messages[msgRnd][from].addMessage(message); err != nil {
+		signer.tryWarn(&Warning{
+			Message:         "Received more messages than expected from a party; dropping the incoming message",
+			TrackingID:      signer.trackingId,
+			PossibleCulprit: message.GetFrom(),
+			Protocol:        common.ProtocolType(signer.session.ProtocolID()),
+			SessionRound:    signerRound,
+		})
+
+		return nil
 	}
 
 	return nil
@@ -191,7 +242,7 @@ func (signer *singleSession) getState() signerState {
 
 // consumeStoredMessages is thread-UNSAFE will attempt to consume all messages stored for the current round.
 func (signer *singleSession) consumeStoredMessages() *common.Error {
-	if signer.session == nil {
+	if signer == nil || signer.session == nil {
 		return common.NewError(errNilSigner, "consumeStoredMessages", -1, nil, signer.self)
 	}
 
@@ -217,28 +268,26 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 	}
 
 	mp := signer.messages[rnd]
+	_, isBroadcastRound := signer.session.(round.BroadcastRound)
 
-	for key, msgs := range mp {
-		msgs.getMsgs()
+	for _, msgkeep := range mp {
+		if msgkeep == nil {
+			continue
+		}
 
-		delete(mp, key) // remove the message store from the map.
-
-		for _, msg := range msgs.getMsgs() {
+		for _, msg := range msgkeep.getMessages(isBroadcastRound) {
 			if msg == nil {
 				continue // skip nil messages.
 			}
 
 			if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(msg.GetFrom()) {
-				select {
-				case signer.outputChannels.WarningChannel <- &Warning{
+				signer.tryWarn(&Warning{
 					Message:         "message from non-committee member dropped",
 					TrackingID:      signer.trackingId,
 					PossibleCulprit: msg.GetFrom(),
 					Protocol:        common.ProtocolFROST, // TODO support more than just frost
 					SessionRound:    rnd,
-				}:
-				default: // in case no one is listening/ channel is full, drop the warning.
-				}
+				})
 
 				continue
 			}
@@ -255,6 +304,8 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 				)
 			}
 		}
+
+		msgkeep.clearDeliveredMessages(isBroadcastRound)
 	}
 
 	return nil
@@ -273,6 +324,10 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 	//  messages may perform some necessary checks and might even run
 	// some cryptographic computations (depending on the protocol).
 	if !m.Broadcast {
+		if err := signer.session.VerifyMessage(m); err != nil {
+			return err
+		}
+
 		return signer.session.StoreMessage(m)
 	}
 
@@ -282,6 +337,7 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 		return errShouldBeBroadcastRound
 	}
 
+	// verifyBroadcastMessage doesn't exist, the following does both verify and store.
 	return r.StoreBroadcastMessage(m)
 }
 
@@ -450,5 +506,12 @@ func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
 		return finalizeReport{}, err
 	}
 
-	return signer.attemptRoundFinalize()
+	report, err := signer.attemptRoundFinalize()
+	if report.advancedRound {
+		// Since we advanced the round, we can clear any messages from the previous round.
+		// messages for the the current round (signer.session.Number()) are still needed.
+		delete(signer.messages, signer.session.Number()-1)
+	}
+
+	return report, err
 }

@@ -94,13 +94,9 @@ func (st *signerTester) run(t *testing.T) {
 
 	digestSet := createDigests(st.numSignatures)
 
-	n := networkSimulator{
-		chans: newOutChannels(),
-
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         st.maxNetworkSimulationTime,
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = st.maxNetworkSimulationTime
 
 	for _, p := range parties {
 		a.NoError(
@@ -131,8 +127,21 @@ func (st *signerTester) run(t *testing.T) {
 	<-donechan
 	a.True(n.verifiedAllSignatures())
 
+	time.Sleep(time.Second * 1)
 	for _, party := range parties {
 		party.Stop()
+
+		p := party.(*Impl)
+		l := p.rateLimiter.lenDigestMap()
+
+		p.rateLimiter.mtx.Lock()
+		for key := range p.rateLimiter.digestToPeer {
+			_, ok := p.sessionMap.Load(string(key))
+			a.False(ok, "expected session to be removed from session map")
+		}
+		p.rateLimiter.mtx.Unlock()
+
+		a.Equal(0, l, "expected 0 digests in rate limiter, got %d", l)
 	}
 }
 
@@ -146,12 +155,9 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 
 	digestSet, hash := createSingleDigest()
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 3,
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 3
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -208,12 +214,9 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 
 	digestSet, _ := createSingleDigest()
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 30 * time.Duration(len(digestSet)),
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 30 * time.Duration(len(digestSet))
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -262,12 +265,9 @@ func testLateParties(t *testing.T, numLate int) {
 
 	digestSet, hash := createSingleDigest()
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 3,
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 3
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -318,6 +318,13 @@ func createSingleDigest() (map[Digest]bool, Digest) {
 	return digestSet, hash
 }
 
+func (r *rateLimiter) lenDigestMap() int {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	return len(r.digestToPeer)
+}
+
 func TestCleanup(t *testing.T) {
 	a := assert.New(t)
 
@@ -326,27 +333,41 @@ func TestCleanup(t *testing.T) {
 	for _, impl := range parties {
 		impl.(*Impl).maxTTl = maxTTL
 	}
-	n := networkSimulator{
-		chans: newOutChannels(),
-	}
+
+	n := newNetworkSimulator(parties)
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
 	}
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
-	fpSign(a, p1, SigningTask{
+	info := fpSign(a, p1, SigningTask{
 		Digest: digest,
 	})
+	p1.rateLimiter.add(info.TrackingID, p1.self) // manually adding to rate limiter, as fpSign doesn't do it.
 
 	a.Equal(getLen(&p1.sessionMap.Map), 1, "expected 1 signer ")
+	a.Equal(1, p1.rateLimiter.lenDigestMap(), "expected 1 digest in rate limiter")
 
 	<-time.After(maxTTL * 2)
 
 	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
+	a.Equal(0, p1.rateLimiter.lenDigestMap(), "expected 0 digest in rate limiter")
 
 	for _, party := range parties {
 		party.Stop()
+	}
+}
+
+func newNetworkSimulator(parties []FullParty) networkSimulator {
+	return networkSimulator{
+		chans:           newOutChannels(),
+		idToFullParty:   idToParty(parties),
+		digestsToVerify: map[Digest]bool{},
+		numSigsReceived: map[Digest]int{},
+
+		Timeout:   0,     // no timeout
+		expectErr: false, // no error expected
 	}
 }
 
@@ -364,19 +385,38 @@ type networkSimulator struct {
 	chans           OutputChannels
 	idToFullParty   map[string]FullParty
 	digestsToVerify map[Digest]bool // states whether it was checked or not yet.
+	numSigsReceived map[Digest]int
 
 	Timeout time.Duration // 0 means no timeout
 	// used to wait for errors
 	expectErr bool
 }
 
-func (n *networkSimulator) verifiedAllSignatures() bool {
+// numSigsExpected is set when we wish to check that each guardian has signed.
+func (n *networkSimulator) verifiedAllSignatures(numSigsExpected ...int) bool {
 	for _, b := range n.digestsToVerify {
 		if b {
 			continue
 		}
 		return false
 	}
+
+	if len(numSigsExpected) == 0 {
+		return true
+	}
+	numExpected := numSigsExpected[0]
+
+	for dgst, _ := range n.digestsToVerify {
+		v, ok := n.numSigsReceived[dgst]
+		if !ok {
+			return false
+		}
+		if v < numExpected {
+			return false
+		}
+
+	}
+
 	return true
 
 }
@@ -390,22 +430,23 @@ func idToParty(parties []FullParty) map[string]FullParty {
 }
 
 func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) {
+	var dnchn chan struct{} = nil
+	if len(donechan) > 0 {
+		dnchn = donechan[0]
+	}
+	after := time.After(n.Timeout)
+	if n.Timeout == 0 {
+		after = nil
+	}
+
 	var anyParty FullParty
 	for _, p := range n.idToFullParty {
 		anyParty = p
 		break
 	}
-	var dnchn chan struct{} = nil
-	if len(donechan) > 0 {
-		dnchn = donechan[0]
-	}
-
 	a.NotNil(anyParty)
 
-	after := time.After(n.Timeout)
-	if n.Timeout == 0 {
-		after = nil
-	}
+	numSigsExpected := anyParty.(*Impl).committeeSize()
 
 	for {
 		select {
@@ -437,10 +478,11 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 				a.True(validateSignature(pk, m, d[:]))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m.TrackingId)
-				continue
 			}
 
-			if n.verifiedAllSignatures() {
+			n.numSigsReceived[d] = n.numSigsReceived[d] + 1
+
+			if n.verifiedAllSignatures(numSigsExpected) {
 				fmt.Println("All signatures validated correctly.")
 				return
 			}
@@ -614,13 +656,10 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 
 	digestSet := createDigests(200) // 200 digests to sign
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 5,
-		expectErr:       true,
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 2
+	n.expectErr = true
 
 	goroutinesstart := runtime.NumGoroutine()
 
@@ -680,12 +719,9 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	hash2 := Digest{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}
 	digestSet[hash2] = false
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 20 * time.Duration(len(digestSet)),
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 20 * time.Duration(len(digestSet))
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -745,12 +781,9 @@ func TestChangingCommittee(t *testing.T) {
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: digestSet,
-		Timeout:         time.Second * 120 * time.Duration(len(digestSet)),
-	}
+	n := newNetworkSimulator(parties)
+	n.digestsToVerify = digestSet
+	n.Timeout = time.Second * 120 * time.Duration(len(digestSet))
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -956,14 +989,7 @@ func testKeygen(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 
-	n := networkSimulator{
-		chans:           newOutChannels(),
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: map[Digest]bool{},
-
-		Timeout:   0,
-		expectErr: false,
-	}
+	n := newNetworkSimulator(parties)
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -1009,15 +1035,7 @@ func testNilConfigKeyGen(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 
-	n := networkSimulator{
-		chans: newOutChannels(),
-
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: map[Digest]bool{},
-
-		Timeout:   0,
-		expectErr: false,
-	}
+	n := newNetworkSimulator(parties)
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -1059,15 +1077,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 		impl.(*Impl).maxTTl = maxTTL
 	}
 
-	n := networkSimulator{
-		chans: newOutChannels(),
-
-		idToFullParty:   idToParty(parties),
-		digestsToVerify: map[Digest]bool{},
-
-		Timeout:   0, // no timeout on network.
-		expectErr: false,
-	}
+	n := newNetworkSimulator(parties)
 
 	for _, p := range parties {
 		a.NoError(p.Start(n.chans))
@@ -1182,4 +1192,263 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		a.FailNow("timeout waiting for warning to be sent")
 	}
+}
+
+func TestSessionRejectsMessageSentTwice(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	_, hash := createSingleDigest()
+
+	for _, p := range parties {
+		a.NoError(p.Start(newOutChannels()))
+	}
+
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+	})
+
+	p := (&round.Message{
+		From:      party.ID(parties[3].(*Impl).self.ID), // party 3 is in committee
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: info.TrackingID,
+	}).ToParsed()
+
+	// Trigger the code path that should warn
+	go parties[0].Update(p)
+
+	// check no warning yet
+	select {
+	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+		a.FailNow("did not expect a warning the first time")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	//  Assert the warning appears after sending similar message type for the same session and round again
+	go parties[0].Update(p) // sending the same message again.
+	select {
+	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+		return
+	case <-time.After(1 * time.Second):
+		a.FailNow("timeout waiting for warning to be sent")
+	}
+}
+
+func TestRateLimiting(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	// Changing parameters before starting the parties.
+	for _, p := range parties {
+		p.(*Impl).rateLimiter.maxActiveSessions = 1
+		p.(*Impl).maxTTl = time.Second * 1
+	}
+
+	_, hash := createSingleDigest()
+
+	for _, p := range parties {
+		a.NoError(p.Start(newOutChannels()))
+	}
+
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+	})
+
+	p := (&round.Message{
+		From:      party.ID(parties[3].(*Impl).self.ID), // party 3 is in committee
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: info.TrackingID,
+	}).ToParsed()
+
+	// Trigger the code path that should warn
+	a.NoError(parties[0].Update(p))
+
+	// changing the digest, demanding different session.
+	p.WireMsg().TrackingID.Digest[0] += 1
+	a.ErrorContains(parties[0].Update(p), "reached the maximum")
+
+	// waiting for the rate limiter to cleanup.
+	time.Sleep(parties[0].(*Impl).maxTTl * 3)
+	a.NoError(parties[0].Update(p))
+}
+
+func TestUpdateChecks(t *testing.T) {
+	a := assert.New(t)
+
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold)
+
+	for _, p := range parties {
+		a.NoError(p.Start(newOutChannels()))
+	}
+
+	a.ErrorIs(parties[0].Update(nil), errNilMessage)
+
+	p := &round.Message{
+		From:      party.ID("UNKNOWN"),
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: nil,
+	}
+	a.ErrorIs(parties[0].Update(p.ToParsed()), errInvalidTrackingID)
+
+	_, hash := createSingleDigest()
+	info := fpSign(a, parties[0], SigningTask{
+		Digest:   hash,
+		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+	})
+	p.TrackingID = info.TrackingID
+	a.ErrorContains(parties[0].Update(p.ToParsed()), "unknown sender")
+
+	tmp := p.ToParsed()
+	tmp.WireMsg().From = nil
+	a.ErrorContains(parties[0].Update(tmp), "mismatch")
+	tmp.(*common.MessageImpl).From = nil
+	a.ErrorIs(parties[0].Update(tmp), errNilSender)
+}
+
+func TestMessageKeep(t *testing.T) {
+
+	msg := &round.Message{
+		From:      party.ID("UNKNOWN"),
+		To:        party.ID("UNKNOWN"),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: nil,
+	}
+
+	broadcast := msg.ToParsed()
+
+	msg.Broadcast = false
+	direct := msg.ToParsed()
+
+	t.Run("keep blocks adding to full cell", func(t *testing.T) {
+		a := assert.New(t)
+
+		keep := messageKeep{}
+
+		a.NoError(keep.addMessage(broadcast))
+		a.Error(keep.addMessage(broadcast))
+
+		a.NoError(keep.addMessage(direct))
+		a.Error(keep.addMessage(direct))
+
+		// shouldn't do anything as cells are not full yet.
+		keep.clearDeliveredMessages(true)
+		a.Error(keep.addMessage(direct))
+		a.Error(keep.addMessage(broadcast))
+
+		for _, v := range keep.cells {
+			a.NotNil(v)
+		}
+
+		// filling the cells
+
+		keep.getMessages(true) // changing the stage for the cells
+
+		a.Error(keep.addMessage(msg.ToParsed()))
+		msg.Broadcast = true
+		a.Error(keep.addMessage(msg.ToParsed()))
+
+		// Now clearing the cells
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.Nil(v)
+		}
+
+		// not allowing adding messages, even though the cells are empty, as they are in delivered state.
+		a.Error(keep.addMessage(direct))
+		a.Error(keep.addMessage(broadcast))
+	})
+
+	t.Run("order of messages", func(t *testing.T) {
+		a := assert.New(t)
+
+		keep := messageKeep{}
+
+		// Test direct message not returned before a broadcast message is added.
+		keep.addMessage(direct)
+		a.Len(keep.getMessages(true), 0, "expected no message to be returned, since we inspect a broadcast round")
+
+		keep.addMessage(broadcast)
+		a.Len(keep.getMessages(true), 2, "expected both messages to be returned, since we inspect a broadcast round")
+
+		// Test that broadcast is returned on demand for broadcast round.
+		keep = messageKeep{}
+		msg.Broadcast = true
+		keep.addMessage(broadcast)
+		msgs := keep.getMessages(true)
+		a.Len(msgs, 1)
+
+		a.True(msgs[0].IsBroadcast())
+
+		// check that we don't return the broadcast message again. Just the direct one.
+		keep.addMessage(direct)
+		msgs = keep.getMessages(true)
+		a.Len(msgs, 1)
+		a.False(msgs[0].IsBroadcast(), "expected direct message to be returned.")
+
+		// Check broadcast message is not returned in a direct round.
+		keep = messageKeep{}
+		msg.Broadcast = true
+		keep.addMessage(broadcast)
+		msgs = keep.getMessages(false)
+		a.Len(msgs, 0, "expected no message to be returned, since we inspect a direct round")
+
+		keep.addMessage(direct)
+		msgs = keep.getMessages(false)
+		a.Len(msgs, 1, "expected only direct message to be returned.")
+		a.False(msgs[0].IsBroadcast())
+	})
+
+	t.Run("clear messages logic", func(t *testing.T) {
+		a := assert.New(t)
+
+		// broadcast case, check delivery
+		keep := messageKeep{}
+		keep.addMessage(broadcast)
+		keep.addMessage(direct)
+
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.NotNil(v) // not delivered yet, so should not be cleared.
+		}
+
+		keep.getMessages(true) // changing the stage for the cells
+		keep.clearDeliveredMessages(true)
+		for _, v := range keep.cells {
+			a.Nil(v)
+		}
+
+		// inspect direct round drops broadcast messages always.
+		keep = messageKeep{}
+		keep.addMessage(broadcast)
+		keep.addMessage(direct)
+
+		keep.clearDeliveredMessages(false)
+		a.Nil(keep.cells[broadcastMessagePos])
+		a.NotNil(keep.cells[directMessagePos])
+
+		a.Len(keep.getMessages(false), 1)
+	})
 }
