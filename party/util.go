@@ -50,7 +50,7 @@ func shuffle[T any](seed []byte, arr []T) error {
 
 	n := len(arr)
 	// Fisher–Yates shuffle
-	for i := n - 1; i >= 0; i-- {
+	for i := n - 1; i > 0; i-- {
 		j, err := rng.modint(uint64(i + 1))
 		if err != nil {
 			return err

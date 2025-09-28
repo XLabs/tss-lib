@@ -245,7 +245,6 @@ func (p *Impl) outputKeygen(res *TSSSecrets) {
 	}
 }
 
-// assumes locked by the caller.
 // This is the only method that changes the session state.
 func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) error {
 	signer.mtx.Lock()
