@@ -13,15 +13,13 @@ import (
 	common "github.com/xlabs/tss-common"
 )
 
+// states for a session. defined as constants.
 type signerState int
 
-type strPartyID string
-
+// states for message cells. defined as constants.
 type messageCellState int
 
-const (
-	cellEmpty, cellSet, cellDelivered messageCellState = 0, 1, 2
-)
+type strPartyID string
 
 type messageKeep struct {
 	cells [2]common.ParsedMessage
@@ -93,12 +91,12 @@ func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 	}
 
 	// ensure cell is empty
-	if r.state[cell] != cellEmpty {
+	if r.state[cell] != empty {
 		return errMessageEntryFull
 	}
 
 	r.cells[cell] = message
-	r.state[cell] = cellSet
+	r.state[cell] = assigned
 
 	return nil
 }
@@ -107,7 +105,7 @@ func (r *messageKeep) addMessage(message common.ParsedMessage) error {
 func (r *messageKeep) clearDeliveredMessages(isBroadcastRound bool) {
 
 	for i := range r.cells {
-		if r.state[i] == cellDelivered {
+		if r.state[i] == delivered {
 			r.cells[i] = nil
 		}
 	}
@@ -127,19 +125,19 @@ func (msgkeep *messageKeep) getMessages(isBroadcastRound bool) []common.ParsedMe
 	// this is because some broadcast messages may contain verification information for direct messages.
 	if isBroadcastRound {
 		switch msgkeep.state[broadcastMessagePos] {
-		case cellEmpty: // nothing to deliver, can't proceed to direct messages.
+		case empty: // nothing to deliver, can't proceed to direct messages.
 			return nil
-		case cellSet: // we have a message to deliver. then proceed to direct messages.
+		case assigned: // we have a message to deliver. then proceed to direct messages.
 			msgs = append(msgs, msgkeep.cells[broadcastMessagePos])
-			msgkeep.state[broadcastMessagePos] = cellDelivered
-		case cellDelivered: // already delivered, can proceed to direct messages.
+			msgkeep.state[broadcastMessagePos] = delivered
+		case delivered: // already delivered, can proceed to direct messages.
 		}
 	}
 
 	// after dealing with broadcast messages, we can deal with direct messages.
-	if msgkeep.state[directMessagePos] == cellSet {
+	if msgkeep.state[directMessagePos] == assigned {
 		msgs = append(msgs, msgkeep.cells[directMessagePos])
-		msgkeep.state[directMessagePos] = cellDelivered
+		msgkeep.state[directMessagePos] = delivered
 	}
 
 	return msgs

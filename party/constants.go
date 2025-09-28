@@ -29,3 +29,7 @@ const (
 	activated
 	notInCommittee
 )
+
+const (
+	empty, assigned, delivered messageCellState = 0, 1, 2
+)
