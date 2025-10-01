@@ -156,6 +156,11 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		p.MaxActiveSessions = maxActiveSessions
 	}
 
+	// validate frost config (if provided)
+	if p.FrostSecrets != nil && !p.FrostSecrets.ValidateBasic() {
+		return nil, errors.New("invalid frost config")
+	}
+
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
 		ctx:        ctx,
