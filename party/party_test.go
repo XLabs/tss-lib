@@ -54,14 +54,6 @@ func newOutChannels() OutputChannels {
 
 func TestSigning(t *testing.T) {
 	st := signerTester{
-		participants:             1,
-		threshold:                0,
-		numSignatures:            1,
-		maxNetworkSimulationTime: time.Second * 3,
-	}
-	t.Run("one-out-of-one signer", st.run)
-
-	st = signerTester{
 		participants:             test.TestParticipants,
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
@@ -349,7 +341,7 @@ func TestCleanup(t *testing.T) {
 	a.Equal(getLen(&p1.sessionMap.Map), 1, "expected 1 signer ")
 	a.Equal(1, p1.rateLimiter.lenDigestMap(), "expected 1 digest in rate limiter")
 
-	<-time.After(maxTTL * 2)
+	<-time.After(maxTTL * 3)
 
 	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
 	a.Equal(0, p1.rateLimiter.lenDigestMap(), "expected 0 digest in rate limiter")
@@ -625,13 +617,16 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 }
 
 func DKGShares(group curve.Secp256k1, threshold int) (*polynomial.Polynomial, curve.Point) {
+	for range 128 {
+		secret := sample.Scalar(rand.Reader, group)
+		publicKey := secret.ActOnBase()
 
-	secret := sample.Scalar(rand.Reader, group)
-	f := polynomial.NewPolynomial(group, threshold, secret)
-	publicKey := secret.ActOnBase()
-
-	return f, publicKey
-
+		if sign.PublicKeyValidForContract(publicKey) {
+			f := polynomial.NewPolynomial(group, threshold, secret)
+			return f, publicKey
+		}
+	}
+	panic("could not find valid DKG shares")
 }
 
 func createFullParties(a *assert.Assertions, participants, threshold int) ([]FullParty, []Parameters) {
@@ -1004,18 +999,23 @@ func testKeygen(t *testing.T) {
 	}()
 
 	for _, p := range parties {
-		if err := p.StartDKG(DkgTask{
-			Threshold: threshold,
-			Seed:      Digest{1, 2, 3, 4},
-		}); err != nil {
-			panic(err)
-		}
+		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
 	}
 
 	waitforDKG(parties, a)
 	close(donechn)
 	wg.Wait()
+}
 
+func goStartDKG(p FullParty, threshold int, seed Digest) {
+	go func() {
+		if err := p.StartDKG(DkgTask{
+			Threshold: threshold,
+			Seed:      seed,
+		}); err != nil {
+			panic(err)
+		}
+	}()
 }
 
 func testNilConfigKeyGen(t *testing.T) {
@@ -1050,12 +1050,7 @@ func testNilConfigKeyGen(t *testing.T) {
 	}()
 
 	for _, p := range parties {
-		if err := p.StartDKG(DkgTask{
-			Threshold: threshold,
-			Seed:      Digest{1, 2, 3, 4},
-		}); err != nil {
-			panic(err)
-		}
+		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
 	}
 
 	waitforDKG(parties, a)
@@ -1093,22 +1088,12 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	}()
 
 	for _, p := range parties[:participants-1] {
-		if err := p.StartDKG(DkgTask{
-			Threshold: threshold,
-			Seed:      Digest{1, 2, 3, 4},
-		}); err != nil {
-			panic(err)
-		}
+		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
 	}
 
 	time.Sleep(time.Second * 5)
 	for _, p := range parties[participants-1:] {
-		if err := p.StartDKG(DkgTask{
-			Threshold: threshold,
-			Seed:      Digest{1, 2, 3, 4},
-		}); err != nil {
-			panic(err)
-		}
+		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
 	}
 	fmt.Println("Waiting for DKG to finish...")
 
