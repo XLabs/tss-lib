@@ -517,7 +517,7 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 }
 
 func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Error {
-	rbits, err := sig.R.MarshalBinary()
+	rbits, err := sig.R.Curve().MarshalPoint(sig.R)
 	if err != nil {
 		return common.NewTrackableError(
 			err,
@@ -528,7 +528,7 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 		)
 	}
 
-	sbits, err := sig.Z.MarshalBinary()
+	sbits, err := sig.Z.Curve().MarshalScalar(sig.Z)
 	if err != nil {
 		return common.NewTrackableError(
 			err,
