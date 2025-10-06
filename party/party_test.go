@@ -99,9 +99,9 @@ func (st *signerTester) run(t *testing.T) {
 	for digest := range digestSet {
 		for _, party := range parties {
 			fpSign(a, party, SigningTask{
-				Digest:       digest,
-				Faulties:     nil,
-				AuxilaryData: nil,
+				Digest:        digest,
+				Faulties:      nil,
+				AuxiliaryData: nil,
 			})
 		}
 	}
@@ -843,17 +843,17 @@ func TestChangingCommittee(t *testing.T) {
 				a.NoError(err)
 
 				info, err := p.AsyncRequestNewSignature(SigningTask{
-					Digest:       hash,
-					Faulties:     shuffledFaulties,
-					AuxilaryData: []byte{},
+					Digest:        hash,
+					Faulties:      shuffledFaulties,
+					AuxiliaryData: []byte{},
 				})
 				a.NoError(err)
 
 				if err != nil {
 					p.AsyncRequestNewSignature(SigningTask{
-						Digest:       hash,
-						Faulties:     shuffledFaulties,
-						AuxilaryData: []byte{},
+						Digest:        hash,
+						Faulties:      shuffledFaulties,
+						AuxiliaryData: []byte{},
 					})
 					return
 				}
@@ -1262,8 +1262,18 @@ func TestRateLimiting(t *testing.T) {
 	// Trigger the code path that should warn
 	a.NoError(parties[0].Update(p))
 
-	// changing the digest, demanding different session.
-	p.WireMsg().TrackingID.Digest[0] += 1
+	tid := proto.CloneOf(info.TrackingID)
+	tid.Digest[0] += 1 // changing the digest to make a new session.
+	p = (&round.Message{
+		From:      party.ID(parties[3].(*Impl).self.ID), // party 3 is in committee
+		To:        party.ID(parties[0].(*Impl).self.ID),
+		Broadcast: true,
+		Content: &sign.Broadcast2{
+			Di: make([]byte, 32),
+			Ei: make([]byte, 32),
+		},
+		TrackingID: tid,
+	}).ToParsed()
 	a.ErrorContains(parties[0].Update(p), "reached the maximum")
 
 	// waiting for the rate limiter to cleanup.

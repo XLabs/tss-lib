@@ -6,7 +6,8 @@ import common "github.com/xlabs/tss-common"
 type task interface {
 	GetDigest() []byte
 	GetFaulties() common.UnSortedPartyIDs
-	GetAuxilaryData() []byte
+	GetAuxiliaryData() []byte
+	GetProtocolType() common.ProtocolType
 }
 
 func (s SigningTask) GetDigest() []byte {
@@ -17,8 +18,12 @@ func (s SigningTask) GetFaulties() common.UnSortedPartyIDs {
 	return s.Faulties
 }
 
-func (s SigningTask) GetAuxilaryData() []byte {
-	return s.AuxilaryData
+func (s SigningTask) GetAuxiliaryData() []byte {
+	return s.AuxiliaryData
+}
+
+func (s SigningTask) GetProtocolType() common.ProtocolType {
+	return common.ProtocolFROSTSign
 }
 
 func (d DkgTask) GetDigest() []byte {
@@ -28,8 +33,12 @@ func (d DkgTask) GetDigest() []byte {
 func (d DkgTask) GetFaulties() common.UnSortedPartyIDs {
 	return nil
 }
-func (d DkgTask) GetAuxilaryData() []byte {
+func (d DkgTask) GetAuxiliaryData() []byte {
 	return nil
+}
+
+func (d DkgTask) GetProtocolType() common.ProtocolType {
+	return common.ProtocolFROSTDKG
 }
 
 func (p *Impl) createTrackingID(t task) *common.TrackingID {
@@ -50,9 +59,10 @@ func (p *Impl) createTrackingID(t task) *common.TrackingID {
 	copy(dgst[:], t.GetDigest())
 
 	tid := &common.TrackingID{
-		Digest:       dgst[:],
-		PartiesState: common.ConvertBoolArrayToByteArray(pids),
-		AuxilaryData: t.GetAuxilaryData(),
+		Digest:        dgst[:],
+		PartiesState:  common.ConvertBoolArrayToByteArray(pids),
+		AuxiliaryData: t.GetAuxiliaryData(),
+		Protocol:      uint32(t.GetProtocolType().ToInt()),
 	}
 
 	return tid

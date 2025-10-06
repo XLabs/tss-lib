@@ -51,6 +51,7 @@ type singleSession struct {
 
 	messages map[round.Number]map[strPartyID]*messageKeep
 
+	protocol  common.ProtocolType
 	committee common.SortedPartyIDs
 	self      *common.PartyID
 
@@ -285,7 +286,7 @@ func (signer *singleSession) consumeStoredMessages() *common.Error {
 					Message:         "message from non-committee member dropped",
 					TrackingID:      signer.trackingId,
 					PossibleCulprit: msg.GetFrom(),
-					Protocol:        common.ProtocolFROST, // TODO support more than just frost
+					Protocol:        signer.protocol,
 					SessionRound:    rnd,
 				})
 

@@ -34,9 +34,9 @@ type Parameters struct {
 type Digest [32]byte
 
 type SigningTask struct {
-	Digest       Digest
-	Faulties     []*common.PartyID // Can be nil
-	AuxilaryData []byte            // can be nil
+	Digest        Digest
+	Faulties      []*common.PartyID // Can be nil
+	AuxiliaryData []byte            // can be nil
 }
 
 type DkgTask struct {
