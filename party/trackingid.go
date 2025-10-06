@@ -19,7 +19,7 @@ func (s SigningTask) GetFaulties() common.UnSortedPartyIDs {
 }
 
 func (s SigningTask) GetAuxiliaryData() []byte {
-	return s.AuxilaryData
+	return s.AuxiliaryData
 }
 
 func (s SigningTask) GetProtocolType() common.ProtocolType {

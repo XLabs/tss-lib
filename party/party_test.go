@@ -99,9 +99,9 @@ func (st *signerTester) run(t *testing.T) {
 	for digest := range digestSet {
 		for _, party := range parties {
 			fpSign(a, party, SigningTask{
-				Digest:       digest,
-				Faulties:     nil,
-				AuxilaryData: nil,
+				Digest:        digest,
+				Faulties:      nil,
+				AuxiliaryData: nil,
 			})
 		}
 	}
@@ -843,17 +843,17 @@ func TestChangingCommittee(t *testing.T) {
 				a.NoError(err)
 
 				info, err := p.AsyncRequestNewSignature(SigningTask{
-					Digest:       hash,
-					Faulties:     shuffledFaulties,
-					AuxilaryData: []byte{},
+					Digest:        hash,
+					Faulties:      shuffledFaulties,
+					AuxiliaryData: []byte{},
 				})
 				a.NoError(err)
 
 				if err != nil {
 					p.AsyncRequestNewSignature(SigningTask{
-						Digest:       hash,
-						Faulties:     shuffledFaulties,
-						AuxilaryData: []byte{},
+						Digest:        hash,
+						Faulties:      shuffledFaulties,
+						AuxiliaryData: []byte{},
 					})
 					return
 				}
