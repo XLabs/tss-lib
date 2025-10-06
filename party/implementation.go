@@ -72,7 +72,7 @@ func (p *Impl) worker() {
 		select {
 		case task := <-p.incomingMessagesChannel:
 			switch task.message.Content().GetProtocol() {
-			case common.ProtocolFROST:
+			case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
 				p.handleFrostMessage(task)
 			default:
 				p.outputChannels.ErrChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
@@ -295,6 +295,11 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	dgst := Digest{}
 	copy(dgst[:], trackingId.Digest)
 
+	protocol, err := trackingId.GetProtocolType()
+	if err != nil {
+		return nil, err
+	}
+
 	signer, _ := s.LoadOrStore(trackingId.ToString(), &singleSession{
 		startTime: time.Now(),
 		state:     atomic.Int64{},
@@ -304,6 +309,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		trackingId: trackingId,
 		mtx:        sync.Mutex{},
 
+		protocol: protocol,
 		// A SingleSession may be created in response to a message from a peer whose honesty
 		// cannot be assumed. Therefore, any data provided alongside the trackingID
 		// (the identifier for this new session) must be considered untrusted.
