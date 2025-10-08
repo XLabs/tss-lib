@@ -8,6 +8,7 @@ type task interface {
 	GetFaulties() common.UnSortedPartyIDs
 	GetAuxiliaryData() []byte
 	GetProtocolType() common.ProtocolType
+	// TODO: add an isvalid method to ensure the task is valid.
 }
 
 func (s SigningTask) GetDigest() []byte {
@@ -23,7 +24,7 @@ func (s SigningTask) GetAuxiliaryData() []byte {
 }
 
 func (s SigningTask) GetProtocolType() common.ProtocolType {
-	return common.ProtocolFROSTSign
+	return s.ProtocolType
 }
 
 func (d DkgTask) GetDigest() []byte {
@@ -38,7 +39,7 @@ func (d DkgTask) GetAuxiliaryData() []byte {
 }
 
 func (d DkgTask) GetProtocolType() common.ProtocolType {
-	return common.ProtocolFROSTDKG
+	return d.ProtocolType
 }
 
 func (p *Impl) createTrackingID(t task) *common.TrackingID {

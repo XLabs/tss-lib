@@ -12,8 +12,8 @@ github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 h1:8UrgZ3GkP4i/CLijOJx79Yu+etly
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0/go.mod h1:v57UDF4pDQJcEfFUCRop3lJL149eHGSe9Jvczhzjo/0=
 github.com/ethereum/go-ethereum v1.14.7 h1:EHpv3dE8evQmpVEQ/Ne2ahB06n2mQptdwqaMNhAT29g=
 github.com/ethereum/go-ethereum v1.14.7/go.mod h1:Mq0biU2jbdmKSZoqOj29017ygFrMnB5/Rifwp980W4o=
-github.com/fxamacker/cbor/v2 v2.8.0 h1:fFtUGXUzXPHTIUdne5+zzMPTfffl3RD5qYnkY40vtxU=
-github.com/fxamacker/cbor/v2 v2.8.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
+github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sapM=
+github.com/fxamacker/cbor/v2 v2.9.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/holiman/uint256 v1.3.0 h1:4wdcm/tnd0xXdu7iS3ruNvxkWwrb4aeBQv19ayYn8F4=
@@ -35,8 +35,8 @@ github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsT
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
-github.com/xlabs/multi-party-sig v0.0.2-0.20251006064349-41c2b72e2bf3 h1:45e/qY0CScA0CXFGqt+ExXOhI5UTTZ6mLrGfRUKsY2Q=
-github.com/xlabs/multi-party-sig v0.0.2-0.20251006064349-41c2b72e2bf3/go.mod h1:NpqmP2W7AAEany+2usJbi0eadzytXVSoucwK1SQ89cs=
+github.com/xlabs/multi-party-sig v0.0.2-0.20251008112155-d7355d6f0f4b h1:kc3spLhlrQV5Y6cc0G86rjiRPJ5BPccMog4v8u7Fc+I=
+github.com/xlabs/multi-party-sig v0.0.2-0.20251008112155-d7355d6f0f4b/go.mod h1:JbrlubmmY8N5VK/V2xJqriA27HEfi79JkPp1TO0dvWE=
 github.com/xlabs/tss-common v0.0.0-20251006064114-b1fcd9c2ce8e h1:5PRcFPXMXmvPL4IBEA+h7Evvd2HziSMdcFKuXtiqugg=
 github.com/xlabs/tss-common v0.0.0-20251006064114-b1fcd9c2ce8e/go.mod h1:EBXV5kup1GsnVpEknaxXXpid87uN6Mh7NboAZhV+HNM=
 github.com/zeebo/assert v1.1.0 h1:hU1L1vLTHsnO8x8c9KAR5GmM5QscxHg5RNU5z5qbUWY=

@@ -12,8 +12,11 @@ import (
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/pkg/pool"
+	"github.com/xlabs/multi-party-sig/pkg/protocol"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 
+	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 	"golang.org/x/crypto/sha3"
@@ -24,7 +27,11 @@ type Impl struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	config   *frost.Config
+	frostConfig *frost.Config
+
+	ecdsaConfig       *cmp.Config
+	ecdsaCachedPublic curve.Point
+
 	peers    []*common.PartyID
 	peersmap map[party.ID]*common.PartyID
 
@@ -43,6 +50,8 @@ type Impl struct {
 	workersWg sync.WaitGroup
 
 	rateLimiter rateLimiter
+
+	pool *pool.Pool
 }
 
 func hash(msg []byte) Digest {
@@ -72,8 +81,9 @@ func (p *Impl) worker() {
 		select {
 		case task := <-p.incomingMessagesChannel:
 			switch task.message.Content().GetProtocol() {
-			case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
-				p.handleFrostMessage(task)
+			case common.ProtocolFROSTSign, common.ProtocolFROSTDKG,
+				common.ProtocolECDSADKG, common.ProtocolECDSASign:
+				p.handleMessage(task)
 			default:
 				p.outputChannels.ErrChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
 			}
@@ -110,28 +120,47 @@ func (p *Impl) Start(out OutputChannels) error {
 
 	go p.cleanupWorker()
 
+	p.pool = pool.NewPool(numHandlerWorkers)
+
 	return nil
 }
 
 func (p *Impl) Stop() {
 	p.cancelFunc()
-
 	p.workersWg.Wait()
+
+	// stopped passing messages to sessions, we can now safely
+	// tear down the pool used by the sessions.
+	p.pool.TearDown()
 }
 
 var ErrNoConfig = errors.New("signing protocol not configured")
 
-func (p *Impl) GetPublic() (curve.Point, error) {
-	if p.config == nil {
-		return nil, ErrNoConfig
-	}
+func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
+	switch t {
+	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
+		if p.ecdsaConfig == nil || p.ecdsaCachedPublic == nil {
+			return nil, ErrNoConfig
+		}
 
-	return p.config.PublicKey.Clone(), nil
+		return p.ecdsaCachedPublic.Clone(), nil
+	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
+		if p.frostConfig == nil {
+			return nil, ErrNoConfig
+		}
+
+		return p.frostConfig.PublicKey.Clone(), nil
+	default:
+		return nil, fmt.Errorf("public not found for: %s", t.ToString())
+	}
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
-	if p.config == nil {
-		return nil, ErrNoConfig
+	if err := p.canSatisfyTask(s); err != nil {
+		return nil, err
+	}
+	if s.ProtocolType != common.ProtocolFROSTSign && s.ProtocolType != common.ProtocolECDSASign {
+		return nil, fmt.Errorf("not a valid signing protocol: %s", s.ProtocolType.ToString())
 	}
 
 	trackid := p.createTrackingID(s)
@@ -157,17 +186,41 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 	return info, nil
 }
 
+var errNotConfiguredToRunDKG = errors.New("not configured to run DKG. missing KeygenOutputChannel")
+
+func (p *Impl) canSatisfyTask(s task) error {
+	protoType := s.GetProtocolType()
+	switch protoType {
+	case common.ProtocolFROSTSign:
+		if p.frostConfig == nil {
+			return ErrNoConfig
+		}
+	case common.ProtocolFROSTDKG:
+		if p.outputChannels.KeygenOutputChannel == nil {
+			return errNotConfiguredToRunDKG
+		}
+	case common.ProtocolECDSASign:
+		if p.ecdsaConfig == nil {
+			return ErrNoConfig
+		}
+	case common.ProtocolECDSADKG:
+		return fmt.Errorf("ECDSA DKG protocol not supported") // TODO: implement ECDSA DKG
+	default:
+		return fmt.Errorf("unknown signing protocol: %s", protoType.ToString())
+	}
+
+	return nil
+}
+
 func (p *Impl) startSigner(signer *singleSession) {
 	if signer == nil {
 		return
 	}
 
-	config := p.config
-
 	// The following method initiates the singleSession (if it’s a committee
 	// member). Depending on the protocol, this function might be
 	// compute intensive (frost is cheap, gg18 is not).
-	if err := p.setSigningSession(config, signer); err != nil {
+	if err := p.setSigningSession(signer); err != nil {
 		p.outputErr(common.NewTrackableError(
 			err,
 			"startSigner",
@@ -246,7 +299,7 @@ func (p *Impl) outputKeygen(res *TSSSecrets) {
 }
 
 // This is the only method that changes the session state.
-func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) error {
+func (p *Impl) setSigningSession(signer *singleSession) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
@@ -276,7 +329,15 @@ func (p *Impl) setSigningSession(config *frost.Config, signer *singleSession) er
 	// set the state to "set" (in committee).
 	signer.state.Store(int64(activated))
 
-	sessionCreator := frost.Sign(config, pids2IDs(signer.committee), signer.digest[:])
+	var sessionCreator protocol.StartFunc
+	switch signer.protocol {
+	case common.ProtocolFROSTSign:
+		sessionCreator = frost.Sign(p.frostConfig, pids2IDs(signer.committee), signer.digest[:])
+	case common.ProtocolECDSASign:
+		sessionCreator = cmp.Sign(p.ecdsaConfig, pids2IDs(signer.committee), signer.digest[:], p.pool)
+	default:
+		return fmt.Errorf("unsupported signing protocol: %s", signer.protocol.ToString())
+	}
 
 	session, err := sessionCreator(signer.trackingId.ToByteString())
 	if err != nil {
@@ -352,11 +413,11 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 }
 
 func (p *Impl) committeeSize() int {
-	if p.config == nil {
+	if p.frostConfig == nil {
 		return len(p.peers) // default to all peers.
 	}
 
-	return p.config.Threshold + 1
+	return p.frostConfig.Threshold + 1
 }
 
 func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
@@ -416,7 +477,7 @@ func (p *Impl) Update(message common.ParsedMessage) error {
 	}
 }
 
-func (p *Impl) handleFrostMessage(task feedMessageTask) {
+func (p *Impl) handleMessage(task feedMessageTask) {
 	// assumes the message has a tracking ID.
 	message := task.message
 
@@ -424,7 +485,7 @@ func (p *Impl) handleFrostMessage(task feedMessageTask) {
 	if err != nil {
 		p.outputErr(common.NewTrackableError(
 			err,
-			"handleFrostMessage",
+			"handleMessage",
 			unknownRound,
 			message.GetFrom(),
 			message.WireMsg().GetTrackingID(),
@@ -559,11 +620,9 @@ func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Err
 	return nil
 }
 
-var errDKGIssue = errors.New("FullParty has bad configurations. Cannot start DKG protocol")
-
 func (p *Impl) StartDKG(task DkgTask) error {
-	if p.outputChannels.KeygenOutputChannel == nil {
-		return errDKGIssue
+	if err := p.canSatisfyTask(task); err != nil {
+		return err
 	}
 
 	if len(p.peers) <= task.Threshold {

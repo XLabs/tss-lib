@@ -9,12 +9,14 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/round"
+	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 )
 
 type Parameters struct {
-	FrostSecrets *frost.Config // maybe store this in a file
+	FrostSecrets *frost.Config
+	EcdsaSecrets *cmp.Config
 
 	PartyIDs []*common.PartyID // should have the same string IDs as the ones that created the initConfigs.
 	Self     *common.PartyID
@@ -37,6 +39,7 @@ type SigningTask struct {
 	Digest        Digest
 	Faulties      []*common.PartyID // Can be nil
 	AuxiliaryData []byte            // can be nil
+	ProtocolType  common.ProtocolType
 }
 
 type DkgTask struct {
@@ -45,6 +48,8 @@ type DkgTask struct {
 	// used to generate a trackingID for the DKG protocol.
 	// should match the seed used by all FullParties that run the DKG protocol.
 	Seed Digest
+	// ProtocolType should be a DKG protocol, e.g., common.ProtocolFROSTDKG
+	ProtocolType common.ProtocolType
 }
 
 type SigningInfo struct {
@@ -109,7 +114,7 @@ type FullParty interface {
 	Update(common.ParsedMessage) error
 
 	// GetPublic returns the public key of the FullParty
-	GetPublic() (curve.Point, error)
+	GetPublic(common.ProtocolType) (curve.Point, error)
 
 	//  GetSigningInfo is used to get the signing info without starting the signing protocol.
 	GetSigningInfo(s SigningTask) (*SigningInfo, error)
@@ -161,6 +166,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		return nil, errors.New("invalid frost config")
 	}
 
+	// TODO: add a validateBasic for cmp.Config [it currently doesn't have one].
+
 	ctx, cancelF := context.WithCancel(context.Background())
 	imp := &Impl{
 		ctx:        ctx,
@@ -170,7 +177,10 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		peers:    p.PartyIDs,
 		peersmap: peersMap,
 
-		config:     p.FrostSecrets,
+		frostConfig:       p.FrostSecrets,
+		ecdsaConfig:       p.EcdsaSecrets,
+		ecdsaCachedPublic: p.EcdsaSecrets.PublicPoint(),
+
 		sessionMap: &sessionMap{Map: sync.Map{}},
 
 		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),
