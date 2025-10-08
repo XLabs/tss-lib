@@ -5,7 +5,7 @@ go 1.23
 require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/stretchr/testify v1.9.0
-	github.com/xlabs/multi-party-sig v0.0.2-0.20251006064349-41c2b72e2bf3
+	github.com/xlabs/multi-party-sig v0.0.2-0.20251008145440-ef00c6484b73
 	github.com/xlabs/tss-common v0.0.0-20251006064114-b1fcd9c2ce8e
 	golang.org/x/crypto v0.22.0
 	google.golang.org/protobuf v1.36.10
