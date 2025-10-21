@@ -49,6 +49,7 @@ func TestSigning(t *testing.T) {
 		threshold:                test.TestThreshold,
 		numSignatures:            1,
 		maxNetworkSimulationTime: time.Second * 200,
+		protocol:                 common.ProtocolFROSTSign,
 	}
 	t.Run("one signature", st.run)
 
@@ -61,74 +62,83 @@ func TestSigning(t *testing.T) {
 		threshold:                3,
 		numSignatures:            50,
 		maxNetworkSimulationTime: time.Minute,
+		protocol:                 common.ProtocolFROSTSign,
 	}
 	t.Run("3 threshold 20 signatures", st2.run)
+
+	st3 := signerTester{
+		participants:             4,
+		threshold:                2,
+		numSignatures:            2,
+		maxNetworkSimulationTime: time.Minute * 2,
+		protocol:                 common.ProtocolECDSASign,
+	}
+	t.Run("ecdsa:2-out-of-4: 2 signatures", st3.run)
 }
 
 type signerTester struct {
 	participants, threshold, numSignatures int
 	maxNetworkSimulationTime               time.Duration
+	protocol                               common.ProtocolType
 }
 
 func (st *signerTester) run(t *testing.T) {
 	a := assert.New(t)
 
-	for _, protocol := range []common.ProtocolType{common.ProtocolFROSTSign} {
-		parties, _ := createFullParties(a, st.participants, st.threshold)
+	parties, _ := createFullParties(a, st.participants, st.threshold)
 
-		digestSet := createDigests(st.numSignatures)
+	digestSet := createDigests(st.numSignatures)
 
-		n := newNetworkSimulator(parties)
-		// n.protocol = protocol // TODO: use it,.
-		n.digestsToVerify = digestSet
-		n.Timeout = st.maxNetworkSimulationTime
+	n := newNetworkSimulator(parties)
+	n.protocol = st.protocol
+	n.digestsToVerify = digestSet
+	n.Timeout = st.maxNetworkSimulationTime
 
-		for _, p := range parties {
-			a.NoError(
-				p.Start(n.chans),
-			)
-		}
+	for _, p := range parties {
+		a.NoError(
+			p.Start(n.chans),
+		)
+	}
 
-		for digest := range digestSet {
-			for _, party := range parties {
-				fpSign(a, party, SigningTask{
-					Digest:        digest,
-					Faulties:      nil,
-					AuxiliaryData: nil,
-					ProtocolType:  protocol,
-				})
-			}
-		}
-
-		fmt.Println("Setup done. waiting for test to run.")
-
-		time.Sleep(time.Second * 1)
-		donechan := make(chan struct{})
-		go func() {
-			defer close(donechan)
-			n.run(a)
-		}()
-
-		fmt.Println("ngoroutines:", runtime.NumGoroutine())
-		<-donechan
-		a.True(n.verifiedAllSignatures())
-
-		time.Sleep(time.Second * 1)
+	for digest := range digestSet {
 		for _, party := range parties {
-			party.Stop()
-
-			p := party.(*Impl)
-			l := p.rateLimiter.lenDigestMap()
-
-			p.rateLimiter.mtx.Lock()
-			for key := range p.rateLimiter.digestToPeer {
-				_, ok := p.sessionMap.Load(string(key))
-				a.False(ok, "expected session to be removed from session map")
-			}
-			p.rateLimiter.mtx.Unlock()
-
-			a.Equal(0, l, "expected 0 digests in rate limiter, got %d", l)
+			fpSign(a, party, SigningTask{
+				Digest:        digest,
+				Faulties:      nil,
+				AuxiliaryData: nil,
+				ProtocolType:  st.protocol,
+			})
 		}
+	}
+
+	fmt.Println("Setup done. waiting for test to run.")
+
+	time.Sleep(time.Second * 1)
+	donechan := make(chan struct{})
+	go func() {
+		defer close(donechan)
+		n.run(a)
+	}()
+
+	fmt.Println("ngoroutines:", runtime.NumGoroutine())
+	<-donechan
+	a.True(n.verifiedAllSignatures())
+
+	time.Sleep(time.Second * 1)
+	for _, party := range parties {
+		party.Stop()
+
+		p := party.(*Impl)
+		l := p.rateLimiter.lenDigestMap()
+
+		p.rateLimiter.mtx.Lock()
+		for key := range p.rateLimiter.digestToPeer {
+			_, ok := p.sessionMap.Load(string(key))
+			a.False(ok, "expected session to be removed from session map")
+		}
+		p.rateLimiter.mtx.Unlock()
+
+		a.Equal(0, l, "expected 0 digests in rate limiter, got %d", l)
 	}
 }
 

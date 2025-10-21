@@ -286,7 +286,7 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	}
 
 	if sig != nil {
-		return p.outputSig(*sig, session)
+		return p.outputSig(sig)
 	}
 
 	return nil
@@ -585,36 +585,9 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	}, nil
 }
 
-func (p *Impl) outputSig(sig frost.Signature, signer *singleSession) *common.Error {
-	rbits, err := sig.R.Curve().MarshalPoint(sig.R)
-	if err != nil {
-		return common.NewTrackableError(
-			err,
-			"outputSig",
-			unknownRound,
-			signer.self,
-			signer.trackingId,
-		)
-	}
-
-	sbits, err := sig.Z.Curve().MarshalScalar(sig.Z)
-	if err != nil {
-		return common.NewTrackableError(
-			err,
-			"outputSig",
-			unknownRound,
-			signer.self,
-			signer.trackingId,
-		)
-	}
-
+func (p *Impl) outputSig(sig *common.SignatureData) *common.Error {
 	select {
-	case p.outputChannels.SignatureOutputChannel <- &common.SignatureData{
-		R:          rbits,
-		S:          sbits,
-		M:          signer.digest[:],
-		TrackingId: signer.trackingId,
-	}:
+	case p.outputChannels.SignatureOutputChannel <- sig:
 	case <-p.ctx.Done():
 		// nothing to report.
 	}

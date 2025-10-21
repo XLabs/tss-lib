@@ -5,7 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xlabs/multi-party-sig/pkg/ecdsa"
+	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
@@ -124,4 +127,45 @@ func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSess
 
 func (s *sessionMap) deleteSession(session *singleSession) {
 	s.Map.Delete(session.trackingId.ToString())
+}
+func rsToCommonSig(R curve.Point, S curve.Scalar, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
+	rbits, err := R.Curve().MarshalPoint(R)
+	if err != nil {
+		return nil, common.NewTrackableError(
+			err,
+			"rsToCommonSig",
+			unknownRound,
+			self,
+			tid,
+		)
+	}
+
+	sbits, err := S.Curve().MarshalScalar(S)
+	if err != nil {
+		return nil, common.NewTrackableError(
+			err,
+			"rsToCommonSig",
+			unknownRound,
+			self,
+			tid,
+		)
+	}
+
+	dgst := Digest{}
+	copy(dgst[:], tid.Digest)
+
+	return &common.SignatureData{
+		R:          rbits,
+		S:          sbits,
+		M:          dgst[:],
+		TrackingId: tid,
+	}, nil
+}
+
+func frostSigToCommonSig(sig *frost.Signature, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
+	return rsToCommonSig(sig.R, sig.Z, self, tid)
+}
+
+func ecdsaSigToCommonSig(res *ecdsa.Signature, partyID *common.PartyID, trackingID *common.TrackingID) (*common.SignatureData, *common.Error) {
+	return rsToCommonSig(res.R, res.S, partyID, trackingID)
 }

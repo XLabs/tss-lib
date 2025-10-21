@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	dkgProtocols     = []common.ProtocolType{common.ProtocolECDSADKG, common.ProtocolFROSTDKG}
-	signingProtocols = []common.ProtocolType{common.ProtocolFROSTSign, common.ProtocolECDSASign}
+	dkgProtocols     = []common.ProtocolType{common.ProtocolFROSTDKG}
+	signingProtocols = []common.ProtocolType{common.ProtocolECDSASign}
 )
 
 type prmKey struct{ N, T int }
@@ -169,9 +169,9 @@ func (r *rateLimiter) lenDigestMap() int {
 
 func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
 	if st.ProtocolType == "" {
-		st.ProtocolType = common.ProtocolFROSTSign
+		panic("protocol type must be set in SigningTask")
 	}
-	// TODO
+
 	info, err := p.AsyncRequestNewSignature(st)
 	a.NoError(err)
 
@@ -256,7 +256,7 @@ func (n *networkSimulator) verifiedAllSignatures(numSigsExpected ...int) bool {
 	}
 	numExpected := numSigsExpected[0]
 
-	for dgst, _ := range n.digestsToVerify {
+	for dgst := range n.digestsToVerify {
 		v, ok := n.numSigsReceived[dgst]
 		if !ok {
 			return false
@@ -337,6 +337,21 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 }
 
 func validateSignature(pk curve.Point, m *common.SignatureData, digest []byte) bool {
+	switch m.TrackingId.Protocol {
+	case uint32(common.ProtocolFROSTSign.ToInt()):
+		return frostValidate(pk, m, digest)
+	default:
+		fmt.Println("unknown protocol for signature verification:", m.TrackingId.Protocol)
+		return false
+	}
+}
+
+func frostValidate(pk curve.Point, m *common.SignatureData, digest []byte) bool {
+	if !bytes.Equal(m.M, digest) {
+		fmt.Println("digest mismatch")
+		return false
+	}
+
 	sg, err := frost.Secp256k1SignatureTranslate(m)
 	if err != nil {
 		fmt.Println("failed to translate signature:", err)

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/xlabs/multi-party-sig/pkg/ecdsa"
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
@@ -481,7 +482,7 @@ var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
 )
 
-func (session *singleSession) extractOutput() (*TSSSecrets, *frost.Signature, *common.Error) {
+func (session *singleSession) extractOutput() (*TSSSecrets, *common.SignatureData, *common.Error) {
 	session.mtx.Lock()
 	defer session.mtx.Unlock()
 
@@ -509,11 +510,14 @@ func (session *singleSession) extractOutput() (*TSSSecrets, *frost.Signature, *c
 	switch res := r.Result.(type) {
 	case *frost.Config:
 		return &TSSSecrets{FrostConfigs: res, TrackingID: session.trackingId}, nil, nil
-	case frost.Signature:
-		return nil, &res, nil
 	case *cmp.Config:
 		return &TSSSecrets{EcdsaConfigs: res, TrackingID: session.trackingId}, nil, nil
-
+	case frost.Signature:
+		sig, err := frostSigToCommonSig(&res, session.self, session.trackingId)
+		return nil, sig, err
+	case *ecdsa.Signature:
+		sig, err := ecdsaSigToCommonSig(res, session.self, session.trackingId)
+		return nil, sig, err
 	default:
 		return nil, nil, common.NewTrackableError(
 			fmt.Errorf("unknown output type: %T", res),
