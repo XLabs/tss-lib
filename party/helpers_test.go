@@ -20,6 +20,11 @@ import (
 	common "github.com/xlabs/tss-common"
 )
 
+var (
+	dkgProtocols     = []common.ProtocolType{common.ProtocolECDSADKG, common.ProtocolFROSTDKG}
+	signingProtocols = []common.ProtocolType{common.ProtocolFROSTSign, common.ProtocolECDSASign}
+)
+
 type prmKey struct{ N, T int }
 
 var cachedParams = map[prmKey][]Parameters{}
@@ -191,13 +196,9 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 	return false
 }
 
-func goStartDKG(p FullParty, threshold int, seed Digest) {
+func goStartDKG(p FullParty, st DkgTask) {
 	go func() {
-		if err := p.StartDKG(DkgTask{
-			Threshold:    threshold,
-			Seed:         seed,
-			ProtocolType: common.ProtocolFROSTDKG,
-		}); err != nil {
+		if err := p.StartDKG(st); err != nil {
 			panic(err)
 		}
 	}()

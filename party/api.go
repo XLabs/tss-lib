@@ -62,7 +62,8 @@ type SigningInfo struct {
 // It contains the frost.Config that can be used to run the signing protocol,
 // and the TrackingID that can be used to distinguish between different DKG sessions.
 type TSSSecrets struct {
-	*frost.Config
+	FrostConfigs *frost.Config
+	EcdsaConfigs *cmp.Config
 	*common.TrackingID
 }
 

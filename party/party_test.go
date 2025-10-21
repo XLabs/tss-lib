@@ -52,17 +52,17 @@ func TestSigning(t *testing.T) {
 	}
 	t.Run("one signature", st.run)
 
-	// st.numSignatures = 5
-	// st.maxNetworkSimulationTime = time.Second * 200
-	// t.Run("five signatures ", st.run)
+	st.numSignatures = 5
+	st.maxNetworkSimulationTime = time.Second * 200
+	t.Run("five signatures ", st.run)
 
-	// st2 := signerTester{
-	// 	participants:             5,
-	// 	threshold:                3,
-	// 	numSignatures:            50,
-	// 	maxNetworkSimulationTime: time.Minute,
-	// }
-	// t.Run("3 threshold 20 signatures", st2.run)
+	st2 := signerTester{
+		participants:             5,
+		threshold:                3,
+		numSignatures:            50,
+		maxNetworkSimulationTime: time.Minute,
+	}
+	t.Run("3 threshold 20 signatures", st2.run)
 }
 
 type signerTester struct {
@@ -724,34 +724,44 @@ func testKeygen(t *testing.T) {
 	participants := 5
 	threshold := 3
 
-	parties, _ := createFullParties(a, participants, threshold)
+	for _, prot := range dkgProtocols {
+		parties, _ := createFullParties(a, participants, threshold)
+		maxTTL := time.Minute * 1
+		for _, impl := range parties {
+			impl.(*Impl).maxTTl = maxTTL
+		}
 
-	maxTTL := time.Minute * 1
-	for _, impl := range parties {
-		impl.(*Impl).maxTTl = maxTTL
+		n := newNetworkSimulator(parties)
+
+		for _, p := range parties {
+			a.NoError(p.Start(n.chans))
+		}
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		donechn := make(chan struct{})
+		go func() {
+			defer wg.Done()
+			n.run(a, donechn)
+		}()
+
+		for _, p := range parties {
+			goStartDKG(p, DkgTask{
+				Threshold:    threshold,
+				Seed:         Digest{1, 2, 3, 4},
+				ProtocolType: prot,
+			})
+		}
+
+		waitforDKG(parties, a)
+		close(donechn)
+		wg.Wait()
+
+		for _, p := range parties {
+			p.Stop()
+		}
 	}
 
-	n := newNetworkSimulator(parties)
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.chans))
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	donechn := make(chan struct{})
-	go func() {
-		defer wg.Done()
-		n.run(a, donechn)
-	}()
-
-	for _, p := range parties {
-		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
-	}
-
-	waitforDKG(parties, a)
-	close(donechn)
-	wg.Wait()
 }
 
 func testNilConfigKeyGen(t *testing.T) {
@@ -760,38 +770,43 @@ func testNilConfigKeyGen(t *testing.T) {
 	participants := 5
 	threshold := 3
 
-	parties, _ := createFullParties(a, participants, threshold)
+	for _, prot := range dkgProtocols {
+		parties, _ := createFullParties(a, participants, threshold)
 
-	for _, p := range parties {
-		p.(*Impl).frostConfig = nil
+		maxTTL := time.Minute * 1
+		for _, p := range parties {
+			p.(*Impl).frostConfig = nil
+			p.(*Impl).maxTTl = maxTTL
+		}
+		n := newNetworkSimulator(parties)
+		for _, p := range parties {
+			a.NoError(p.Start(n.chans))
+		}
 
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		donechn := make(chan struct{})
+		go func() {
+			defer wg.Done()
+			n.run(a, donechn)
+		}()
+
+		for _, p := range parties {
+			goStartDKG(p, DkgTask{
+				Threshold:    threshold,
+				Seed:         Digest{1, 2, 3, 4},
+				ProtocolType: prot,
+			})
+		}
+
+		waitforDKG(parties, a)
+		close(donechn)
+		wg.Wait()
+
+		for _, p := range parties {
+			p.Stop()
+		}
 	}
-	maxTTL := time.Minute * 1
-	for _, impl := range parties {
-		impl.(*Impl).maxTTl = maxTTL
-	}
-
-	n := newNetworkSimulator(parties)
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.chans))
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	donechn := make(chan struct{})
-	go func() {
-		defer wg.Done()
-		n.run(a, donechn)
-	}()
-
-	for _, p := range parties {
-		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
-	}
-
-	waitforDKG(parties, a)
-	close(donechn)
-	wg.Wait()
 }
 
 func testKeygenWithOneLateParty(t *testing.T) {
@@ -801,41 +816,56 @@ func testKeygenWithOneLateParty(t *testing.T) {
 	participants := 5
 	threshold := 2
 
-	parties, _ := createFullParties(a, participants, threshold)
+	for _, prot := range dkgProtocols {
 
-	maxTTL := time.Minute * 5
-	for _, impl := range parties {
-		impl.(*Impl).maxTTl = maxTTL
+		parties, _ := createFullParties(a, participants, threshold)
+
+		maxTTL := time.Minute * 5
+		for _, impl := range parties {
+			impl.(*Impl).maxTTl = maxTTL
+		}
+
+		n := newNetworkSimulator(parties)
+
+		for _, p := range parties {
+			a.NoError(p.Start(n.chans))
+		}
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		donechn := make(chan struct{})
+		go func() {
+			defer wg.Done()
+
+			n.run(a, donechn)
+		}()
+
+		for _, p := range parties[:participants-1] {
+			goStartDKG(p, DkgTask{
+				Threshold:    threshold,
+				Seed:         Digest{1, 2, 3, 4},
+				ProtocolType: prot,
+			})
+		}
+
+		time.Sleep(time.Second * 5)
+		for _, p := range parties[participants-1:] {
+			goStartDKG(p, DkgTask{
+				Threshold:    threshold,
+				Seed:         Digest{1, 2, 3, 4},
+				ProtocolType: prot,
+			})
+		}
+		fmt.Println("Waiting for DKG to finish...")
+
+		waitforDKG(parties, a)
+		close(donechn)
+		wg.Wait()
+
+		for _, p := range parties {
+			p.Stop()
+		}
 	}
-
-	n := newNetworkSimulator(parties)
-
-	for _, p := range parties {
-		a.NoError(p.Start(n.chans))
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	donechn := make(chan struct{})
-	go func() {
-		defer wg.Done()
-
-		n.run(a, donechn)
-	}()
-
-	for _, p := range parties[:participants-1] {
-		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
-	}
-
-	time.Sleep(time.Second * 5)
-	for _, p := range parties[participants-1:] {
-		goStartDKG(p, threshold, Digest{1, 2, 3, 4})
-	}
-	fmt.Println("Waiting for DKG to finish...")
-
-	waitforDKG(parties, a)
-	close(donechn)
-	wg.Wait()
 }
 
 func TestMessageFromNonCommitteeIsReported(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/round"
+	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
@@ -507,9 +508,12 @@ func (session *singleSession) extractOutput() (*TSSSecrets, *frost.Signature, *c
 
 	switch res := r.Result.(type) {
 	case *frost.Config:
-		return &TSSSecrets{res, session.trackingId}, nil, nil
+		return &TSSSecrets{FrostConfigs: res, TrackingID: session.trackingId}, nil, nil
 	case frost.Signature:
 		return nil, &res, nil
+	case *cmp.Config:
+		return &TSSSecrets{EcdsaConfigs: res, TrackingID: session.trackingId}, nil, nil
+
 	default:
 		return nil, nil, common.NewTrackableError(
 			fmt.Errorf("unknown output type: %T", res),
