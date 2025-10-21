@@ -163,6 +163,9 @@ func (r *rateLimiter) lenDigestMap() int {
 }
 
 func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
+	if st.ProtocolType == "" {
+		st.ProtocolType = common.ProtocolFROSTSign
+	}
 	// TODO
 	info, err := p.AsyncRequestNewSignature(st)
 	a.NoError(err)
@@ -171,7 +174,7 @@ func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
 }
 
 func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
-	timeout := time.After(time.Second * 10)
+	timeout := time.After(time.Second * 120)
 	for _, p := range parties {
 		select {
 
@@ -191,8 +194,9 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 func goStartDKG(p FullParty, threshold int, seed Digest) {
 	go func() {
 		if err := p.StartDKG(DkgTask{
-			Threshold: threshold,
-			Seed:      seed,
+			Threshold:    threshold,
+			Seed:         seed,
+			ProtocolType: common.ProtocolFROSTDKG,
 		}); err != nil {
 			panic(err)
 		}

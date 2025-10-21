@@ -204,7 +204,9 @@ func (p *Impl) canSatisfyTask(s task) error {
 			return ErrNoConfig
 		}
 	case common.ProtocolECDSADKG:
-		return fmt.Errorf("ECDSA DKG protocol not supported") // TODO: implement ECDSA DKG
+		if p.outputChannels.KeygenOutputChannel == nil {
+			return errNotConfiguredToRunDKG
+		}
 	default:
 		return fmt.Errorf("unknown signing protocol: %s", protoType.ToString())
 	}
@@ -663,7 +665,18 @@ func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
 
 	s.committee = common.SortPartyIDs(p.peers)
 
-	sessionCreator := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
+	var sessionCreator protocol.StartFunc
+	// sessionCreator := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
+
+	switch s.protocol {
+	// TODO: find a nice way to merge all the switch cases that inspect protocol type.
+	case common.ProtocolFROSTDKG:
+		sessionCreator = frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
+	case common.ProtocolECDSADKG:
+		sessionCreator = cmp.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold, p.pool)
+	default:
+		return fmt.Errorf("unsupported dkg protocol: %s", s.protocol.ToString())
+	}
 
 	session, err := sessionCreator(s.trackingId.ToByteString())
 	if err != nil {

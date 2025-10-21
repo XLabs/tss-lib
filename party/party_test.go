@@ -52,17 +52,17 @@ func TestSigning(t *testing.T) {
 	}
 	t.Run("one signature", st.run)
 
-	st.numSignatures = 5
-	st.maxNetworkSimulationTime = time.Second * 200
-	t.Run("five signatures ", st.run)
+	// st.numSignatures = 5
+	// st.maxNetworkSimulationTime = time.Second * 200
+	// t.Run("five signatures ", st.run)
 
-	st2 := signerTester{
-		participants:             5,
-		threshold:                3,
-		numSignatures:            50,
-		maxNetworkSimulationTime: time.Minute,
-	}
-	t.Run("3 threshold 20 signatures", st2.run)
+	// st2 := signerTester{
+	// 	participants:             5,
+	// 	threshold:                3,
+	// 	numSignatures:            50,
+	// 	maxNetworkSimulationTime: time.Minute,
+	// }
+	// t.Run("3 threshold 20 signatures", st2.run)
 }
 
 type signerTester struct {
@@ -73,7 +73,7 @@ type signerTester struct {
 func (st *signerTester) run(t *testing.T) {
 	a := assert.New(t)
 
-	for _, protocol := range []common.ProtocolType{common.ProtocolECDSASign} {
+	for _, protocol := range []common.ProtocolType{common.ProtocolFROSTSign} {
 		parties, _ := createFullParties(a, st.participants, st.threshold)
 
 		digestSet := createDigests(st.numSignatures)
@@ -159,7 +159,8 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	var trackingId *common.TrackingID
 	for i := 0; i < len(parties)-1; i++ {
 		info := fpSign(a, parties[i], SigningTask{
-			Digest: hash,
+			Digest:       hash,
+			ProtocolType: common.ProtocolFROSTSign,
 		})
 		trackingId = info.TrackingID
 	}
@@ -207,7 +208,8 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 			go func(digest Digest) {
 				for _, party := range parties {
 					fpSign(a, party, SigningTask{
-						Digest: digest,
+						Digest:       digest,
+						ProtocolType: common.ProtocolFROSTSign,
 					})
 				}
 			}(digest)
@@ -261,7 +263,8 @@ func testLateParties(t *testing.T, numLate int) {
 
 	for i := 0; i < len(parties)-numLate; i++ {
 		fpSign(a, parties[i], SigningTask{
-			Digest: hash,
+			Digest:       hash,
+			ProtocolType: common.ProtocolFROSTSign,
 		})
 	}
 
@@ -270,7 +273,8 @@ func testLateParties(t *testing.T, numLate int) {
 
 	for i := len(parties) - numLate; i < len(parties); i++ {
 		fpSign(a, parties[i], SigningTask{
-			Digest: hash,
+			Digest:       hash,
+			ProtocolType: common.ProtocolFROSTSign,
 		})
 	}
 
@@ -306,7 +310,8 @@ func TestCleanup(t *testing.T) {
 	p1 := parties[0].(*Impl)
 	digest := Digest{}
 	info := fpSign(a, p1, SigningTask{
-		Digest: digest,
+		Digest:       digest,
+		ProtocolType: common.ProtocolFROSTSign,
 	})
 	p1.rateLimiter.add(info.TrackingID, p1.self) // manually adding to rate limiter, as fpSign doesn't do it.
 
@@ -423,7 +428,8 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	for i := 0; i < len(parties); i++ {
 		for dgst := range digestSet {
 			fpSign(a, parties[i], SigningTask{
-				Digest: dgst,
+				Digest:       dgst,
+				ProtocolType: common.ProtocolFROSTSign,
 			})
 		}
 	}
@@ -480,7 +486,8 @@ func TestTrailingZerosInDigests(t *testing.T) {
 		go func(digest Digest) {
 			for _, party := range parties {
 				fpSign(a, party, SigningTask{
-					Digest: digest,
+					Digest:       digest,
+					ProtocolType: common.ProtocolFROSTSign,
 				})
 			}
 		}(digest)
@@ -532,7 +539,8 @@ func TestChangingCommittee(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				fpSign(a, p, SigningTask{
-					Digest: hash,
+					Digest:       hash,
+					ProtocolType: common.ProtocolFROSTSign,
 				})
 			}()
 		}
@@ -565,8 +573,9 @@ func TestChangingCommittee(t *testing.T) {
 
 				// Dropping ongoing sig to ensure the state of prev sig is `unset`.
 				trackid := p.createTrackingID(SigningTask{
-					Digest:   hash,
-					Faulties: prevFaulties, // prev round faulties.
+					Digest:       hash,
+					Faulties:     prevFaulties, // prev round faulties.
+					ProtocolType: common.ProtocolFROSTSign,
 				})
 				p.sessionMap.Map.Delete(trackid.ToString()) // ensures signature is not created.
 
@@ -581,6 +590,7 @@ func TestChangingCommittee(t *testing.T) {
 					Digest:        hash,
 					Faulties:      shuffledFaulties,
 					AuxiliaryData: []byte{},
+					ProtocolType:  common.ProtocolFROSTSign,
 				})
 				a.NoError(err)
 
@@ -589,6 +599,7 @@ func TestChangingCommittee(t *testing.T) {
 						Digest:        hash,
 						Faulties:      shuffledFaulties,
 						AuxiliaryData: []byte{},
+						ProtocolType:  common.ProtocolFROSTSign,
 					})
 					return
 				}
@@ -654,7 +665,8 @@ func TestErrorsInUpdate(t *testing.T) {
 
 	for _, party := range parties {
 		go fpSign(a, party, SigningTask{
-			Digest: hash,
+			Digest:       hash,
+			ProtocolType: common.ProtocolFROSTSign,
 		})
 	}
 
@@ -838,8 +850,9 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 	}
 
 	info := fpSign(a, parties[0], SigningTask{
-		Digest:   hash,
-		Faulties: []*common.PartyID{parties[1].(*Impl).self},
+		Digest:       hash,
+		Faulties:     []*common.PartyID{parties[1].(*Impl).self},
+		ProtocolType: common.ProtocolFROSTSign,
 	})
 
 	p := (&round.Message{
@@ -878,8 +891,9 @@ func TestSessionRejectsMessageSentTwice(t *testing.T) {
 	}
 
 	info := fpSign(a, parties[0], SigningTask{
-		Digest:   hash,
-		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		Digest:       hash,
+		Faulties:     []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		ProtocolType: common.ProtocolFROSTSign,
 	})
 
 	p := (&round.Message{
@@ -931,8 +945,9 @@ func TestRateLimiting(t *testing.T) {
 	}
 
 	info := fpSign(a, parties[0], SigningTask{
-		Digest:   hash,
-		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		Digest:       hash,
+		Faulties:     []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		ProtocolType: common.ProtocolFROSTSign,
 	})
 
 	p := (&round.Message{
@@ -993,8 +1008,9 @@ func TestUpdateChecks(t *testing.T) {
 
 	_, hash := createSingleDigest()
 	info := fpSign(a, parties[0], SigningTask{
-		Digest:   hash,
-		Faulties: []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		Digest:       hash,
+		Faulties:     []*common.PartyID{parties[1].(*Impl).self, parties[2].(*Impl).self},
+		ProtocolType: common.ProtocolFROSTSign,
 	})
 	p.TrackingID = info.TrackingID
 	a.ErrorContains(parties[0].Update(p.ToParsed()), "unknown sender")

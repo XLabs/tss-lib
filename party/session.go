@@ -9,6 +9,7 @@ import (
 
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/round"
+	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 )
@@ -177,7 +178,7 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 
 	msgRnd := round.Number(message.Content().RoundNumber())
 
-	if msgRnd > frost.NumRounds {
+	if msgRnd > signer.finalRound() {
 		return common.NewTrackableError(
 			errRoundTooLarge,
 			"storeMessage:roundcheck",
@@ -235,6 +236,22 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 	}
 
 	return nil
+}
+
+func (s *singleSession) finalRound() round.Number {
+	// while s.Session supports the function FinalRoundNumber,
+	// we may not have it initialized yet. So we use the protocol type
+	// to determine the final round. It is also lock free.
+	switch s.protocol {
+	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
+		return frost.NumRounds
+	case common.ProtocolECDSASign:
+		return cmpsign.Rounds
+	case common.ProtocolECDSADKG:
+		return cmpsign.Rounds
+	default:
+		return 0
+	}
 }
 
 func (signer *singleSession) getState() signerState {
@@ -319,12 +336,18 @@ func (signer *singleSession) consumeMessage(msg common.ParsedMessage) error {
 		Broadcast:  msg.IsBroadcast(),
 		Content:    msg.Content(),
 		TrackingID: msg.WireMsg().TrackingID,
+		To:         "",
 	}
 
 	// The following storing (Both StoreMessage and StoreBroadcastMessage methods) of
 	//  messages may perform some necessary checks and might even run
 	// some cryptographic computations (depending on the protocol).
 	if !m.Broadcast {
+		if msg.GetTo() == nil {
+			return errInvalidMessage
+		}
+		m.To = party.ID(msg.GetTo().ID)
+
 		if err := signer.session.VerifyMessage(m); err != nil {
 			return err
 		}
