@@ -482,6 +482,8 @@ var (
 	errFinalRoundNotOfCorrectType = errors.New("session final round failed: not of type 'Output'")
 )
 
+// Extracts the output of the session, whether keygen output or signature output.
+// held in a "generic" TSSSecrets struct, or a common.SignatureData struct.
 func (session *singleSession) extractOutput() (*TSSSecrets, *common.SignatureData, *common.Error) {
 	session.mtx.Lock()
 	defer session.mtx.Unlock()

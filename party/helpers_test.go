@@ -14,6 +14,7 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/math/polynomial"
 	"github.com/xlabs/multi-party-sig/pkg/math/sample"
 	"github.com/xlabs/multi-party-sig/pkg/party"
+	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/cmp/config/configgen"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
@@ -317,7 +318,7 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 				pk, err := anyParty.GetPublic(n.protocol)
 				a.NoError(err, "failed to get public key for signature validation")
 
-				a.True(validateSignature(pk, m, d[:]))
+				a.True(validateSignature(pk, m))
 				n.digestsToVerify[d] = true
 				fmt.Println("Signature validated correctly.", m.TrackingId)
 			}
@@ -336,32 +337,29 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 	}
 }
 
-func validateSignature(pk curve.Point, m *common.SignatureData, digest []byte) bool {
+func validateSignature(pk curve.Point, m *common.SignatureData) bool {
 	switch m.TrackingId.Protocol {
 	case uint32(common.ProtocolFROSTSign.ToInt()):
-		return frostValidate(pk, m, digest)
+		sg, err := frost.Secp256k1SignatureTranslate(m)
+		if err != nil {
+			fmt.Println("failed to translate signature:", err)
+			return false
+		}
+
+		if err := sg.Verify(pk, m.M); err != nil {
+			return false
+		}
+
+		return true
+	case uint32(common.ProtocolECDSASign.ToInt()):
+		sg, err := cmp.Secp256k1SignatureTranslate(m)
+		if err != nil {
+			fmt.Println("failed to translate signature:", err)
+			return false
+		}
+
+		return sg.Verify(pk, m.M)
 	default:
-		fmt.Println("unknown protocol for signature verification:", m.TrackingId.Protocol)
-		return false
+		panic("unknown protocol for signature verification")
 	}
-}
-
-func frostValidate(pk curve.Point, m *common.SignatureData, digest []byte) bool {
-	if !bytes.Equal(m.M, digest) {
-		fmt.Println("digest mismatch")
-		return false
-	}
-
-	sg, err := frost.Secp256k1SignatureTranslate(m)
-	if err != nil {
-		fmt.Println("failed to translate signature:", err)
-		return false
-	}
-
-	if err := sg.Verify(pk, digest); err != nil {
-		fmt.Println("failed to verify signature:", err)
-		return false
-	}
-
-	return true
 }
