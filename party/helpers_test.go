@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -22,8 +23,15 @@ import (
 )
 
 var (
-	dkgProtocols     = []common.ProtocolType{common.ProtocolFROSTDKG}
-	signingProtocols = []common.ProtocolType{common.ProtocolECDSASign}
+	dkgProtocols = []common.ProtocolType{common.ProtocolFROSTDKG, common.ProtocolECDSADKG}
+)
+
+// Constants for test parameters
+var (
+	testPrngSeedBytes             = []byte{1, 2, 3, 4}
+	testChainKeyBytes             = []byte{1, 2, 3, 4}
+	testLoadDistributionSeedBytes = []byte{5, 6, 7, 8}
+	testDigestPrefix              = "hello, world"
 )
 
 type prmKey struct{ N, T int }
@@ -75,7 +83,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 		verificationShares[id] = point
 	}
 
-	prng, err := newPrng([]byte{1, 2, 3, 4})
+	prng, err := newPrng(testPrngSeedBytes)
 	a.NoError(err)
 
 	cmpCnfgs := configgen.GenerateCmpTestConfig(group, pids2IDs(partyIDs), threshold, &saferng{prng: prng})
@@ -91,7 +99,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 				Threshold:          threshold,
 				PrivateShare:       privateShares[id],
 				PublicKey:          pk,
-				ChainKey:           []byte{1, 2, 3, 4},
+				ChainKey:           testChainKeyBytes,
 				VerificationShares: party.NewPointMap(verificationShares),
 			},
 			EcdsaSecrets: ecdsaCnfg,
@@ -100,7 +108,7 @@ func makeTestParameters(a *assert.Assertions, participants, threshold int) []Par
 			Self:     pid,
 
 			MaxSignerTTL:         0, // letting it pick default.
-			LoadDistributionSeed: []byte{5, 6, 7, 8},
+			LoadDistributionSeed: testLoadDistributionSeedBytes,
 		}
 	}
 
@@ -144,7 +152,7 @@ func pidToDigest(pid *common.PartyID) Digest {
 
 func createSingleDigest() (map[Digest]bool, Digest) {
 	digestSet := make(map[Digest]bool)
-	d := crypto.Keccak256([]byte("hello, world"))
+	d := crypto.Keccak256([]byte(testDigestPrefix))
 	hash := Digest{}
 	copy(hash[:], d)
 	digestSet[hash] = false
@@ -179,7 +187,7 @@ func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
 	return info
 }
 
-func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
+func waitforDKG(parties []FullParty, a *assert.Assertions) {
 	timeout := time.After(time.Second * 120)
 	for _, p := range parties {
 		select {
@@ -190,11 +198,8 @@ func waitforDKG(parties []FullParty, a *assert.Assertions) bool {
 			}
 		case <-timeout:
 			a.FailNow("timeout waiting for keygen to finish")
-
-			return true
 		}
 	}
-	return false
 }
 
 func goStartDKG(p FullParty, st DkgTask) {
@@ -208,7 +213,7 @@ func goStartDKG(p FullParty, st DkgTask) {
 func createDigests(numDigests int) map[Digest]bool {
 	digestSet := make(map[Digest]bool)
 	for i := 0; i < numDigests; i++ {
-		d := crypto.Keccak256([]byte("hello, world" + strconv.Itoa(i)))
+		d := crypto.Keccak256([]byte(testDigestPrefix + strconv.Itoa(i)))
 		hash := Digest{}
 		copy(hash[:], d)
 		digestSet[hash] = false
@@ -319,19 +324,19 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 				a.NoError(err, "failed to get public key for signature validation")
 
 				a.True(validateSignature(pk, m))
-				n.digestsToVerify[d] = true
-				fmt.Println("Signature validated correctly.", m.TrackingId)
+				n.digestsToVerify[d] = true // Mark as verified
+				slog.Info("Signature validated correctly.", "trackingID", m.TrackingId)
 			}
 
 			n.numSigsReceived[d] = n.numSigsReceived[d] + 1
 
 			if n.verifiedAllSignatures(numSigsExpected) {
-				fmt.Println("All signatures validated correctly.")
+				slog.Info("All signatures validated correctly.")
 				return
 			}
 
-		case <-after:
-			fmt.Println("network timeout")
+		case <-after: // Timeout for the network simulation
+			slog.Warn("Network simulation timed out.")
 			return
 		}
 	}

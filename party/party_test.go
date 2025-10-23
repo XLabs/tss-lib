@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -680,16 +679,11 @@ func TestErrorsInUpdate(t *testing.T) {
 		})
 	}
 
-	success := atomic.Bool{}
-	success.Store(false)
-
 	donechn := time.After(time.Second * 5)
 	for {
 		select {
 		case <-donechn:
-			if !success.Load() {
-				t.Fail()
-			}
+			t.Fail() // Timeout without receiving an expected error
 			return
 
 		case m := <-chans.OutChannel:
