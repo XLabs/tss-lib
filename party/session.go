@@ -11,6 +11,7 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
+	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
@@ -250,7 +251,7 @@ func (s *singleSession) finalRound() round.Number {
 	case common.ProtocolECDSASign:
 		return cmpsign.Rounds
 	case common.ProtocolECDSADKG:
-		return cmpsign.Rounds
+		return cmpdkg.Rounds
 	default:
 		return 0
 	}

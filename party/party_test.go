@@ -431,7 +431,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 	a.Equal(
 		len(parties)*(2*numHandlerWorkers+1)+goroutinesstart,
 		runtime.NumGoroutine(),
-		"expected each party to add 2*numcpu workers and 1 cleanup gorotuines",
+		"expected each party to add 2*numHandlerWorkers and 1 cleanup gorotuines",
 	)
 
 	for i := 0; i < len(parties); i++ {
@@ -661,6 +661,7 @@ func getProjectRootDir() string {
 	return abs
 }
 
+// tests that the fullParty outputs error over chans.ErrChannel for corrupt messages.
 func TestErrorsInUpdate(t *testing.T) {
 	a := assert.New(t)
 	parties, _ := createFullParties(a, 5, 4)
@@ -757,7 +758,7 @@ func testKeygen(t *testing.T) {
 			})
 		}
 
-		waitforDKG(parties, a)
+		waitforDKG(prot, parties, a)
 		close(donechn)
 		wg.Wait()
 
@@ -803,7 +804,7 @@ func testNilConfigKeyGen(t *testing.T) {
 			})
 		}
 
-		waitforDKG(parties, a)
+		waitforDKG(prot, parties, a)
 		close(donechn)
 		wg.Wait()
 
@@ -862,7 +863,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 		}
 		fmt.Println("Waiting for DKG to finish...")
 
-		waitforDKG(parties, a)
+		waitforDKG(prot, parties, a)
 		close(donechn)
 		wg.Wait()
 

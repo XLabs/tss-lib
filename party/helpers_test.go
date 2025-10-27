@@ -187,8 +187,12 @@ func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {
 	return info
 }
 
-func waitforDKG(parties []FullParty, a *assert.Assertions) {
-	timeout := time.After(time.Second * 120)
+func waitforDKG(prot common.ProtocolType, parties []FullParty, a *assert.Assertions) {
+	timeout := time.After(time.Second * 10)
+	if prot == common.ProtocolECDSADKG {
+		timeout = time.After(time.Second * 120) // a whole lot slower
+	}
+
 	for _, p := range parties {
 		select {
 
