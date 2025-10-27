@@ -154,7 +154,7 @@ func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
-	if err := p.canSatisfyTask(s); err != nil {
+	if err := p.validateTaskConfiguration(s); err != nil {
 		return nil, err
 	}
 	if s.ProtocolType != common.ProtocolFROSTSign && s.ProtocolType != common.ProtocolECDSASign {
@@ -186,27 +186,26 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 
 var errNotConfiguredToRunDKG = errors.New("not configured to run DKG. missing KeygenOutputChannel")
 
-func (p *Impl) canSatisfyTask(s task) error {
+// ensures we have the right configuration to run the given task.
+// For instance, if the task is FROST signing, we need to have the frost config set.
+// If the task is DKG, we need to have the KeygenOutputChannel set.
+func (p *Impl) validateTaskConfiguration(s task) error {
 	protoType := s.GetProtocolType()
 	switch protoType {
 	case common.ProtocolFROSTSign:
 		if p.frostConfig == nil {
 			return ErrNoConfig
 		}
-	case common.ProtocolFROSTDKG:
-		if p.outputChannels.KeygenOutputChannel == nil {
-			return errNotConfiguredToRunDKG
-		}
 	case common.ProtocolECDSASign:
 		if p.ecdsaConfig == nil {
 			return ErrNoConfig
 		}
-	case common.ProtocolECDSADKG:
+	case common.ProtocolECDSADKG, common.ProtocolFROSTDKG:
 		if p.outputChannels.KeygenOutputChannel == nil {
 			return errNotConfiguredToRunDKG
 		}
 	default:
-		return fmt.Errorf("unknown signing protocol: %s", protoType.ToString())
+		return fmt.Errorf("unknown protocol: %s", protoType.ToString())
 	}
 
 	return nil
@@ -594,7 +593,7 @@ func (p *Impl) outputSig(sig *common.SignatureData) *common.Error {
 }
 
 func (p *Impl) StartDKG(task DkgTask) error {
-	if err := p.canSatisfyTask(task); err != nil {
+	if err := p.validateTaskConfiguration(task); err != nil {
 		return err
 	}
 
