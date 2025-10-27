@@ -178,9 +178,8 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		peers:    p.PartyIDs,
 		peersmap: peersMap,
 
-		frostConfig:       p.FrostSecrets,
-		ecdsaConfig:       p.EcdsaSecrets,
-		ecdsaCachedPublic: p.EcdsaSecrets.PublicPoint(),
+		frostConfig: p.FrostSecrets,
+		ecdsaConfig: p.EcdsaSecrets,
 
 		sessionMap: &sessionMap{Map: sync.Map{}},
 

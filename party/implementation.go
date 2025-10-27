@@ -28,9 +28,7 @@ type Impl struct {
 	cancelFunc context.CancelFunc
 
 	frostConfig *frost.Config
-
-	ecdsaConfig       *cmp.Config
-	ecdsaCachedPublic curve.Point
+	ecdsaConfig *cmp.Config
 
 	peers    []*common.PartyID
 	peersmap map[party.ID]*common.PartyID
@@ -139,11 +137,11 @@ var ErrNoConfig = errors.New("signing protocol not configured")
 func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
 	switch t {
 	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
-		if p.ecdsaConfig == nil || p.ecdsaCachedPublic == nil {
+		if p.ecdsaConfig == nil {
 			return nil, ErrNoConfig
 		}
 
-		return p.ecdsaCachedPublic.Clone(), nil
+		return p.ecdsaConfig.PublicPoint().Clone(), nil
 	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
 		if p.frostConfig == nil {
 			return nil, ErrNoConfig
