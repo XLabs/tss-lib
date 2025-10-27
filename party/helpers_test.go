@@ -298,7 +298,7 @@ func (n *networkSimulator) run(a *assert.Assertions, donechan ...chan struct{}) 
 	}
 	a.NotNil(anyParty)
 
-	numSigsExpected := anyParty.(*Impl).committeeSize()
+	numSigsExpected := anyParty.(*Impl).committeeSize(n.protocol)
 
 	for {
 		select {

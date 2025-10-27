@@ -385,6 +385,8 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		outputChannels: &p.outputChannels,
 	})
 
+	// TODO: add committee computation here, to reduce storing messages for sessions
+	//       that won't be part of the committee.
 	return signer, nil
 }
 
@@ -394,7 +396,12 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 		return nil, err
 	}
 
-	committeeSize := p.committeeSize()
+	prot, err := trackid.GetProtocolType()
+	if err != nil {
+		return nil, err
+	}
+
+	committeeSize := p.committeeSize(prot)
 
 	if len(validParties) < committeeSize {
 		return nil, fmt.Errorf("not enough valid parties in signer committee: %d < %d",
@@ -408,15 +415,23 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 		return nil, err
 	}
 
-	return common.SortPartyIDs(parties[:p.committeeSize()]), nil
+	return common.SortPartyIDs(parties[:committeeSize]), nil
 }
 
-func (p *Impl) committeeSize() int {
-	if p.frostConfig == nil {
-		return len(p.peers) // default to all peers.
+func (p *Impl) committeeSize(prot common.ProtocolType) int {
+	switch prot {
+	case common.ProtocolFROSTSign:
+		if p.frostConfig != nil {
+			return p.frostConfig.Threshold + 1
+		}
+	case common.ProtocolECDSASign:
+		if p.ecdsaConfig != nil {
+			return p.ecdsaConfig.Threshold + 1
+		}
 	}
 
-	return p.frostConfig.Threshold + 1
+	// default to 0 if no config found.
+	return 0
 }
 
 func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
