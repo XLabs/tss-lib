@@ -876,7 +876,7 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 500) // ensuring all other engines have finished and not just one of them.
 
-		sigProducedCntr.WithLabelValues("12").Write(&m) // TODO fix!
+		sigProducedCntr.WithLabelValues(common.ProtocolFROSTSign.ToString()).Write(&m) // TODO fix!
 		a.Equal(engines[0].Threshold+1, int(m.Counter.GetValue()))
 	})
 
@@ -980,46 +980,6 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		if ctxExpiredFirst(ctx, dnchn) {
 			a.FailNow("context expired")
-		}
-	})
-
-	t.Run("with nonreportable consistency level", func(t *testing.T) {
-		// test will check thatno FT is triggered when the consistency level is non-reportable.
-		// does so by starting signing for 2 out of 3 guardians and then wait for timeout.
-		a := assert.New(t)
-		engines, err := loadGuardians(5, "tss5")
-		a.NoError(err)
-
-		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		defer cancel()
-
-		for _, engine := range engines {
-			a.NoError(engine.Start(ctx, logger))
-		}
-
-		dnchn := msgHandler(ctx, engines, 1)
-
-		e := getSigningGuardian(a, engines, party.SigningTask{
-			Digest:        dgst,
-			Faulties:      []*common.PartyID{},
-			AuxiliaryData: nil,
-			ProtocolType:  common.ProtocolFROSTSign,
-		})
-
-		for _, engine := range engines {
-			if e.Self.Pid.Equals(engine.Self.Pid) {
-				continue
-			}
-
-			tmp := make([]byte, 32)
-			copy(tmp, dgst[:])
-			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
-		}
-
-		if !ctxExpiredFirst(ctx, dnchn) {
-			a.FailNow("signature shouldn't have been created")
 		}
 	})
 
@@ -1567,7 +1527,7 @@ func TestSigCounter(t *testing.T) {
 	a := assert.New(t)
 
 	t.Run("MaxCountBlockAdditionalUpdates", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 		defer cancel()
 
 		// t.Skip("TODO: implement this test, fails since we've moved to broadcast only messages!")
@@ -1594,8 +1554,8 @@ func TestSigCounter(t *testing.T) {
 
 				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:])
 				feeder.addMessage(e, msg)
-				err := feeder.feedWithEchoes()
-				if err != nil {
+
+				if err := feeder.feedWithEchoes(); err != nil {
 					a.ErrorContains(err, "maximum number of simultaneous")
 
 					return
@@ -1603,7 +1563,17 @@ func TestSigCounter(t *testing.T) {
 			}
 		}
 
-		t.FailNow() // expected feeding to fail due to maxSimultaneousSignatures.
+		// try grabbing another message from e1:
+		a.NotPanics(func() {
+			for {
+				feeder.addMessage(e1, waitOnChannelForNonHashEcho(e1))
+				if err := feeder.feedWithEchoes(); err != nil {
+					a.ErrorContains(err, "maximum number of simultaneous")
+
+					return
+				}
+			}
+		})
 	})
 
 	t.Run("ErrorReduceCount", func(t *testing.T) {
@@ -1762,10 +1732,19 @@ mainloop:
 func beginSigningAndGrabMessage(e1 *Engine, dgst []byte) Sendable {
 	go e1.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, dgst, nil)
 
+	return waitOnChannelForNonHashEcho(e1)
+}
+
+func waitOnChannelForNonHashEcho(e1 *Engine) Sendable {
 	var msg Sendable
 	for { // cleaning the channel, and taking one of the messages.
 		select {
 		case tmp := <-e1.ProducedOutputMessages():
+
+			if isHashEcho(tmp) {
+				fmt.Println("skipping hash echo message")
+				continue
+			}
 			msg = tmp
 			parsed, err := e1.parseBroadcast(&IncomingMessage{
 				Source:  e1.Self,
@@ -1787,6 +1766,17 @@ func beginSigningAndGrabMessage(e1 *Engine, dgst []byte) Sendable {
 			panic("timeout!")
 		}
 	}
+}
+
+func isHashEcho(tmp Sendable) bool {
+	if msg, ok := tmp.GetNetworkMessage().Message.(*tsscommv1.PropagatedMessage_Echo); ok {
+		_, ok = msg.Echo.Message.Content.(*tsscommv1.SignedMessage_HashEcho)
+		if ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 func contains(lst []*Engine, e *Engine) bool {

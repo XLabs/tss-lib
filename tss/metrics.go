@@ -52,7 +52,7 @@ type signatureMetadata struct {
 }
 
 func (t *Engine) createSignatureMetrics(tid *common.TrackingID) {
-	key := tid.ToString()
+	key := trackingIdIntoSigKey(tid)
 	t.SignatureMetrics.Store(key, &signatureMetadata{
 		timeOfCreation: time.Now(),
 	})
@@ -73,13 +73,12 @@ func (t *Engine) sigMetricDone(trackid *common.TrackingID, hadIssue bool) {
 	}
 
 	protocoltype, _ := trackid.GetProtocolType()
-	auxStr := string(trackid.AuxiliaryData)
 	sigProducedCntr.
-		WithLabelValues(protocoltype.ToString(), auxStr).
+		WithLabelValues(protocoltype.ToString()).
 		Inc()
 
 	latency := time.Since(metrics.timeOfCreation)
-	sigLatency.WithLabelValues(protocoltype.ToString(), auxStr).Observe(float64(latency.Milliseconds()))
+	sigLatency.WithLabelValues(protocoltype.ToString()).Observe(float64(latency.Milliseconds()))
 
 	t.SignatureMetrics.Delete(key)
 

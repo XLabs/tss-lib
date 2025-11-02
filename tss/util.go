@@ -35,6 +35,7 @@ type strPartyId string
 // a guardian is allowed to send how many messages it want per signature, but not allowed to
 // participate in more than maxActiveSignaturesPerGuardian signatures at a time.
 type activeSigCounter struct {
+	// TODO: Merge with rateLimiter in party/limiter.go
 	mtx sync.RWMutex
 
 	digestToGuardians map[sigKey]set[strPartyId]

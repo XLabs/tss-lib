@@ -52,9 +52,6 @@ type Engine struct {
 
 	sigCounter activeSigCounter
 
-	// informs a central tracker of the guardian's actions.
-	ftCommandChan chan any
-
 	SignatureMetrics sync.Map
 }
 
@@ -175,15 +172,6 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 		ProtocolType:  protocolType,
 	}
 
-	// if err := t.prepareThenAnounceNewDigest(sigtask, consistencyLvl, mt); err != nil {
-	// 	return err
-	// }
-
-	// sigPrepInfo, err := t.getSigPrepInfo(chainID, d)
-	// if err != nil {
-	// 	return err
-	// }
-
 	t.logger.Info("signature for VAA requested",
 		zap.String("digest", fmt.Sprintf("%x", digest)),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
@@ -196,13 +184,7 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 
 	t.createSignatureMetrics(info.TrackingID)
 
-	// if sigPrepInfo.alreadyStartedSigningTrackingIDs[trackidStr(info.TrackingID.ToString())] {
-	// 	return nil // skipping signing.
-	// }
-
-	// TODO: cosider not recomputing the info, and just used it from `t.fp.GetSigningInfo(sigTask)`
 	info, err = t.fp.AsyncRequestNewSignature(sigtask)
-
 	if err != nil {
 		return err
 	}
@@ -215,45 +197,8 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 		zap.Any("committee", t.getCommitteeNetworkNames(info.SigningCommittee)),
 	)
 
-	// scmd := signCommand{SigningInfo: info, passedToFP: true, signingMeta: mt, digestconsistancy: consistencyLvl}
-	// if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, &scmd); err != nil {
-	// 	t.logger.Error("couldn't inform the tracker of the signature start",
-	// 		zap.Error(err),
-	// 		zap.String("trackingID", info.TrackingID.ToString()),
-	// 	)
-
-	// 	return err
-	// }
-
 	return nil
 }
-
-// getExcludedFromCommittee follows the Leader's recommendation for the committee
-// by returning the list of guardians that should be excluded from the committee (as 'faulties' list).
-// func (t *Engine) getExcludedFromCommittee(mt signingMeta) []*common.PartyID {
-// 	if !mt.isFromVaav1 || mt.verifiedVAAv1 == nil {
-// 		return nil
-// 	}
-
-// 	signersID, err := t.translateVaaV1Signers(mt.verifiedVAAv1)
-// 	if err != nil {
-// 		return nil
-// 	}
-
-// 	if len(signersID) < t.GuardianStorage.Threshold {
-// 		return nil // not enough guardians to form a committee.
-// 	}
-
-// 	// grab everyone that is not a signer in the VAAv1.
-// 	var excludedSigners []*common.PartyID
-// 	for _, id := range t.GuardianStorage.Identities {
-// 		if _, ok := signersID[id.CommunicationIndex]; !ok {
-// 			excludedSigners = append(excludedSigners, id.Pid)
-// 		}
-// 	}
-
-// 	return excludedSigners
-// }
 
 func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
 	ids := make([]string, 0, len(pids))
@@ -270,47 +215,6 @@ func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
 
 	return ids
 }
-
-// func (t *Engine) getSigPrepInfo(chainID vaa.ChainID, d party.Digest) (sigPreparationInfo, error) {
-// cmd := prepareToSignCommand{
-// 	ChainID: chainID,
-// 	Digest:  d,
-// 	reply:   make(chan sigPreparationInfo, 1),
-// }
-
-// if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, &cmd); err != nil {
-// 	return sigPreparationInfo{}, fmt.Errorf("failed to request for inactive guardians: %w", err)
-// }
-
-// // waiting for the reply.
-// sigPrepInfo, err := outOfChannelOrDone(t.ctx, cmd.reply)
-// if err != nil {
-// 	return sigPreparationInfo{}, fmt.Errorf("failed to get inactive guardians: %w", err)
-// }
-
-// return sigPrepInfo, nil
-// }
-
-// prepareThenAnounceNewDigest updates the inner state of the engine before announcing to others about a new digest seen.
-// func (t *Engine) prepareThenAnounceNewDigest(sigtask party.SigningTask, consistencyLvl uint8, mt signingMeta) error {
-// 	signinginfo, err := t.fp.GetSigningInfo(sigtask)
-// 	if err != nil {
-// 		return fmt.Errorf("couldnt generate signing task: %w", err)
-// 	}
-
-// 	sgCmd := &signCommand{
-// 		SigningInfo:       signinginfo,
-// 		passedToFP:        false, // set to true only after FP actually received the message.
-// 		digestconsistancy: consistencyLvl,
-// 		signingMeta:       mt,
-// 	}
-
-// 	if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, sgCmd); err != nil {
-// 		return fmt.Errorf("couldn't inform the tracker of the signature start: %w", err)
-// 	}
-
-// 	return nil
-// }
 
 func NewKeyGenerator(storage *GuardianStorage) (KeyGenerator, error) {
 	return newEngine(storage)
