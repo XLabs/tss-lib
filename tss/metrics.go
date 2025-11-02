@@ -6,7 +6,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
@@ -52,8 +51,8 @@ type signatureMetadata struct {
 	timeOfCreation time.Time
 }
 
-func (t *Engine) createSignatureMetrics(vaaDigest []byte, chainID vaa.ChainID) {
-	key := intoSigKey(party.Digest(vaaDigest), chainID)
+func (t *Engine) createSignatureMetrics(digest, aux []byte) {
+	key := intoSigKey(party.Digest(digest), aux)
 	t.SignatureMetrics.Store(key, &signatureMetadata{
 		timeOfCreation: time.Now(),
 	})

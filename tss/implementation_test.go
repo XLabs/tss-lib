@@ -44,9 +44,9 @@ var (
 		round3Message,
 	}
 
-	allRounds                     = append(unicastRounds, broadcastRounds...)
-	reportableConsistancyLevel    = uint8(1)                // TODO
-	nonReportableConsistancyLevel = instantConsistencyLevel // TODO
+	allRounds                  = append(unicastRounds, broadcastRounds...)
+	reportableConsistancyLevel = uint8(1) // TODO
+	// nonReportableConsistancyLevel = instantConsistencyLevel // TODO
 )
 
 func parsedIntoEcho(a *assert.Assertions, t *Engine, parsed common.ParsedMessage) *IncomingMessage {

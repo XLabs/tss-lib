@@ -59,7 +59,7 @@ type Signer interface {
 	// aux is optional auxiliary data that can be used to distinguish different signing
 	// requests over the same digest.
 	// returns error if the signing protocol couldn't be started.
-	BeginAsyncThresholdSigningProtocol(digest, aux []byte) error
+	BeginAsyncThresholdSigningProtocol(protocol common.ProtocolType, digest, aux []byte) error
 
 	// outputs a channel that will produce signature data once available.
 	ProducedSignature() <-chan *common.SignatureData

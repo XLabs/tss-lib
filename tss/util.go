@@ -374,13 +374,14 @@ func chainIDToBytes(chainID vaa.ChainID) []byte {
 
 // sigKey contains two main parts of common.TrackID: the digest and the chainID.
 // it doesan't contain the faulty bitmap since we want to point to the same signature even if the faulty bitmap changes.
-type sigKey [party.DigestSize + auxiliaryDataSize]byte
+type sigKey [digestSize * 2]byte
 
-func intoSigKey(dgst party.Digest, chain vaa.ChainID) sigKey {
+func intoSigKey(dgst party.Digest, aux []byte) sigKey {
 	var key sigKey
 
+	auxhash := hash(aux)
+	copy(key[party.DigestSize:], auxhash[:])
 	copy(key[:party.DigestSize], dgst[:])
-	copy(key[party.DigestSize:], chainIDToBytes(chain))
 
 	return key
 }
