@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	engine "github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	common "github.com/xlabs/tss-common"
+	engine "github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 type Identifier struct {

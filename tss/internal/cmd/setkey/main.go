@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
+	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 var secretkeypath = flag.String("key", "", "path to the secret key PEM file")

@@ -13,16 +13,16 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/internal/testutils"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
-	engine "github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/comm"
-	"github.com/certusone/wormhole/node/pkg/tss/internal/cmd"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	engine "github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/comm"
+	"github.com/xlabs/tss-lib/v2/tss/internal/cmd"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 var (
@@ -35,21 +35,23 @@ var (
 var logger *zap.Logger
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	ctx = testutils.MakeSupervisorContext(ctx)
-	logger = supervisor.Logger(ctx)
+	core, _ := observer.New(zapcore.DebugLevel)
+	logger = zap.New(core)
 
 	logger.Info("Loading KeyGenerator and GuardianStorage for DKG...")
 	cnfgs, prot := loadConfigsFromFlags()
 
 	keygen, gst := keygeneratorSetup(cnfgs)
 
-	keygen.Start(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	keygen.Start(ctx, logger)
 
 	logger.Info("Setting up server...")
 	srvr := createServer(keygen)
+
 	go func() {
 		if err := srvr.Run(ctx); err != nil {
 			logger.Fatal("Server stopped", zap.Error(err))

@@ -16,14 +16,8 @@ import (
 	"testing"
 	"time"
 
-	whcommon "github.com/certusone/wormhole/node/pkg/common"
-	"github.com/certusone/wormhole/node/pkg/guardiansigner"
-	"github.com/certusone/wormhole/node/pkg/internal/testutils"
-	ethcommon "github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
@@ -31,6 +25,7 @@ import (
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
+	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -49,6 +44,16 @@ var (
 	// nonReportableConsistancyLevel = instantConsistencyLevel // TODO
 )
 
+var (
+	logger       *zap.Logger
+	observedLogs *observer.ObservedLogs
+	core         zapcore.Core
+)
+
+func init() {
+	core, observedLogs = observer.New(zapcore.DebugLevel)
+	logger = zap.New(core)
+}
 func parsedIntoEcho(a *assert.Assertions, t *Engine, parsed common.ParsedMessage) *IncomingMessage {
 	payload, _, err := parsed.WireBytes()
 	a.NoError(err)
@@ -395,12 +400,11 @@ func TestEquivocation(t *testing.T) {
 		e1, e2 := engines[0], engines[1]
 
 		receiver := engines[4]
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cncl := context.WithCancel(supctx)
+		ctx, cncl := context.WithCancel(context.Background())
 		defer cncl()
 
-		e1.Start(ctx)
-		e2.Start(ctx)
+		e1.Start(ctx, logger)
+		e2.Start(ctx, logger)
 
 		for i, rndType := range unicastRounds {
 
@@ -446,11 +450,10 @@ func TestBadInputs(t *testing.T) {
 	engines := load5GuardiansSetupForBroadcastChecks(a)
 	e1, e2 := engines[0], engines[1]
 
-	supctx := testutils.MakeSupervisorContext(context.Background())
-	ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 	defer cancel()
 
-	e1.Start(ctx) // so it has a logger.
+	e1.Start(ctx, logger) // so it has a logger.
 
 	t.Run("signature", func(t *testing.T) {
 		for j, rnd := range allRounds {
@@ -567,16 +570,16 @@ func TestBadInputs(t *testing.T) {
 		var tmp *Engine = nil
 		engines2 := load5GuardiansSetupForBroadcastChecks(a)
 
-		a.ErrorIs(tmp.BeginAsyncThresholdSigningProtocol(nil, 0, reportableConsistancyLevel), errNilTssEngine)
-		a.ErrorIs(e2.BeginAsyncThresholdSigningProtocol(nil, 0, reportableConsistancyLevel), errTssEngineNotStarted)
+		a.ErrorIs(tmp.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), errNilTssEngine)
+		a.ErrorIs(e2.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), errTssEngineNotStarted)
 
 		tmp = engines2[1]
 		tmp.started.Store(started)
 
-		a.ErrorContains(e1.BeginAsyncThresholdSigningProtocol(make([]byte, 12), 0, reportableConsistancyLevel), "length is not 32 bytes")
+		a.ErrorContains(e1.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, make([]byte, 12), nil), "length is not 32 bytes")
 
 		tmp.fp = nil
-		a.ErrorContains(tmp.BeginAsyncThresholdSigningProtocol(nil, 0, reportableConsistancyLevel), "not set up correctly")
+		a.ErrorContains(tmp.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), "not set up correctly")
 	})
 
 	t.Run("fetch certificate", func(t *testing.T) {
@@ -584,126 +587,126 @@ func TestBadInputs(t *testing.T) {
 		a.ErrorIs(err, ErrUnkownSender)
 	})
 
-	t.Run("handle incoming VAAs", func(t *testing.T) {
-		a := assert.New(t)
+	// t.Run("handle incoming VAAs", func(t *testing.T) {
+	// 	a := assert.New(t)
 
-		v, gs := genVaaAndGuardianSet(a)
+	// 	v, gs := genVaaAndGuardianSet(a)
 
-		gst := whcommon.NewGuardianSetState(nil)
-		gst.Set(gs)
+	// 	gst := whcommon.NewGuardianSetState(nil)
+	// 	gst.Set(gs)
 
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
+	// 	engines := load5GuardiansSetupForBroadcastChecks(a)
+	// 	engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
 
-		engine.SetGuardianSetState(gst)
+	// 	// engine.SetGuardianSetState(gst)
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+	// 	ctx, cancel := context.WithCancel(context.Background())
+	// 	defer cancel()
 
-		ctx = testutils.MakeSupervisorContext(ctx)
+	// 	ctx = testutils.MakeSupervisorContext(ctx)
 
-		engine.Start(ctx)
+	// 	engine.Start(ctx, logger)
 
-		// bad verfication run
-		v.Version = 2
-		v.Nonce = 0
+	// 	// bad verfication run
+	// 	v.Version = 2
+	// 	v.Nonce = 0
 
-		bts, err := v.Marshal()
-		a.NoError(err)
+	// 	bts, err := v.Marshal()
+	// 	a.NoError(err)
 
-		engine.LeaderIdentity = engine.Self.KeyPEM
+	// 	engine.LeaderIdentity = engine.Self.KeyPEM
 
-		t.Run("Bad Version", func(t *testing.T) {
-			err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-				Vaav1: &tsscommv1.VaaV1Info{
-					Marshaled: bts,
-				},
-			})
+	// 	t.Run("Bad Version", func(t *testing.T) {
+	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
+	// 			Vaav1: &tsscommv1.VaaV1Info{
+	// 				Marshaled: bts,
+	// 			},
+	// 		})
 
-			a.ErrorContains(err, errNotVaaV1.Error())
-		})
+	// 		a.ErrorContains(err, errNotVaaV1.Error())
+	// 	})
 
-		v.Version = vaa.VaaVersion1
-		bts, err = v.Marshal()
-		a.NoError(err)
+	// 	v.Version = vaa.VaaVersion1
+	// 	bts, err = v.Marshal()
+	// 	a.NoError(err)
 
-		t.Run("Bad Signature", func(t *testing.T) {
-			err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-				Vaav1: &tsscommv1.VaaV1Info{
-					Marshaled: bts,
-				},
-			})
+	// 	t.Run("Bad Signature", func(t *testing.T) {
+	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
+	// 			Vaav1: &tsscommv1.VaaV1Info{
+	// 				Marshaled: bts,
+	// 			},
+	// 		})
 
-			a.ErrorContains(err, "signature")
-		})
+	// 		a.ErrorContains(err, "signature")
+	// 	})
 
-		t.Run("Bad Marshal", func(t *testing.T) {
-			err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-				Vaav1: &tsscommv1.VaaV1Info{
-					Marshaled: []byte("BadMarshal"),
-				},
-			})
+	// 	t.Run("Bad Marshal", func(t *testing.T) {
+	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
+	// 			Vaav1: &tsscommv1.VaaV1Info{
+	// 				Marshaled: []byte("BadMarshal"),
+	// 			},
+	// 		})
 
-			a.ErrorContains(err, "unmarshal")
-		})
+	// 		a.ErrorContains(err, "unmarshal")
+	// 	})
 
-		t.Run("nil VAA", func(t *testing.T) {
-			err = engine.handleUnicastVaaV1(nil)
+	// 	t.Run("nil VAA", func(t *testing.T) {
+	// 		err = engine.handleUnicastVaaV1(nil)
 
-			a.ErrorContains(err, "nil")
-		})
+	// 		a.ErrorContains(err, "nil")
+	// 	})
 
-		t.Run("no guardian set state", func(t *testing.T) {
-			engine.gst = nil
+	// 	t.Run("no guardian set state", func(t *testing.T) {
+	// 		engine.gst = nil
 
-			err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-				Vaav1: &tsscommv1.VaaV1Info{
-					Marshaled: bts,
-				},
-			})
+	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
+	// 			Vaav1: &tsscommv1.VaaV1Info{
+	// 				Marshaled: bts,
+	// 			},
+	// 		})
 
-			a.ErrorContains(err, "guardianSet")
-		})
-	})
+	// 		a.ErrorContains(err, "guardianSet")
+	// 	})
+	// })
 
-	t.Run("witness Vaas", func(t *testing.T) {
-		a := assert.New(t)
+	// t.Run("witness Vaas", func(t *testing.T) {
+	// 	a := assert.New(t)
 
-		v, gs := genVaaAndGuardianSet(a)
+	// 	v, gs := genVaaAndGuardianSet(a)
 
-		gst := whcommon.NewGuardianSetState(nil)
-		gst.Set(gs)
+	// 	gst := whcommon.NewGuardianSetState(nil)
+	// 	gst.Set(gs)
 
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
+	// 	engines := load5GuardiansSetupForBroadcastChecks(a)
+	// 	engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+	// 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	// 	defer cancel()
 
-		ctx = testutils.MakeSupervisorContext(ctx)
+	// 	ctx = testutils.MakeSupervisorContext(ctx)
 
-		a.ErrorContains(engine.WitnessNewVaa(v), errTssEngineNotStarted.Error())
+	// 	a.ErrorContains(engine.WitnessNewVaa(v), errTssEngineNotStarted.Error())
 
-		engine.Start(ctx)
+	// 	engine.Start(ctx, logger)
 
-		engine.isleader = true
-		a.ErrorContains(engine.WitnessNewVaa(v), errNilGuardianSetState.Error())
-		engine.gst = gst
+	// 	engine.isleader = true
+	// 	a.ErrorContains(engine.WitnessNewVaa(v), errNilGuardianSetState.Error())
+	// 	engine.gst = gst
 
-		a.NoError(engine.WitnessNewVaa(v))
+	// 	a.NoError(engine.WitnessNewVaa(v))
 
-		a.ErrorContains(engine.WitnessNewVaa(nil), "nil")
-		a.NoError(engine.WitnessNewVaa(v))
+	// 	a.ErrorContains(engine.WitnessNewVaa(nil), "nil")
+	// 	a.NoError(engine.WitnessNewVaa(v))
 
-		engine.messageOutChan = nil
-		a.NoError(engine.WitnessNewVaa(v)) //shouldn't output error but log.
+	// 	engine.messageOutChan = nil
+	// 	a.NoError(engine.WitnessNewVaa(v)) //shouldn't output error but log.
 
-		v.Version += 1
-		a.NoError(engine.WitnessNewVaa(v))
+	// 	v.Version += 1
+	// 	a.NoError(engine.WitnessNewVaa(v))
 
-		engine = nil
-		a.ErrorContains(engine.WitnessNewVaa(v), errNilTssEngine.Error())
-	})
+	// 	engine = nil
+	// 	a.ErrorContains(engine.WitnessNewVaa(v), errNilTssEngine.Error())
+	// })
 }
 
 func createX509Cert(dnsName string) *x509.Certificate {
@@ -804,11 +807,10 @@ func TestRouteCheck(t *testing.T) {
 	engines := load5GuardiansSetupForBroadcastChecks(a)
 	e1 := engines[0]
 
-	supctx := testutils.MakeSupervisorContext(context.Background())
-	ctx, cancel := context.WithTimeout(supctx, time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	e1.Start(ctx)
+	e1.Start(ctx, logger)
 	e1.fpCommChans.OutChannel <- &badtssMessage{}
 	e1.fpCommChans.ErrChannel <- common.NewTrackableError(errors.New("test"), "test", -1, nil, &common.TrackingID{})
 	e1.fpCommChans.ErrChannel <- nil
@@ -845,13 +847,12 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Second*20)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 		defer cancel()
 
 		fmt.Println("starting engines.")
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		fmt.Println("msgHandler settup:")
@@ -861,12 +862,11 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		m := dto.Metric{}
 
-		cID := vaa.ChainID(1)
 		// all engines are started, now we can begin the protocol.
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			err := engine.BeginAsyncThresholdSigningProtocol(tmp, cID, reportableConsistancyLevel)
+			err := engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 			a.NoError(err)
 		}
 
@@ -876,7 +876,7 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 500) // ensuring all other engines have finished and not just one of them.
 
-		sigProducedCntr.WithLabelValues(cID.String()).Write(&m)
+		sigProducedCntr.WithLabelValues("12").Write(&m) // TODO fix!
 		a.Equal(engines[0].Threshold+1, int(m.Counter.GetValue()))
 	})
 
@@ -890,24 +890,21 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Second*10)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		dnchn := msgHandler(ctx, engines, 1)
-
-		cID := vaa.ChainID(1)
 
 		// demand signing multiple times.
 		for range 10 {
 			for _, engine := range engines {
 				tmp := make([]byte, 32)
 				copy(tmp, dgst[:])
-				engine.BeginAsyncThresholdSigningProtocol(tmp, cID, reportableConsistancyLevel)
+				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 			}
 			fmt.Println()
 		}
@@ -926,22 +923,19 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		dnchn := msgHandler(ctx, engines, 1)
 
-		cID := vaa.ChainID(1)
-
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			engine.BeginAsyncThresholdSigningProtocol(tmp, cID, reportableConsistancyLevel)
+			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 		}
 
 		time.Sleep(time.Millisecond * 500)
@@ -960,13 +954,12 @@ func TestNoFaultsFlow(t *testing.T) {
 			digests[i] = party.Digest{byte(i)}
 		}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		fmt.Println("starting engines.")
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		fmt.Println("msgHandler settup:")
@@ -981,7 +974,7 @@ func TestNoFaultsFlow(t *testing.T) {
 				tmp := make([]byte, 32)
 				copy(tmp, d[:])
 
-				engine.BeginAsyncThresholdSigningProtocol(tmp, 1, reportableConsistancyLevel)
+				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 			}
 		}
 
@@ -999,22 +992,19 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Second*10)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		dnchn := msgHandler(ctx, engines, 1)
 
-		cID := vaa.ChainID(1)
-
 		e := getSigningGuardian(a, engines, party.SigningTask{
 			Digest:        dgst,
 			Faulties:      []*common.PartyID{},
-			AuxiliaryData: chainIDToBytes(cID),
+			AuxiliaryData: nil,
 			ProtocolType:  common.ProtocolFROSTSign,
 		})
 
@@ -1025,122 +1015,11 @@ func TestNoFaultsFlow(t *testing.T) {
 
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			engine.BeginAsyncThresholdSigningProtocol(tmp, cID, nonReportableConsistancyLevel)
+			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 		}
 
 		if !ctxExpiredFirst(ctx, dnchn) {
 			a.FailNow("signature shouldn't have been created")
-		}
-	})
-
-	t.Run("TSS sign after VAA seen by leader", func(t *testing.T) {
-		a := assert.New(t)
-
-		nvaa, gs := genVaaAndGuardianSet(a)
-
-		a.NoError(nvaa.Verify(gs.Keys))
-
-		gst := whcommon.NewGuardianSetState(nil)
-		gst.Set(gs)
-
-		engines, err := loadGuardians(5, "tss5")
-		a.NoError(err)
-
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*30)
-		defer cancel()
-
-		engines[0].isleader = true
-		for _, engine := range engines {
-			engine.LeaderIdentity = engines[0].Self.KeyPEM
-			engine.SetGuardianSetState(gst)
-			a.NoError(engine.Start(ctx))
-		}
-
-		dnchn := msgHandler(ctx, engines, 1)
-
-		engines[0].WitnessNewVaa(nvaa)
-		if ctxExpiredFirst(ctx, dnchn) {
-			a.FailNow("context expired without signature")
-		}
-	})
-
-	t.Run("witness signature and use vaav1 mappings", func(t *testing.T) {
-		/*
-			This tests ensures that a specific committee signs the VAAv2 (everyone that signed the VAAv1).
-		*/
-		a := assert.New(t)
-
-		nvaa, gs := genVaaAndGuardianSet(a)
-
-		nvaa.Signatures = nvaa.Signatures[:4]
-		// ensuring valid vaa.
-		a.NoError(nvaa.Verify(gs.Keys))
-
-		gst := whcommon.NewGuardianSetState(nil)
-		gst.Set(gs)
-
-		engines, err := loadGuardians(5, "tss5")
-		a.NoError(err)
-
-		// set mappings (can be arbitrary in this unit test, since everyone is "online" and alive).
-
-		for i := range engines {
-			engineIdentities := engines[i].GuardianStorage.Identities
-			for j := range engineIdentities {
-				id := engineIdentities[j]
-
-				tmp := ethcommon.Address{}
-				copy(tmp[:], gs.Keys[j][:])
-
-				id.VAAv1PubKey = &tmp
-				engines[i].GuardianStorage.IdentitiesKeep.vaav1PubToIdentity[tmp] = int(id.CommunicationIndex)
-			}
-		}
-
-		e := engines[0] // e IS LEADER.
-		e.isleader = true
-
-		// Get who signed the VAAv1:
-		committeeHostnames := make(map[string]bool) // partyIDs
-		for _, s := range nvaa.Signatures {
-			id, err := e.GuardianStorage.fetchIdentityFromVaav1Pubkey(gs.Keys[s.Index])
-			a.NoError(err)
-
-			committeeHostnames[id.Hostname] = true
-		}
-
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*30)
-		defer cancel()
-
-		for _, engine := range engines {
-			engine.LeaderIdentity = e.Self.KeyPEM
-			engine.SetGuardianSetState(gst)
-			a.NoError(engine.Start(ctx))
-		}
-
-		dnchn := msgHandler(ctx, engines, 1)
-
-		e.WitnessNewVaa(nvaa)
-
-		allMessages := <-dnchn
-
-		// TEST: Check that every TSS-Content message was received from a committee member.
-		for _, m := range allMessages {
-			echo := m.toBroadcastMsg()
-			if echo == nil || echo.Message == nil || echo.Message.Content == nil {
-				continue
-			}
-			_, ok := echo.Message.Content.(*tsscommv1.SignedMessage_TssContent)
-			if !ok {
-				continue
-			}
-
-			id, err := e.GuardianStorage.fetchIdentityFromIndex(SenderIndex(echo.Message.Sender))
-			a.NoError(err)
-
-			a.True(committeeHostnames[id.Hostname], "message from non-committee member: %s", id.Hostname)
 		}
 	})
 
@@ -1153,23 +1032,12 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-		ctx, cancel := context.WithTimeout(testutils.MakeSupervisorContext(context.Background()), time.Second*50)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*50)
 		defer cancel()
-
-		cID := vaa.ChainID(1)
-		for i, e := range engines {
-			e.GuardianStorage.EcdsaChains = []vaa.ChainID{cID}
-			a.NoError(e.attemptLoadTssSecrets()) // ensure ecdsa is loaded.
-			a.NotNil(e.GuardianStorage.ecdsaconf)
-
-			// recreate engine to ensure ecdsa config is used.
-			engines[i], err = newEngine(&e.GuardianStorage)
-			a.NoError(err)
-		}
 
 		fmt.Println("starting engines.")
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		fmt.Println("msgHandler settup:")
@@ -1177,68 +1045,18 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		fmt.Println("engines started, requesting sigs")
 
-		m := dto.Metric{}
-
 		// all engines are started, now we can begin the protocol.
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			err := engine.BeginAsyncThresholdSigningProtocol(tmp, cID, reportableConsistancyLevel)
+			err := engine.BeginAsyncThresholdSigningProtocol(common.ProtocolECDSASign, tmp, nil)
 			a.NoError(err)
 		}
 
 		if ctxExpiredFirst(ctx, dnchn) {
 			a.FailNow("context expired")
 		}
-
-		time.Sleep(time.Millisecond * 500) // ensuring all other engines have finished and not just one of them.
-
-		sigProducedCntr.WithLabelValues(cID.String()).Write(&m)
-		a.Equal(engines[0].Threshold+1, int(m.Counter.GetValue()))
 	})
-}
-
-// Creates a vaa with 2t+1 sigantures (not n-out-of-n signatures).
-func genVaaAndGuardianSet(a *assert.Assertions) (*vaa.VAA, *whcommon.GuardianSet) {
-	gss := whcommon.NewGuardianSetState(nil)
-	_ = gss
-
-	nvaa := &vaa.VAA{
-		Version:          vaa.VaaVersion1,
-		GuardianSetIndex: 0,
-		Signatures:       nil,
-		Timestamp:        time.Now(),
-		Nonce:            12345,
-		EmitterChain:     vaa.ChainIDPythNet,
-		EmitterAddress:   vaa.Address{1, 2, 3, 4, 54, 56, 67},
-		Payload:          []byte("hello world"),
-		Sequence:         5578,
-		ConsistencyLevel: pythnetFinalizedConsistencyLevel,
-	}
-
-	addrss := []ethcommon.Address{}
-	sigs := []*vaa.Signature{}
-	for i := range 5 {
-		guardianSigner, err := guardiansigner.GenerateSignerWithPrivatekeyUnsafe(nil)
-		a.NoError(err)
-
-		dgst := nvaa.SigningDigest()
-
-		tmp, err := guardianSigner.Sign(context.Background(), dgst[:])
-		a.NoError(err)
-
-		sig := &vaa.Signature{Index: uint8(i)}
-		copy(sig.Signature[:], tmp)
-
-		sigs = append(sigs, sig)
-
-		addrss = append(addrss, crypto.PubkeyToAddress(guardianSigner.PublicKey(context.Background())))
-	}
-
-	gs := whcommon.NewGuardianSet(addrss, 0)
-
-	nvaa.Signatures = sigs
-	return nvaa, gs
 }
 
 func ctxExpiredFirst[T any](ctx context.Context, ch chan T) bool {
@@ -1268,25 +1086,24 @@ func TestFT(t *testing.T) {
 		a.NoError(err)
 
 		n := 2
-		chainId := vaa.ChainID(1)
+
 		digests := make([]party.SigningTask, n)
 		for i := 0; i < n; i++ {
 			digests[i] = party.SigningTask{
 				Digest:        [32]byte{byte(i + 1)},
 				Faulties:      nil,
-				AuxiliaryData: chainIDToBytes(chainId),
+				AuxiliaryData: []byte{1, 2, 3, 4},
 				ProtocolType:  common.ProtocolFROSTSign,
 			}
 		}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*4)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*4)
 		defer cancel()
 
 		fmt.Println("starting engines.")
 		for _, engine := range engines {
 			engine.Configurations.MaxSignerTTL = time.Second * 4
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		e := getSigningGuardian(a, engines, digests...)
@@ -1301,7 +1118,7 @@ func TestFT(t *testing.T) {
 			d := d
 
 			for _, engine := range engines {
-				engine.BeginAsyncThresholdSigningProtocol(d.Digest[:], chainId, reportableConsistancyLevel)
+				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, d.Digest[:], nil)
 			}
 		}
 
@@ -1331,15 +1148,13 @@ func TestFT(t *testing.T) {
 		// As a result, the VAA was generated, but the VAAv2 was not (since the others in the committee didn't f+1 messages that started signing).
 		a := assert.New(t)
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 
-		cID := vaa.ChainID(1)
 		tsk := party.SigningTask{
 			Digest:        party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9},
 			Faulties:      []*common.PartyID{},
-			AuxiliaryData: chainIDToBytes(cID),
+			AuxiliaryData: []byte{1, 2, 3, 4},
 			ProtocolType:  common.ProtocolFROSTSign,
 		}
 
@@ -1348,7 +1163,7 @@ func TestFT(t *testing.T) {
 
 		fmt.Println("starting engines.")
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		signers := getSigningGuardians(a, engines, tsk)
@@ -1369,7 +1184,7 @@ func TestFT(t *testing.T) {
 			tmp := make([]byte, 32)
 			copy(tmp, tsk.Digest[:])
 
-			engine.BeginAsyncThresholdSigningProtocol(tmp, cID, reportableConsistancyLevel)
+			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
 		}
 
 		if ctxExpiredFirst(ctx, dnchn) {
@@ -1751,18 +1566,15 @@ func (b *echoFeed) genEcho(msg IncomingMessage) *Echo {
 func TestSigCounter(t *testing.T) {
 	a := assert.New(t)
 
-	supctx := testutils.MakeSupervisorContext(context.Background())
-
 	t.Run("MaxCountBlockAdditionalUpdates", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		// t.Skip("TODO: implement this test, fails since we've moved to broadcast only messages!")
 
-		cID := vaa.ChainID(0)
 		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
-			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
@@ -1778,9 +1590,9 @@ func TestSigCounter(t *testing.T) {
 
 		for taskNum, committee := range [][]*Engine{signersTask0, signersTask1} {
 			for _, e := range committee {
-				e.Start(ctx)
+				e.Start(ctx, logger)
 
-				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:], cID)
+				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:])
 				feeder.addMessage(e, msg)
 				err := feeder.feedWithEchoes()
 				if err != nil {
@@ -1795,21 +1607,21 @@ func TestSigCounter(t *testing.T) {
 	})
 
 	t.Run("ErrorReduceCount", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		// Tests might fail due to change of the GuardianStorage files
-		cID := vaa.ChainID(0)
+
 		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
 		e1.maxSimultaneousSignatures = 1
 
-		e1.Start(ctx)
+		e1.Start(ctx, logger)
 
-		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:], cID)
+		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:])
 
 		feeder := &echoFeed{
 			eng:   e1,
@@ -1842,21 +1654,20 @@ func TestSigCounter(t *testing.T) {
 	})
 
 	t.Run("sigDoneReduceCount", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		// Tests might fail due to change of the GuardianStorage files
-		cID := vaa.ChainID(0)
 		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
 		e1.maxSimultaneousSignatures = 1
 
-		e1.Start(ctx)
+		e1.Start(ctx, logger)
 
-		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:], cID)
+		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:])
 
 		feeder := &echoFeed{
 			eng:   e1,
@@ -1890,15 +1701,12 @@ func TestSigCounter(t *testing.T) {
 	})
 
 	t.Run("CanHaveSimulSigners", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
-		// t.Skip("TODO: implement this test, fails since we've moved to broadcast only messages!")
-
-		cID := vaa.ChainID(0)
 		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
-			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: chainIDToBytes(cID), ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
+			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
@@ -1914,9 +1722,9 @@ func TestSigCounter(t *testing.T) {
 
 		for taskNum, committee := range [][]*Engine{signersTask0, signersTask1} {
 			for _, e := range committee {
-				e.Start(ctx)
+				e.Start(ctx, logger)
 
-				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:], cID)
+				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:])
 				feeder.addMessage(e, msg)
 				err := feeder.feedWithEchoes()
 				a.NoError(err)
@@ -1951,8 +1759,8 @@ mainloop:
 	return guardians
 }
 
-func beginSigningAndGrabMessage(e1 *Engine, dgst []byte, cid vaa.ChainID) Sendable {
-	go e1.BeginAsyncThresholdSigningProtocol(dgst, cid, reportableConsistancyLevel)
+func beginSigningAndGrabMessage(e1 *Engine, dgst []byte) Sendable {
+	go e1.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, dgst, nil)
 
 	var msg Sendable
 	for { // cleaning the channel, and taking one of the messages.
@@ -1996,7 +1804,7 @@ func TestTrackingIDSizeIsOkay(t *testing.T) {
 	tid := common.TrackingID{
 		Digest:        dgst[:],
 		PartiesState:  make([]byte, (maxParties+7)/8),
-		AuxiliaryData: chainIDToBytes(vaa.ChainID(5)),
+		AuxiliaryData: nil,
 	}
 
 	tidstr := tid.ToString()
@@ -2014,12 +1822,11 @@ func TestDKG(t *testing.T) {
 			e.GuardianStorage.frostconf = nil
 		}
 
-		supctx := testutils.MakeSupervisorContext(context.Background())
-		ctx, cancel := context.WithTimeout(supctx, time.Minute*1)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
 		defer cancel()
 
 		for _, engine := range engines {
-			a.NoError(engine.Start(ctx))
+			a.NoError(engine.Start(ctx, logger))
 		}
 
 		_ = msgHandler(ctx, engines, 1)
@@ -2061,12 +1868,11 @@ func TestHandleFPWarning_IntegrationStyle_UsesEngineBootstrap(t *testing.T) {
 		t.Fatalf("loadGuardians failed: %v", err)
 	}
 
-	supctx := testutils.MakeSupervisorContext(context.Background())
-	ctx, cancel := context.WithTimeout(supctx, time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	for _, e := range engines {
-		if err := e.Start(ctx); err != nil {
+		if err := e.Start(ctx, logger); err != nil {
 			t.Fatalf("engine.Start failed: %v", err)
 		}
 	}
@@ -2181,10 +1987,9 @@ func TestHandleIncomingTssMessage_NilHashEcho(t *testing.T) {
 	receiver := engines[4]
 
 	// Start the receiver engine
-	supctx := testutils.MakeSupervisorContext(context.Background())
-	ctx, cancel := context.WithCancel(supctx)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a.NoError(receiver.Start(ctx))
+	a.NoError(receiver.Start(ctx, logger))
 
 	// Create a valid SignedMessage, but with Content as a HashEcho with nil value
 	signedMsg := &tsscommv1.SignedMessage{

@@ -12,8 +12,6 @@ import (
 	"os"
 	"path"
 
-	engine "github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal/cmd"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/math/polynomial"
@@ -21,6 +19,8 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	engine "github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal/cmd"
 )
 
 var cnfgPath = flag.String("cnfg", "", "path to config file in json format used to run the protocol")

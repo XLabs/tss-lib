@@ -3,7 +3,7 @@ package tss
 import (
 	"testing"
 
-	"github.com/certusone/wormhole/node/pkg/internal/testutils"
+	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
 )
 
 const (

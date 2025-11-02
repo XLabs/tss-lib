@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	engine "github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	common "github.com/xlabs/tss-common"
+	engine "github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 // create these from scrath, then store it into a single file.

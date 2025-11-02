@@ -10,7 +10,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/gogo/status"
 	"github.com/xlabs/tss-lib/v2/tss"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
@@ -18,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 type connection struct {
