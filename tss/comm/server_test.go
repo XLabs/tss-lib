@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/internal/testutils"
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
-	"github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	"github.com/stretchr/testify/require"
+	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
+	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )

@@ -3,7 +3,7 @@ package comm
 import (
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 const (

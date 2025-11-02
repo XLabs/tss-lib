@@ -10,9 +10,9 @@ import (
 	"net"
 	"time"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/certusone/wormhole/node/pkg/tss"
 	"github.com/gogo/status"
+	"github.com/xlabs/tss-lib/v2/tss"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
