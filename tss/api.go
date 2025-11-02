@@ -11,6 +11,7 @@ import (
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
+	"go.uber.org/zap"
 )
 
 type message interface {
@@ -77,7 +78,8 @@ type Signer interface {
 type Starter interface {
 	// Start deploys the component and allocates its resources.
 	// The context is used to control the lifetime of the component.
-	Start(ctx context.Context) error
+	// if logger is not nil, the component should use it for logging.
+	Start(ctx context.Context, logger *zap.Logger) error
 }
 
 type KeyGenerator interface {

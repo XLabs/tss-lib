@@ -65,10 +65,6 @@ func (st *GuardianStorage) storeCmpConf(cnf *party.TSSSecrets) error {
 		return fmt.Errorf("TSSSecrets is nil")
 	}
 
-	if len(st.Configurations.EcdsaChains) == 0 {
-		return nil // we do not need to load cmp config since there are no chains that use ecdsa.
-	}
-
 	// also validates conf != nil.
 	if !cnf.EcdsaConfigs.ValidateBasic() {
 		return fmt.Errorf("invalid ecdsa configs in stored TSSSecrets")

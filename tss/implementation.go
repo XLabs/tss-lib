@@ -7,16 +7,12 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"fmt"
-	"log/slog"
 
 	"sync"
 	"sync/atomic"
 	"time"
 
-	whcommon "github.com/certusone/wormhole/node/pkg/common"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
 	ethcommon "github.com/ethereum/go-ethereum/common"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	frosteth "github.com/xlabs/multi-party-sig/pkg/eth"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
@@ -37,7 +33,7 @@ type fpCommunicationChannels party.OutputChannels
 type Engine struct {
 	ctx context.Context
 
-	logger *slog.Logger
+	logger *zap.Logger
 	GuardianStorage
 
 	fpParams *party.Parameters
@@ -60,8 +56,6 @@ type Engine struct {
 	ftCommandChan chan any
 
 	SignatureMetrics sync.Map
-
-	gst *whcommon.GuardianSetState
 }
 
 type PEM []byte
@@ -80,7 +74,7 @@ type Configurations struct {
 	LeaderIdentity PEM // The public key of the leader in PEM format.
 
 	// The list of chains that use ECDSA signatures.
-	// EcdsaChains []vaa.ChainID
+
 }
 
 // GuardianStorage is a struct that holds the data needed for a guardian to participate in the TSS protocol
@@ -149,8 +143,7 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(protocolType common.Protocol
 }
 
 type signingMeta struct {
-	isFromVaav1   bool
-	verifiedVAAv1 *vaa.VAA
+	isFromVaav1 bool
 }
 
 // TODO: receive a list of signers to exclude from the committee.
@@ -192,19 +185,16 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 	// }
 
 	t.logger.Info("signature for VAA requested",
-		slog.String("digest", fmt.Sprintf("%x", digest)),
-		// slog.String("chainID", chainID.String()),
-		// slog.Bool("isFromVaav1", mt.isFromVaav1),
-		// slog.Int("numMatchingTrackIDS", len(sigPrepInfo.alreadyStartedSigningTrackingIDs)),
-		slog.String("signingProtocol", sigtask.ProtocolType.ToString()),
+		zap.String("digest", fmt.Sprintf("%x", digest)),
+		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
-
-	t.createSignatureMetrics(digest, aux)
 
 	info, err := t.fp.GetSigningInfo(sigtask)
 	if err != nil {
 		return fmt.Errorf("couldnt generate signing task: %w", err)
 	}
+
+	t.createSignatureMetrics(info.TrackingID)
 
 	// if sigPrepInfo.alreadyStartedSigningTrackingIDs[trackidStr(info.TrackingID.ToString())] {
 	// 	return nil // skipping signing.
@@ -220,9 +210,9 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 	t.logger.Info(
 		"guardian started signing protocol",
 
-		slog.String("trackingID", info.TrackingID.ToString()),
-		slog.String("ChainID", chainID.String()),
-		slog.Any("committee", t.getCommitteeNetworkNames(info.SigningCommittee)),
+		zap.String("trackingID", info.TrackingID.ToString()),
+		// zap.String("ChainID", chainID.String()),
+		zap.Any("committee", t.getCommitteeNetworkNames(info.SigningCommittee)),
 	)
 
 	// scmd := signCommand{SigningInfo: info, passedToFP: true, signingMeta: mt, digestconsistancy: consistencyLvl}
@@ -240,37 +230,37 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 
 // getExcludedFromCommittee follows the Leader's recommendation for the committee
 // by returning the list of guardians that should be excluded from the committee (as 'faulties' list).
-func (t *Engine) getExcludedFromCommittee(mt signingMeta) []*common.PartyID {
-	if !mt.isFromVaav1 || mt.verifiedVAAv1 == nil {
-		return nil
-	}
+// func (t *Engine) getExcludedFromCommittee(mt signingMeta) []*common.PartyID {
+// 	if !mt.isFromVaav1 || mt.verifiedVAAv1 == nil {
+// 		return nil
+// 	}
 
-	signersID, err := t.translateVaaV1Signers(mt.verifiedVAAv1)
-	if err != nil {
-		return nil
-	}
+// 	signersID, err := t.translateVaaV1Signers(mt.verifiedVAAv1)
+// 	if err != nil {
+// 		return nil
+// 	}
 
-	if len(signersID) < t.GuardianStorage.Threshold {
-		return nil // not enough guardians to form a committee.
-	}
+// 	if len(signersID) < t.GuardianStorage.Threshold {
+// 		return nil // not enough guardians to form a committee.
+// 	}
 
-	// grab everyone that is not a signer in the VAAv1.
-	var excludedSigners []*common.PartyID
-	for _, id := range t.GuardianStorage.Identities {
-		if _, ok := signersID[id.CommunicationIndex]; !ok {
-			excludedSigners = append(excludedSigners, id.Pid)
-		}
-	}
+// 	// grab everyone that is not a signer in the VAAv1.
+// 	var excludedSigners []*common.PartyID
+// 	for _, id := range t.GuardianStorage.Identities {
+// 		if _, ok := signersID[id.CommunicationIndex]; !ok {
+// 			excludedSigners = append(excludedSigners, id.Pid)
+// 		}
+// 	}
 
-	return excludedSigners
-}
+// 	return excludedSigners
+// }
 
 func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
 	ids := make([]string, 0, len(pids))
 	for _, pid := range pids {
 		id, err := t.GuardianStorage.fetchIdentityFromPartyID(pid)
 		if err != nil {
-			t.logger.Warn("couldn't find identity for partyID", slog.Any("partyID", pid))
+			t.logger.Warn("couldn't find identity for partyID", zap.Any("partyID", pid))
 
 			continue
 		}
@@ -279,24 +269,6 @@ func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
 	}
 
 	return ids
-}
-
-func (t *Engine) SetGuardianSetState(gss *whcommon.GuardianSetState) error {
-	if gss == nil {
-		return fmt.Errorf("guardian set state is nil")
-	}
-
-	if t == nil {
-		return errNilTssEngine
-	}
-
-	if t.started.Load() != notStarted {
-		return fmt.Errorf("tss engine has started, and cannot receive new guardian set state")
-	}
-
-	t.gst = gss
-
-	return nil
 }
 
 // func (t *Engine) getSigPrepInfo(chainID vaa.ChainID, d party.Digest) (sigPreparationInfo, error) {
@@ -424,7 +396,7 @@ func (t *Engine) MaxTTL() time.Duration {
 }
 
 // Start starts the TSS engine, and listens for the outputs of the full party.
-func (t *Engine) Start(ctx context.Context) error {
+func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 	if t == nil {
 		return fmt.Errorf("tss engine is nil")
 	}
@@ -434,9 +406,10 @@ func (t *Engine) Start(ctx context.Context) error {
 	}
 
 	t.ctx = ctx
-	t.logger = supervisor.Logger(ctx).
-		With(zap.String("hostname", t.GuardianStorage.Self.Hostname)).
-		Named("tss")
+
+	t.logger = zapLogger.
+		With(zap.String("hostname", t.GuardianStorage.Self.NetworkName())).
+		Named("engine")
 
 	if err := t.fp.Start(party.OutputChannels(t.fpCommChans)); err != nil {
 		t.started.Store(notStarted)
@@ -457,7 +430,6 @@ func (t *Engine) Start(ctx context.Context) error {
 	t.logger.Info(
 		"tss engine started",
 		zap.Any("configs", t.GuardianStorage.Configurations),
-		zap.Bool("hasGuardianSet", t.gst != nil),
 		zap.String("leaderID", leaderIdentity.Hostname),
 	)
 
@@ -876,9 +848,10 @@ func (t *Engine) handleUnicast(m Incoming) error {
 
 	switch v := unicast.Content.(type) {
 	case *tsscommv1.Unicast_Vaav1:
-		if err := t.handleUnicastVaaV1(v); err != nil {
-			return fmt.Errorf("failed to handle unicast vaav1: %w", err)
-		}
+		t.logger.Error("VAA witnessing not supported.")
+		// if err := t.handleUnicastVaaV1(v); err != nil {
+		// 	return fmt.Errorf("failed to handle unicast vaav1: %w", err)
+		// }
 	case *tsscommv1.Unicast_Tss:
 		if err := t.handleUnicastTSS(v, m.GetSource()); err != nil {
 			return fmt.Errorf("failed to handle unicast tss message: %w", err)

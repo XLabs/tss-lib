@@ -2,13 +2,13 @@ package tss
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	frostdkg "github.com/xlabs/multi-party-sig/protocols/frost/keygen"
@@ -161,7 +161,6 @@ func logErr(l *zap.Logger, err error) {
 	var zapFields []zap.Field
 	if informativeErr.trackingId != nil {
 		zapFields = append(zapFields, zap.String("trackingId", informativeErr.trackingId.ToString()))
-		zapFields = append(zapFields, zap.String("chainID", extractChainIDFromTrackingID(informativeErr.trackingId).String()))
 	}
 
 	if informativeErr.round != "" {
@@ -358,39 +357,12 @@ func (st *GuardianStorage) validateTrackingIDForm(tid *common.TrackingID) error 
 	return nil
 }
 
-func extractChainIDFromTrackingID(tid *common.TrackingID) vaa.ChainID {
-	bts := [2]byte{}
-	copy(bts[:], tid.AuxiliaryData)
-
-	return vaa.ChainID(binary.BigEndian.Uint16(bts[:]))
-}
-
-func chainIDToBytes(chainID vaa.ChainID) []byte {
-	bts := [2]byte{}
-	binary.BigEndian.PutUint16(bts[:], uint16(chainID))
-
-	return bts[:]
-}
-
 // sigKey contains two main parts of common.TrackID: the digest and the chainID.
 // it doesan't contain the faulty bitmap since we want to point to the same signature even if the faulty bitmap changes.
-type sigKey [digestSize * 2]byte
-
-func intoSigKey(dgst party.Digest, aux []byte) sigKey {
-	var key sigKey
-
-	auxhash := hash(aux)
-	copy(key[party.DigestSize:], auxhash[:])
-	copy(key[:party.DigestSize], dgst[:])
-
-	return key
-}
+type sigKey string
 
 func trackingIdIntoSigKey(tid *common.TrackingID) sigKey {
-	dgst := party.Digest{}
-	copy(dgst[:], tid.Digest)
-
-	return intoSigKey(dgst, extractChainIDFromTrackingID(tid))
+	return sigKey(tid.ToString())
 }
 
 type SenderIndex uint32
@@ -398,3 +370,5 @@ type SenderIndex uint32
 func (s SenderIndex) toProto() uint32 {
 	return uint32(s)
 }
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))

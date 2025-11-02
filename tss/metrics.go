@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	// TODO: Consider what to do with metrics.
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	common "github.com/xlabs/tss-common"
-	"github.com/xlabs/tss-lib/v2/party"
 
 	"go.uber.org/zap"
 )
@@ -51,8 +51,8 @@ type signatureMetadata struct {
 	timeOfCreation time.Time
 }
 
-func (t *Engine) createSignatureMetrics(digest, aux []byte) {
-	key := intoSigKey(party.Digest(digest), aux)
+func (t *Engine) createSignatureMetrics(tid *common.TrackingID) {
+	key := tid.ToString()
 	t.SignatureMetrics.Store(key, &signatureMetadata{
 		timeOfCreation: time.Now(),
 	})
@@ -72,19 +72,19 @@ func (t *Engine) sigMetricDone(trackid *common.TrackingID, hadIssue bool) {
 		return
 	}
 
-	chain := extractChainIDFromTrackingID(trackid)
+	protocoltype, _ := trackid.GetProtocolType()
+	auxStr := string(trackid.AuxiliaryData)
 	sigProducedCntr.
-		WithLabelValues(chain.String()).
+		WithLabelValues(protocoltype.ToString(), auxStr).
 		Inc()
 
 	latency := time.Since(metrics.timeOfCreation)
-	sigLatency.WithLabelValues(chain.String()).Observe(float64(latency.Milliseconds()))
+	sigLatency.WithLabelValues(protocoltype.ToString(), auxStr).Observe(float64(latency.Milliseconds()))
 
 	t.SignatureMetrics.Delete(key)
 
 	t.logger.Info("tss signature produced",
-		zap.String("digest", fmt.Sprintf("%x", trackid.Digest)),
-		zap.String("chain", chain.String()),
+		zap.String("tid", trackid.ToString()),
 		zap.Duration("protocol duration", latency),
 	)
 }
