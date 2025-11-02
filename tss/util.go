@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
@@ -16,6 +15,7 @@ import (
 	frostsign "github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 )
 

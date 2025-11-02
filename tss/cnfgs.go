@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -17,6 +16,7 @@ import (
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 func (s *GuardianStorage) unmarshalFromJSON(storageData []byte) error {

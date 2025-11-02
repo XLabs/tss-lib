@@ -6,13 +6,11 @@ import (
 	"crypto/x509"
 	"time"
 
-	whcommon "github.com/certusone/wormhole/node/pkg/common"
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
 	ethcommon "github.com/ethereum/go-ethereum/common"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 )
 
 type message interface {
@@ -57,8 +55,13 @@ type ReliableMessenger interface {
 
 // Signer is the interface to give any component with the ability to authorise a new threshold signature over a message.
 type Signer interface {
-	// for consistency level see https://wormhole.com/docs/build/reference/consistency-levels/
-	BeginAsyncThresholdSigningProtocol(vaaDigest []byte, chainID vaa.ChainID, vaaconsistency uint8) error
+	// starts a new threshold signing protocol over the given digest (32 bytes).
+	// aux is optional auxiliary data that can be used to distinguish different signing
+	// requests over the same digest.
+	// returns error if the signing protocol couldn't be started.
+	BeginAsyncThresholdSigningProtocol(digest, aux []byte) error
+
+	// outputs a channel that will produce signature data once available.
 	ProducedSignature() <-chan *common.SignatureData
 
 	// Since signatures may be produced for different protocols (FROST, CMP),
@@ -69,9 +72,6 @@ type Signer interface {
 	// tells the maximal duration one might wait on a signature to be produced
 	// (realisticly, it should be produced within a few seconds).
 	MaxTTL() time.Duration
-
-	// WitnessNewVaa is a method to witness a new VAA, andto start a signing protocol for it.
-	WitnessNewVaa(v *vaa.VAA) error
 }
 
 type Starter interface {
@@ -101,6 +101,4 @@ type ReliableTSS interface {
 	// or via a hash-broadcast protocol.
 	ReliableMessenger
 	Signer
-
-	SetGuardianSetState(gs *whcommon.GuardianSetState) error
 }

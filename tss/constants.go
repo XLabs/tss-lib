@@ -4,8 +4,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
-
 	"github.com/xlabs/multi-party-sig/protocols/frost/keygen"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 
@@ -48,12 +46,11 @@ const (
 	pemKeySize   = 178
 
 	// auxiliaryData is emmiterChain in bytes.
-	auxiliaryDataSize = int(unsafe.Sizeof(vaa.ChainID(0)))
-	maxParties        = 256
+	// auxiliaryDataSize = int(unsafe.Sizeof(vaa.ChainID(0)))
+	maxParties = 256
 
 	// hex string sizes use 2x since each byte is represented by 2 hex characters
 	// e.g. 0xFF = "FF"
-	auxiliaryDataStrHexSize  = 2 * auxiliaryDataSize
 	maxPartiesStrHexSize     = 2 * (maxParties / 8) // divided by 8 since it's a bitmap
 	digestStrHexSize         = 2 * digestSize
 	protocolTypeSize         = int(unsafe.Sizeof(uint8(0))) // uint8 currently
@@ -64,7 +61,7 @@ const (
 	// *Digest is 32 bytes (sha256)
 	// *AuxiliaryData is 2 bytes (emitterChain)
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
-	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxiliaryDataStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
+	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 
 	defaultMaxLiveSignatures = 20000
 
@@ -92,12 +89,6 @@ const (
 
 	defaultMaxDownTimeJitter = time.Minute
 	maxHeartbeatInterval     = defaultGuardianDownTime
-
-	// Consistency levels (following https://wormhole.com/docs/build/reference/consistency-levels/):
-	instantConsistencyLevel uint8 = vaa.ConsistencyLevelPublishImmediately // low consistancy
-
-	pythnetFinalizedConsistencyLevel uint8 = 1
-	solanaFinalizedConsistencyLevel  uint8 = 1
 
 	senderIndexSize = int(unsafe.Sizeof(SenderIndex(0)))
 )
