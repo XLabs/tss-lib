@@ -157,6 +157,10 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 		return fmt.Errorf("digest length is not 32 bytes")
 	}
 
+	if len(aux) > maxAuxiliaryDataSize {
+		return fmt.Errorf("auxiliary data length is larger than %d bytes", maxAuxiliaryDataSize)
+	}
+
 	d := party.Digest{}
 	copy(d[:], digest)
 
@@ -176,6 +180,10 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 	info, err := t.fp.GetSigningInfo(sigtask)
 	if err != nil {
 		return fmt.Errorf("couldnt generate signing task: %w", err)
+	}
+
+	if err := validateTrackingID(info.TrackingID); err != nil {
+		return err
 	}
 
 	t.createSignatureMetrics(info.TrackingID)
@@ -261,7 +269,7 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 	t := &Engine{
 		ctx: nil,
 
-		logger:          &zap.Logger{},
+		logger:          discardLogger,
 		GuardianStorage: *storage,
 
 		fpParams: fpParams,
@@ -307,9 +315,11 @@ func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 
 	t.ctx = ctx
 
-	t.logger = zapLogger.
-		With(zap.String("hostname", t.GuardianStorage.Self.NetworkName())).
-		Named("engine")
+	if zapLogger != nil {
+		t.logger = zapLogger.
+			With(zap.String("hostname", t.GuardianStorage.Self.NetworkName())).
+			Named("engine")
+	}
 
 	if err := t.fp.Start(party.OutputChannels(t.fpCommChans)); err != nil {
 		t.started.Store(notStarted)
@@ -772,6 +782,10 @@ func (t *Engine) handleUnicastTSS(v *tsscommv1.Unicast_Tss, src *Identity) error
 
 	if !isKnownUnicastType(fpmsg) {
 		return fmt.Errorf("unknown unicast message type received: %T", fpmsg.Content())
+	}
+
+	if err := validateTrackingID(fpmsg.getTrackingID()); err != nil {
+		return err
 	}
 
 	err = t.validateUnicastDoesntExist(fpmsg)

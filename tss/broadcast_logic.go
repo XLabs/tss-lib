@@ -43,6 +43,7 @@ type serialzeable interface {
 type deliverable interface {
 	serialzeable
 
+	getTrackingID() *common.TrackingID
 	deliver(*Engine) error
 }
 
@@ -99,7 +100,6 @@ func serializeTSSMessage(msg common.Message) []byte {
 	// The TackingID of a parsed message is tied to the run of the protocol for a single
 	//  signature, thus we use it as a sessionID.
 
-	// TODO: find a proper way to ADD auxilary data to the sessionID to avoid equivication attacks
 	tidString := []byte(msg.WireMsg().GetTrackingID().ToString())
 
 	messageTrackingID := [trackingIDHexStrSize]byte{}

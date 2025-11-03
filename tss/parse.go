@@ -40,6 +40,10 @@ func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
 			return nil, fmt.Errorf("unknown broadcast message received: %T. sender: %s", p.Content(), m.GetSource().NetworkName())
 		}
 
+		if err := validateTrackingID(p.WireMsg().GetTrackingID()); err != nil {
+			return nil, err
+		}
+
 		parsed := &parsedTssContent{p, ""}
 		res := &deliverableMessage{parsed}
 

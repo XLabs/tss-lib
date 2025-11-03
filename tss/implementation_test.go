@@ -1221,8 +1221,8 @@ func generateFakeParsedMessageWithRandomContent(from, to *common.PartyID, rnd si
 
 // if to == nil it's a broadcast message.
 func generateFakeMessageWithRandomContent(from, to *common.PartyID, rnd signingRound, digest party.Digest) common.ParsedMessage {
-	partiesState := make([]byte, maxParties)
-	for i := 0; i < maxParties; i++ {
+	partiesState := make([]byte, maxParties/8)
+	for i := range partiesState {
 		partiesState[i] = 255
 	}
 
@@ -1230,6 +1230,7 @@ func generateFakeMessageWithRandomContent(from, to *common.PartyID, rnd signingR
 		Digest:        digest[:],
 		PartiesState:  partiesState,
 		AuxiliaryData: []byte{},
+		Protocol:      uint32(common.ProtocolECDSASign.ToInt()),
 	}
 
 	rndmBigNumber := &big.Int{}
@@ -1794,11 +1795,14 @@ func TestTrackingIDSizeIsOkay(t *testing.T) {
 	tid := common.TrackingID{
 		Digest:        dgst[:],
 		PartiesState:  make([]byte, (maxParties+7)/8),
-		AuxiliaryData: nil,
+		AuxiliaryData: dgst[:],
 	}
 
 	tidstr := tid.ToString()
 	assert.Equal(t, trackingIDHexStrSize, len(tidstr))
+
+	tid.AuxiliaryData = append(tid.AuxiliaryData, 0)
+	assert.Error(t, validateTrackingID(&tid))
 }
 
 func TestDKG(t *testing.T) {

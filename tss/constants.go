@@ -36,7 +36,8 @@ func extractProtoTypeNames(protoreflectDesc protoreflect.FileDescriptor) []strin
 const (
 	DefaultPort = "8998"
 
-	digestSize = 32
+	digestSize           = 32
+	maxAuxiliaryDataSize = 32
 
 	notStarted uint32 = 0 // using 0 since it's the default value
 	started    uint32 = 1
@@ -45,11 +46,11 @@ const (
 	hostnameSize = 255
 	pemKeySize   = 178
 
-	// auxiliaryData is emmiterChain in bytes.
 	maxParties = 256
 
 	// hex string sizes use 2x since each byte is represented by 2 hex characters
 	// e.g. 0xFF = "FF"
+	auxStrHexSize            = 2 * maxAuxiliaryDataSize
 	maxPartiesStrHexSize     = 2 * (maxParties / 8) // divided by 8 since it's a bitmap
 	digestStrHexSize         = 2 * digestSize
 	protocolTypeSize         = int(unsafe.Sizeof(uint8(0))) // uint8 currently
@@ -60,7 +61,7 @@ const (
 	// *Digest is 32 bytes (sha256)
 	// *AuxiliaryData is 2 bytes (emitterChain)
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
-	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
+	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 
 	defaultMaxLiveSignatures = 20000
 
