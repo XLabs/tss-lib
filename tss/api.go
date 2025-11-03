@@ -9,6 +9,7 @@ import (
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
@@ -60,7 +61,7 @@ type Signer interface {
 	// aux is optional auxiliary data that can be used to distinguish different signing
 	// requests over the same digest.
 	// returns error if the signing protocol couldn't be started.
-	BeginAsyncThresholdSigningProtocol(protocol common.ProtocolType, digest, aux []byte) error
+	BeginAsyncThresholdSigningProtocol(*signer.SignRequest) error
 
 	// outputs a channel that will produce signature data once available.
 	ProducedSignature() <-chan *common.SignatureData

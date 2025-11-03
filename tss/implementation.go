@@ -18,6 +18,7 @@ import (
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
@@ -131,16 +132,34 @@ func (st *GuardianStorage) GetCertificate() *tls.Certificate {
 var (
 	errNilTssEngine        = fmt.Errorf("tss engine is nil")
 	errTssEngineNotStarted = fmt.Errorf("tss engine hasn't started")
+	errNilSignRequest      = fmt.Errorf("sign request is nil")
 )
 
 // BeginAsyncThresholdSigningProtocol used to start the TSS protocol over a specific msg.
 
-func (t *Engine) BeginAsyncThresholdSigningProtocol(protocolType common.ProtocolType, digest, aux []byte) error {
-	return t.beginTSSSign(protocolType, digest, aux)
+func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) error {
+	if req == nil {
+		return errNilSignRequest
+	}
+
+	protocol, err := common.ProtocolTypeFromString(req.Protocol)
+	if err != nil {
+		return err
+	}
+
+	if len(req.Digest) != digestSize {
+		return fmt.Errorf("digest length is not 32 bytes")
+	}
+
+	d := party.Digest{}
+	copy(d[:], req.Digest)
+
+	// TODO: use the request's committee to determine the committee to use.
+
+	return t.beginTSSSign(protocol, d)
 }
 
-// TODO: receive a list of signers to exclude from the committee.
-func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []byte) error {
+func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest) error {
 	if t == nil {
 		return errNilTssEngine
 	}
@@ -153,27 +172,16 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []by
 		return fmt.Errorf("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
 	}
 
-	if len(digest) != digestSize {
-		return fmt.Errorf("digest length is not 32 bytes")
-	}
-
-	if len(aux) > maxAuxiliaryDataSize {
-		return fmt.Errorf("auxiliary data length is larger than %d bytes", maxAuxiliaryDataSize)
-	}
-
-	d := party.Digest{}
-	copy(d[:], digest)
-
 	sigtask := party.SigningTask{
 		Digest: d,
 		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      nil, // t.getExcludedFromCommittee(mt),
-		AuxiliaryData: aux,
+		Faulties:      nil, // t.getExcludedFromCommittee(mt), // TODO: use mapping.
+		AuxiliaryData: nil, // not used anymore.
 		ProtocolType:  protocolType,
 	}
 
 	t.logger.Info("signature for VAA requested",
-		zap.String("digest", fmt.Sprintf("%x", digest)),
+		zap.String("digest", fmt.Sprintf("%x", d[:])),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
 

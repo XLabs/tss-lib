@@ -8,8 +8,8 @@ require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/prometheus/client_model v0.6.2
 	github.com/stretchr/testify v1.11.1
-	github.com/xlabs/multi-party-sig v0.0.2-0.20251027070734-8ce22a563161
-	github.com/xlabs/tss-common v0.0.0-20251006064114-b1fcd9c2ce8e
+	github.com/xlabs/multi-party-sig v0.0.2-0.20251103131906-f369c25b6cef
+	github.com/xlabs/tss-common v0.0.0-20251103131551-3f0c57165d3e
 	golang.org/x/crypto v0.41.0
 	google.golang.org/protobuf v1.36.10
 )

@@ -23,6 +23,7 @@ import (
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
@@ -570,16 +571,33 @@ func TestBadInputs(t *testing.T) {
 		var tmp *Engine = nil
 		engines2 := load5GuardiansSetupForBroadcastChecks(a)
 
-		a.ErrorIs(tmp.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), errNilTssEngine)
-		a.ErrorIs(e2.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), errTssEngineNotStarted)
+		a.ErrorIs(tmp.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+			Digest:    make([]byte, 32),
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: [][]byte{},
+		}), errNilTssEngine)
+
+		a.ErrorIs(e2.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+			Digest:    make([]byte, 32),
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: [][]byte{},
+		}), errTssEngineNotStarted)
 
 		tmp = engines2[1]
 		tmp.started.Store(started)
 
-		a.ErrorContains(e1.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, make([]byte, 12), nil), "length is not 32 bytes")
+		a.ErrorContains(e1.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+			Digest:    make([]byte, 31, 32),
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: [][]byte{},
+		}), "length is not 32 bytes")
 
 		tmp.fp = nil
-		a.ErrorContains(tmp.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, nil, nil), "not set up correctly")
+		a.ErrorContains(tmp.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+			Digest:    make([]byte, 32),
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: [][]byte{},
+		}), "not set up correctly")
 	})
 
 	t.Run("fetch certificate", func(t *testing.T) {
@@ -866,7 +884,12 @@ func TestNoFaultsFlow(t *testing.T) {
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			err := engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
+
+			err := engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:   tmp,
+				Protocol: common.ProtocolFROSTSign.ToString(),
+			})
+
 			a.NoError(err)
 		}
 
@@ -904,7 +927,10 @@ func TestNoFaultsFlow(t *testing.T) {
 			for _, engine := range engines {
 				tmp := make([]byte, 32)
 				copy(tmp, dgst[:])
-				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
+				engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+					Digest:   tmp,
+					Protocol: common.ProtocolFROSTSign.ToString(),
+				})
 			}
 			fmt.Println()
 		}
@@ -935,7 +961,10 @@ func TestNoFaultsFlow(t *testing.T) {
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
+			engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:   tmp,
+				Protocol: common.ProtocolFROSTSign.ToString(),
+			})
 		}
 
 		time.Sleep(time.Millisecond * 500)
@@ -974,7 +1003,10 @@ func TestNoFaultsFlow(t *testing.T) {
 				tmp := make([]byte, 32)
 				copy(tmp, d[:])
 
-				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
+				engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+					Digest:   tmp,
+					Protocol: common.ProtocolFROSTSign.ToString(),
+				})
 			}
 		}
 
@@ -1009,8 +1041,12 @@ func TestNoFaultsFlow(t *testing.T) {
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
 			copy(tmp, dgst[:])
-			err := engine.BeginAsyncThresholdSigningProtocol(common.ProtocolECDSASign, tmp, nil)
-			a.NoError(err)
+			a.NoError(
+				engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+					Digest:   tmp,
+					Protocol: common.ProtocolFROSTSign.ToString(),
+				}),
+			)
 		}
 
 		if ctxExpiredFirst(ctx, dnchn) {
@@ -1078,7 +1114,10 @@ func TestFT(t *testing.T) {
 			d := d
 
 			for _, engine := range engines {
-				engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, d.Digest[:], nil)
+				engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+					Digest:   d.Digest[:],
+					Protocol: common.ProtocolFROSTSign.ToString(),
+				})
 			}
 		}
 
@@ -1144,7 +1183,10 @@ func TestFT(t *testing.T) {
 			tmp := make([]byte, 32)
 			copy(tmp, tsk.Digest[:])
 
-			engine.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, tmp, nil)
+			engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:   tmp,
+				Protocol: common.ProtocolFROSTSign.ToString(),
+			})
 		}
 
 		if ctxExpiredFirst(ctx, dnchn) {
@@ -1731,7 +1773,10 @@ mainloop:
 }
 
 func beginSigningAndGrabMessage(e1 *Engine, dgst []byte) Sendable {
-	go e1.BeginAsyncThresholdSigningProtocol(common.ProtocolFROSTSign, dgst, nil)
+	go e1.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+		Digest:   dgst,
+		Protocol: common.ProtocolFROSTSign.ToString(),
+	})
 
 	return waitOnChannelForNonHashEcho(e1)
 }
