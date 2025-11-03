@@ -139,10 +139,6 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(protocolType common.Protocol
 	return t.beginTSSSign(protocolType, digest, aux)
 }
 
-type signingMeta struct {
-	isFromVaav1 bool
-}
-
 // TODO: receive a list of signers to exclude from the committee.
 func (t *Engine) beginTSSSign(protocolType common.ProtocolType, digest, aux []byte) error {
 	if t == nil {
@@ -751,11 +747,6 @@ func (t *Engine) handleUnicast(m Incoming) error {
 	}
 
 	switch v := unicast.Content.(type) {
-	case *tsscommv1.Unicast_Vaav1:
-		t.logger.Error("VAA witnessing not supported.")
-		// if err := t.handleUnicastVaaV1(v); err != nil {
-		// 	return fmt.Errorf("failed to handle unicast vaav1: %w", err)
-		// }
 	case *tsscommv1.Unicast_Tss:
 		if err := t.handleUnicastTSS(v, m.GetSource()); err != nil {
 			return fmt.Errorf("failed to handle unicast tss message: %w", err)

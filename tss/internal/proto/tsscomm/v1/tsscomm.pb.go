@@ -318,56 +318,11 @@ func (x *Echo) GetMessage() *SignedMessage {
 	return nil
 }
 
-type VaaV1Info struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Marshaled     []byte                 `protobuf:"bytes,1,opt,name=marshaled,proto3" json:"marshaled,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VaaV1Info) Reset() {
-	*x = VaaV1Info{}
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VaaV1Info) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VaaV1Info) ProtoMessage() {}
-
-func (x *VaaV1Info) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VaaV1Info.ProtoReflect.Descriptor instead.
-func (*VaaV1Info) Descriptor() ([]byte, []int) {
-	return file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *VaaV1Info) GetMarshaled() []byte {
-	if x != nil {
-		return x.Marshaled
-	}
-	return nil
-}
-
 type Unicast struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Content:
 	//
 	//	*Unicast_Tss
-	//	*Unicast_Vaav1
 	Content       isUnicast_Content `protobuf_oneof:"content"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -375,7 +330,7 @@ type Unicast struct {
 
 func (x *Unicast) Reset() {
 	*x = Unicast{}
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6]
+	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +342,7 @@ func (x *Unicast) String() string {
 func (*Unicast) ProtoMessage() {}
 
 func (x *Unicast) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6]
+	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +355,7 @@ func (x *Unicast) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Unicast.ProtoReflect.Descriptor instead.
 func (*Unicast) Descriptor() ([]byte, []int) {
-	return file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP(), []int{6}
+	return file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Unicast) GetContent() isUnicast_Content {
@@ -419,15 +374,6 @@ func (x *Unicast) GetTss() *TssContent {
 	return nil
 }
 
-func (x *Unicast) GetVaav1() *VaaV1Info {
-	if x != nil {
-		if x, ok := x.Content.(*Unicast_Vaav1); ok {
-			return x.Vaav1
-		}
-	}
-	return nil
-}
-
 type isUnicast_Content interface {
 	isUnicast_Content()
 }
@@ -436,13 +382,7 @@ type Unicast_Tss struct {
 	Tss *TssContent `protobuf:"bytes,1,opt,name=tss,proto3,oneof"`
 }
 
-type Unicast_Vaav1 struct {
-	Vaav1 *VaaV1Info `protobuf:"bytes,2,opt,name=vaav1,proto3,oneof"`
-}
-
 func (*Unicast_Tss) isUnicast_Content() {}
-
-func (*Unicast_Vaav1) isUnicast_Content() {}
 
 // PropagatedMessage is a message that is sent across the network,
 // either to a specific recipient or all nodes (using reliable broadcast).
@@ -459,7 +399,7 @@ type PropagatedMessage struct {
 
 func (x *PropagatedMessage) Reset() {
 	*x = PropagatedMessage{}
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[7]
+	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -471,7 +411,7 @@ func (x *PropagatedMessage) String() string {
 func (*PropagatedMessage) ProtoMessage() {}
 
 func (x *PropagatedMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[7]
+	mi := &file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -484,7 +424,7 @@ func (x *PropagatedMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PropagatedMessage.ProtoReflect.Descriptor instead.
 func (*PropagatedMessage) Descriptor() ([]byte, []int) {
-	return file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP(), []int{7}
+	return file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PropagatedMessage) GetMessage() isPropagatedMessage_Message {
@@ -550,12 +490,9 @@ const file_proto_tsscomm_v1_tsscomm_proto_rawDesc = "" +
 	"\vsessionUuid\x18\x01 \x01(\fR\vsessionUuid\x122\n" +
 	"\x14originalContetDigest\x18\x02 \x01(\fR\x14originalContetDigest\"?\n" +
 	"\x04Echo\x127\n" +
-	"\amessage\x18\x01 \x01(\v2\x1d.xlabs.tss.comm.SignedMessageR\amessage\")\n" +
-	"\tVaaV1Info\x12\x1c\n" +
-	"\tmarshaled\x18\x01 \x01(\fR\tmarshaled\"w\n" +
+	"\amessage\x18\x01 \x01(\v2\x1d.xlabs.tss.comm.SignedMessageR\amessage\"D\n" +
 	"\aUnicast\x12.\n" +
-	"\x03tss\x18\x01 \x01(\v2\x1a.xlabs.tss.comm.TssContentH\x00R\x03tss\x121\n" +
-	"\x05vaav1\x18\x02 \x01(\v2\x19.xlabs.tss.comm.VaaV1InfoH\x00R\x05vaav1B\t\n" +
+	"\x03tss\x18\x01 \x01(\v2\x1a.xlabs.tss.comm.TssContentH\x00R\x03tssB\t\n" +
 	"\acontent\"\x7f\n" +
 	"\x11PropagatedMessage\x123\n" +
 	"\aUnicast\x18\x01 \x01(\v2\x17.xlabs.tss.comm.UnicastH\x00R\aUnicast\x12*\n" +
@@ -577,33 +514,31 @@ func file_proto_tsscomm_v1_tsscomm_proto_rawDescGZIP() []byte {
 	return file_proto_tsscomm_v1_tsscomm_proto_rawDescData
 }
 
-var file_proto_tsscomm_v1_tsscomm_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_proto_tsscomm_v1_tsscomm_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_tsscomm_v1_tsscomm_proto_goTypes = []any{
 	(*PartyId)(nil),           // 0: xlabs.tss.comm.PartyId
 	(*TssContent)(nil),        // 1: xlabs.tss.comm.TssContent
 	(*SignedMessage)(nil),     // 2: xlabs.tss.comm.SignedMessage
 	(*HashEcho)(nil),          // 3: xlabs.tss.comm.HashEcho
 	(*Echo)(nil),              // 4: xlabs.tss.comm.Echo
-	(*VaaV1Info)(nil),         // 5: xlabs.tss.comm.VaaV1Info
-	(*Unicast)(nil),           // 6: xlabs.tss.comm.Unicast
-	(*PropagatedMessage)(nil), // 7: xlabs.tss.comm.PropagatedMessage
-	(*emptypb.Empty)(nil),     // 8: google.protobuf.Empty
+	(*Unicast)(nil),           // 5: xlabs.tss.comm.Unicast
+	(*PropagatedMessage)(nil), // 6: xlabs.tss.comm.PropagatedMessage
+	(*emptypb.Empty)(nil),     // 7: google.protobuf.Empty
 }
 var file_proto_tsscomm_v1_tsscomm_proto_depIdxs = []int32{
 	1, // 0: xlabs.tss.comm.SignedMessage.tss_content:type_name -> xlabs.tss.comm.TssContent
 	3, // 1: xlabs.tss.comm.SignedMessage.hashEcho:type_name -> xlabs.tss.comm.HashEcho
 	2, // 2: xlabs.tss.comm.Echo.message:type_name -> xlabs.tss.comm.SignedMessage
 	1, // 3: xlabs.tss.comm.Unicast.tss:type_name -> xlabs.tss.comm.TssContent
-	5, // 4: xlabs.tss.comm.Unicast.vaav1:type_name -> xlabs.tss.comm.VaaV1Info
-	6, // 5: xlabs.tss.comm.PropagatedMessage.Unicast:type_name -> xlabs.tss.comm.Unicast
-	4, // 6: xlabs.tss.comm.PropagatedMessage.Echo:type_name -> xlabs.tss.comm.Echo
-	7, // 7: xlabs.tss.comm.DirectLink.Send:input_type -> xlabs.tss.comm.PropagatedMessage
-	8, // 8: xlabs.tss.comm.DirectLink.Send:output_type -> google.protobuf.Empty
-	8, // [8:9] is the sub-list for method output_type
-	7, // [7:8] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 4: xlabs.tss.comm.PropagatedMessage.Unicast:type_name -> xlabs.tss.comm.Unicast
+	4, // 5: xlabs.tss.comm.PropagatedMessage.Echo:type_name -> xlabs.tss.comm.Echo
+	6, // 6: xlabs.tss.comm.DirectLink.Send:input_type -> xlabs.tss.comm.PropagatedMessage
+	7, // 7: xlabs.tss.comm.DirectLink.Send:output_type -> google.protobuf.Empty
+	7, // [7:8] is the sub-list for method output_type
+	6, // [6:7] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_proto_tsscomm_v1_tsscomm_proto_init() }
@@ -615,11 +550,10 @@ func file_proto_tsscomm_v1_tsscomm_proto_init() {
 		(*SignedMessage_TssContent)(nil),
 		(*SignedMessage_HashEcho)(nil),
 	}
-	file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6].OneofWrappers = []any{
+	file_proto_tsscomm_v1_tsscomm_proto_msgTypes[5].OneofWrappers = []any{
 		(*Unicast_Tss)(nil),
-		(*Unicast_Vaav1)(nil),
 	}
-	file_proto_tsscomm_v1_tsscomm_proto_msgTypes[7].OneofWrappers = []any{
+	file_proto_tsscomm_v1_tsscomm_proto_msgTypes[6].OneofWrappers = []any{
 		(*PropagatedMessage_Unicast)(nil),
 		(*PropagatedMessage_Echo)(nil),
 	}
@@ -629,7 +563,7 @@ func file_proto_tsscomm_v1_tsscomm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_tsscomm_v1_tsscomm_proto_rawDesc), len(file_proto_tsscomm_v1_tsscomm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

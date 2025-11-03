@@ -100,8 +100,13 @@ func serializeTSSMessage(msg common.Message) []byte {
 	//  signature, thus we use it as a sessionID.
 
 	// TODO: find a proper way to ADD auxilary data to the sessionID to avoid equivication attacks
+	tidString := []byte(msg.WireMsg().GetTrackingID().ToString())
+
 	messageTrackingID := [trackingIDHexStrSize]byte{}
-	copy(messageTrackingID[:], []byte(msg.WireMsg().GetTrackingID().ToString()))
+	copy(messageTrackingID[:], tidString)
+	if len(tidString) > trackingIDHexStrSize {
+		// TODO: Now that this is in the hand of the user I'm not sure we can use constant sizes anymore.
+	}
 
 	fromId := [pemKeySize]byte{}
 	copy(fromId[:], []byte(msg.GetFrom().GetID()))
@@ -334,8 +339,6 @@ func (t *Engine) validateBroadcastState(s *broadcaststate, parsed broadcastMessa
 		s.verifiedDigest = &signedMsgHash
 
 	} else if *s.verifiedDigest != signedMsgHash {
-		// TODO: VaaV1 leader can cause two signatures with the same trackingID, to run.
-		//       Perhaps we need to add auxilary data to the uuid to remove this bug.
 		if err := t.verifySignedMessage(uid, unparsedSignedMessage); err != nil {
 			// two different digest and bad signature.
 			return fmt.Errorf("caught bad behaviour: Echoer %v sent a digest that can't be verified", src.Hostname)

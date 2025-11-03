@@ -49,14 +49,10 @@ message Echo {
   SignedMessage message = 1;
 }
 
-message VaaV1Info {
-  bytes marshaled = 1;
-}
 
 message Unicast{
   oneof content{
     TssContent tss = 1;
-    VaaV1Info vaav1 = 2;
   }
 }
 

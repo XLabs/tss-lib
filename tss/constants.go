@@ -46,7 +46,6 @@ const (
 	pemKeySize   = 178
 
 	// auxiliaryData is emmiterChain in bytes.
-	// auxiliaryDataSize = int(unsafe.Sizeof(vaa.ChainID(0)))
 	maxParties = 256
 
 	// hex string sizes use 2x since each byte is represented by 2 hex characters
