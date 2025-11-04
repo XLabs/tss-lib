@@ -6,7 +6,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss"
@@ -106,8 +105,6 @@ func main() {
 
 		cancel()
 	}()
-
-	time.Sleep(time.Second)
 
 	logger.Info("Server is running and accepting requests.\nNotice: signature requests demand peers to be online.")
 

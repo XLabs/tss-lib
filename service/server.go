@@ -102,6 +102,8 @@ func (s *Server) SignMessage(stream signer.Signer_SignMessageServer) error {
 // fanOutSignatures listens for produced signatures and forwards them to all registered waiters.
 func (s *Server) fanOutSignatures() {
 	for sig := range s.Signer.ProducedSignature() {
+		s.logger.Info("New signature distributed to subscribed clients", zap.Any("sig", sig))
+
 		s.waitersLock.Lock()
 
 		for _, waiter := range s.waiters {

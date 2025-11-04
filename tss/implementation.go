@@ -180,7 +180,7 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest) 
 		ProtocolType:  protocolType,
 	}
 
-	t.logger.Info("signature for VAA requested",
+	t.logger.Info("signature requested",
 		zap.String("digest", fmt.Sprintf("%x", d[:])),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
@@ -327,6 +327,7 @@ func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 		t.logger = zapLogger.
 			With(zap.String("hostname", t.GuardianStorage.Self.NetworkName())).
 			Named("engine")
+		t.logger.Debug("TSS Engine logger initialized")
 	}
 
 	if err := t.fp.Start(party.OutputChannels(t.fpCommChans)); err != nil {
@@ -465,16 +466,6 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 	t.logger.Debug("signature complete. updating inner state and forwarding it", zap.String("trackingId", sig.TrackingId.ToString()))
 
 	t.sigCounter.remove(sig.TrackingId)
-
-	// select {
-	// case t.ftCommandChan <- &SigEndCommand{sig.TrackingId}:
-	// default:
-	// 	// This is a warning, since the ftTracker will eventually clean the sigState matching the trackingID.
-	// 	t.logger.Warn(
-	// 		"couldn't inform the tracker of the signature end",
-	// 		zap.String("trackingId", sig.TrackingId.ToString()),
-	// 	)
-	// }
 
 	select {
 	case t.sigOutChan <- sig:
@@ -651,7 +642,7 @@ func (t *Engine) HandleIncomingTssMessage(msg Incoming) {
 	}
 
 	if err := t.handleIncomingTssMessage(msg); err != nil {
-		logErr(t.logger, err)
+		t.logger.Error("failed to handle incoming TSS message", zap.Error(err))
 	}
 }
 

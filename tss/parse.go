@@ -54,12 +54,6 @@ func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
 
 		parsed.signingRound = rnd
 
-		// TODO: once keygen/reshare is implemented, we need to redefine this check, since we'll be using unicasts in round 1.
-		// according to gg18 (tss ecdsa paper), unicasts are sent in these rounds.
-		// if rnd == round1Message1 || rnd == round2Message {
-		// 	return res, errBadRoundsInBroadcast
-		// }
-
 		if err := t.validateTrackingIDForm(parsed.getTrackingID()); err != nil {
 			return res, err
 		}

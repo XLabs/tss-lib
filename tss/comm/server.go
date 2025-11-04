@@ -321,7 +321,7 @@ func (s *server) Send(inStream tsscommv1.DirectLink_SendServer) error {
 			s.logger.Error(
 				"error receiving from guardian. Closing connection",
 				zap.Error(err),
-				zap.String("peer", clientId.Hostname),
+				zap.String("peer", clientId.NetworkName()),
 			)
 
 			return status.Error(codes.Unknown, "error receiving message from client "+err.Error()) //fmt.Errorf("received error while receiving message: %w", err)
