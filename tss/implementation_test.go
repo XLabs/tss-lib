@@ -7,6 +7,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/xlabs/multi-party-sig/pkg/round"
@@ -2004,6 +2006,170 @@ func TestHandleFPWarning_IntegrationStyle_UsesEngineBootstrap(t *testing.T) {
 	// if got["trackingId"] != "trk-123" {
 	//     t.Fatalf("engine %d: trackingId mismatch: got %q, want %q", i, got["trackingId"], "trk-123")
 	// }
+}
+
+func TestTranslateEthCommitteeMembers(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	storage := engines[0].GuardianStorage
+	storage.Threshold = 3 // Need at least 3 guardians
+
+	// Setup VAAv1 public keys for testing
+	for i, id := range storage.Identities {
+		addr := ethcommon.Address{}
+		binary.BigEndian.PutUint64(addr[:], uint64(i+1)) // Simple unique address
+		id.VAAv1PubKey = &addr
+	}
+	// Re-run SetInnerFields to populate the vaav1PubToIdentity map
+	a.NoError(storage.SetInnerFields())
+
+	t.Run("Valid committee", func(t *testing.T) {
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			storage.Identities[1].VAAv1PubKey.Bytes(),
+			storage.Identities[2].VAAv1PubKey.Bytes(),
+		}
+		members, err := storage.translateEthCommitteeMembers(committee)
+		a.NoError(err)
+		a.Len(members, 3)
+		a.Contains(members, storage.Identities[0].CommunicationIndex)
+		a.Contains(members, storage.Identities[1].CommunicationIndex)
+		a.Contains(members, storage.Identities[2].CommunicationIndex)
+	})
+
+	t.Run("committee larger than threshold", func(t *testing.T) {
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			storage.Identities[1].VAAv1PubKey.Bytes(),
+			storage.Identities[2].VAAv1PubKey.Bytes(),
+			storage.Identities[3].VAAv1PubKey.Bytes(),
+		}
+		members, err := storage.translateEthCommitteeMembers(committee)
+		a.NoError(err)
+		a.Len(members, 4)
+		a.Contains(members, storage.Identities[0].CommunicationIndex)
+		a.Contains(members, storage.Identities[1].CommunicationIndex)
+		a.Contains(members, storage.Identities[2].CommunicationIndex)
+		a.Contains(members, storage.Identities[3].CommunicationIndex)
+	})
+
+	t.Run("Committee with invalid member length", func(t *testing.T) {
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			[]byte{1, 2, 3}, // Invalid length
+		}
+		_, err := storage.translateEthCommitteeMembers(committee)
+		a.Error(err)
+		a.ErrorContains(err, "invalid committee member length")
+	})
+
+	t.Run("Committee with unknown member", func(t *testing.T) {
+		unknownAddr := ethcommon.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			unknownAddr.Bytes(),
+		}
+		_, err := storage.translateEthCommitteeMembers(committee)
+		a.Error(err)
+		a.ErrorContains(err, "couldn't map committee member")
+	})
+
+	t.Run("Committee with repeating members", func(t *testing.T) {
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			storage.Identities[0].VAAv1PubKey.Bytes(), // Duplicate
+			storage.Identities[1].VAAv1PubKey.Bytes(),
+		}
+		_, err := storage.translateEthCommitteeMembers(committee)
+		a.ErrorIs(err, errRepeatingCommitteeMembers)
+	})
+
+	t.Run("Committee too small", func(t *testing.T) {
+		committee := [][]byte{
+			storage.Identities[0].VAAv1PubKey.Bytes(),
+			storage.Identities[1].VAAv1PubKey.Bytes(),
+		}
+		_, err := storage.translateEthCommitteeMembers(committee)
+		a.ErrorIs(err, errCommitteeTooSmall)
+	})
+}
+
+func TestFindExcludeesFromCommittee(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	engine := engines[0]
+	engine.GuardianStorage.Threshold = 3 // Need 4 guardians to sign
+
+	allIdentities := engine.GuardianStorage.Identities
+
+	t.Run("Empty committee", func(t *testing.T) {
+		excluded := engine.findExcludeesFromCommittee(map[SenderIndex]*Identity{})
+		a.Nil(excluded)
+	})
+
+	t.Run("Committee smaller than threshold", func(t *testing.T) {
+		members := map[SenderIndex]*Identity{
+			allIdentities[0].CommunicationIndex: allIdentities[0],
+			allIdentities[1].CommunicationIndex: allIdentities[1],
+		}
+		excluded := engine.findExcludeesFromCommittee(members)
+		a.Nil(excluded)
+	})
+
+	t.Run("Committee with more than threshold members", func(t *testing.T) {
+		// Committee has 4 members, threshold is 2.
+		members := map[SenderIndex]*Identity{
+			allIdentities[0].CommunicationIndex: allIdentities[0],
+			allIdentities[1].CommunicationIndex: allIdentities[1],
+			allIdentities[2].CommunicationIndex: allIdentities[2],
+			allIdentities[3].CommunicationIndex: allIdentities[3],
+		}
+		excluded := engine.findExcludeesFromCommittee(members)
+		a.Len(excluded, 1)
+		a.True(excluded[0].Equals(allIdentities[4].Pid))
+	})
+
+	t.Run("Committee exact sized committee", func(t *testing.T) {
+		// Committee has 3 members, threshold is 2.
+		members := map[SenderIndex]*Identity{
+			allIdentities[0].CommunicationIndex: allIdentities[0],
+			allIdentities[1].CommunicationIndex: allIdentities[1],
+			allIdentities[2].CommunicationIndex: allIdentities[2],
+		}
+		excluded := engine.findExcludeesFromCommittee(members)
+		a.Len(excluded, 2)
+		a.True(excluded[0].Equals(allIdentities[3].Pid))
+		a.True(excluded[1].Equals(allIdentities[4].Pid))
+	})
+
+	t.Run("Full committee", func(t *testing.T) {
+		members := make(map[SenderIndex]*Identity)
+		for _, id := range allIdentities {
+			members[id.CommunicationIndex] = id
+		}
+		excluded := engine.findExcludeesFromCommittee(members)
+		a.Len(excluded, 0) // nothing to exclude, since the committee contains everyone.
+	})
+}
+
+func TestNewEngine(t *testing.T) {
+	a := assert.New(t)
+	storage := loadMockGuardianStorage(0, "tss5")
+
+	t.Run("Nil storage", func(t *testing.T) {
+		_, err := newEngine(nil)
+		a.Error(err)
+		a.ErrorContains(err, "the guardian's tss storage is nil")
+	})
+
+	t.Run("Default values", func(t *testing.T) {
+		storage.maxSimultaneousSignatures = 0
+		storage.MaxSignerTTL = 0
+		engine, err := newEngine(storage)
+		a.NoError(err)
+		a.Equal(defaultMaxLiveSignatures, engine.GuardianStorage.maxSimultaneousSignatures)
+		a.Equal(defaultMaxSignerTTL, engine.GuardianStorage.MaxSignerTTL)
+	})
 }
 
 func observerToMap(entry observer.LoggedEntry) map[string]string {

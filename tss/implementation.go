@@ -138,6 +138,18 @@ var (
 // BeginAsyncThresholdSigningProtocol used to start the TSS protocol over a specific msg.
 
 func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) error {
+	if t == nil {
+		return errNilTssEngine
+	}
+
+	if t.started.Load() != started {
+		return errTssEngineNotStarted
+	}
+
+	if t.fp == nil {
+		return fmt.Errorf("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
+	}
+
 	if req == nil {
 		return errNilSignRequest
 	}
@@ -154,28 +166,44 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	d := party.Digest{}
 	copy(d[:], req.Digest)
 
-	// TODO: use the request's committee to determine the committee to use.
+	excluded := []*common.PartyID{}
+	if len(req.Committee) != 0 {
+		members, err := t.translateEthCommitteeMembers(req.Committee)
+		if err != nil {
+			return err
+		}
 
-	return t.beginTSSSign(protocol, d)
+		excluded = t.findExcludeesFromCommittee(members)
+	}
+
+	return t.beginTSSSign(protocol, d, excluded)
 }
 
-func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest) error {
-	if t == nil {
-		return errNilTssEngine
+func (t *Engine) findExcludeesFromCommittee(members map[SenderIndex]*Identity) []*common.PartyID {
+	if len(members) == 0 {
+		return nil
 	}
 
-	if t.started.Load() != started {
-		return errTssEngineNotStarted
+	if len(members) < t.GuardianStorage.Threshold {
+		return nil // not enough guardians to form a committee.
 	}
 
-	if t.fp == nil {
-		return fmt.Errorf("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
+	// grab everyone that is not in the committee
+	var excludedSigners []*common.PartyID
+	for _, id := range t.GuardianStorage.Identities {
+		if _, ok := members[id.CommunicationIndex]; !ok {
+			excludedSigners = append(excludedSigners, id.Pid)
+		}
 	}
 
+	return excludedSigners
+}
+
+func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, fauilties []*common.PartyID) error {
 	sigtask := party.SigningTask{
 		Digest: d,
 		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      nil, // t.getExcludedFromCommittee(mt), // TODO: use mapping.
+		Faulties:      fauilties,
 		AuxiliaryData: nil, // not used anymore.
 		ProtocolType:  protocolType,
 	}
