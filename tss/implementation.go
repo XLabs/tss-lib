@@ -702,8 +702,8 @@ func (t *Engine) makeEcho(m Incoming, parsed broadcastMessage) *Echo {
 		Signature: e.Message.Signature,
 		Content: &tsscommv1.SignedMessage_HashEcho{
 			HashEcho: &tsscommv1.HashEcho{
-				SessionUuid:          uuid[:],
-				OriginalContetDigest: contentDigest[:],
+				SessionUuid:           uuid[:],
+				OriginalContentDigest: contentDigest[:],
 			},
 		},
 	}

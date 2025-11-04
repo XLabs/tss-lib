@@ -97,16 +97,14 @@ func (p *parsedHashEcho) getUUID(loadDistKey []byte) uuid {
 // this is used by the broadcast protocol to check no two messages from the same sender will be used to update the full party
 // in the same round for the specific session of the protocol.
 func serializeTSSMessage(msg common.Message) []byte {
-	// The TackingID of a parsed message is tied to the run of the protocol for a single
+	// The TrackingID of a parsed message is tied to the run of the protocol for a single
 	//  signature, thus we use it as a sessionID.
 
 	tidString := []byte(msg.WireMsg().GetTrackingID().ToString())
 
+	// Assumes the trackingID is of the correct size. (see validateTrackingIDForm).
 	messageTrackingID := [trackingIDHexStrSize]byte{}
 	copy(messageTrackingID[:], tidString)
-	if len(tidString) > trackingIDHexStrSize {
-		// TODO: Now that this is in the hand of the user I'm not sure we can use constant sizes anymore.
-	}
 
 	fromId := [pemKeySize]byte{}
 	copy(fromId[:], []byte(msg.GetFrom().GetID()))

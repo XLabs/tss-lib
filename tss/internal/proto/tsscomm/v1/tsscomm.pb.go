@@ -222,11 +222,11 @@ func (*SignedMessage_TssContent) isSignedMessage_Content() {}
 func (*SignedMessage_HashEcho) isSignedMessage_Content() {}
 
 type HashEcho struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	SessionUuid          []byte                 `protobuf:"bytes,1,opt,name=sessionUuid,proto3" json:"sessionUuid,omitempty"`                   // should be the relevant uuid. without it, we cant math this echo with the tssContent that we receive a hash of.
-	OriginalContetDigest []byte                 `protobuf:"bytes,2,opt,name=originalContetDigest,proto3" json:"originalContetDigest,omitempty"` // should be a hash of what the original sender signed.
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	SessionUuid           []byte                 `protobuf:"bytes,1,opt,name=sessionUuid,proto3" json:"sessionUuid,omitempty"`                     // should be the relevant uuid. without it, we cant match this echo with the tssContent that we receive a hash of.
+	OriginalContentDigest []byte                 `protobuf:"bytes,2,opt,name=originalContentDigest,proto3" json:"originalContentDigest,omitempty"` // should be a hash of what the original sender signed.
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *HashEcho) Reset() {
@@ -266,9 +266,9 @@ func (x *HashEcho) GetSessionUuid() []byte {
 	return nil
 }
 
-func (x *HashEcho) GetOriginalContetDigest() []byte {
+func (x *HashEcho) GetOriginalContentDigest() []byte {
 	if x != nil {
-		return x.OriginalContetDigest
+		return x.OriginalContentDigest
 	}
 	return nil
 }
@@ -485,10 +485,10 @@ const file_proto_tsscomm_v1_tsscomm_proto_rawDesc = "" +
 	"\vtss_content\x18\x03 \x01(\v2\x1a.xlabs.tss.comm.TssContentH\x00R\n" +
 	"tssContent\x126\n" +
 	"\bhashEcho\x18\x06 \x01(\v2\x18.xlabs.tss.comm.HashEchoH\x00R\bhashEchoB\t\n" +
-	"\acontent\"`\n" +
+	"\acontent\"b\n" +
 	"\bHashEcho\x12 \n" +
-	"\vsessionUuid\x18\x01 \x01(\fR\vsessionUuid\x122\n" +
-	"\x14originalContetDigest\x18\x02 \x01(\fR\x14originalContetDigest\"?\n" +
+	"\vsessionUuid\x18\x01 \x01(\fR\vsessionUuid\x124\n" +
+	"\x15originalContentDigest\x18\x02 \x01(\fR\x15originalContentDigest\"?\n" +
 	"\x04Echo\x127\n" +
 	"\amessage\x18\x01 \x01(\v2\x1d.xlabs.tss.comm.SignedMessageR\amessage\"D\n" +
 	"\aUnicast\x12.\n" +

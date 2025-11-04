@@ -44,7 +44,7 @@ func hashSignedMessage(msg *tsscommv1.SignedMessage) digest {
 
 	case *tsscommv1.SignedMessage_HashEcho:
 		d := digest{}
-		copy(d[:], m.HashEcho.OriginalContetDigest)
+		copy(d[:], m.HashEcho.OriginalContentDigest)
 
 		return d
 	}

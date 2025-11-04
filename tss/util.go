@@ -212,7 +212,7 @@ func validateHashEchoMessageCorrectForm(v *tsscommv1.SignedMessage_HashEcho) err
 		return errNilEcho
 	}
 
-	if len(v.HashEcho.OriginalContetDigest) != len(digest{}) {
+	if len(v.HashEcho.OriginalContentDigest) != len(digest{}) {
 		return errEchoDigestBadSize
 	}
 
@@ -356,8 +356,6 @@ func (st *GuardianStorage) validateTrackingIDForm(tid *common.TrackingID) error 
 	return nil
 }
 
-// sigKey contains two main parts of common.TrackID: the digest and the chainID.
-// it doesan't contain the faulty bitmap since we want to point to the same signature even if the faulty bitmap changes.
 type sigKey string
 
 func trackingIdIntoSigKey(tid *common.TrackingID) sigKey {

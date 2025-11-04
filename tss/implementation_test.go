@@ -239,8 +239,8 @@ func makeHashEcho(e *Engine, parsed common.ParsedMessage, in *IncomingMessage) *
 	dgst := hashSignedMessage(echocpy.Message)
 
 	hshEcho := &tsscommv1.HashEcho{
-		SessionUuid:          uid[:],
-		OriginalContetDigest: dgst[:],
+		SessionUuid:           uid[:],
+		OriginalContentDigest: dgst[:],
 	}
 
 	outgoing.toBroadcastMsg().Message.Content = &tsscommv1.SignedMessage_HashEcho{HashEcho: hshEcho}

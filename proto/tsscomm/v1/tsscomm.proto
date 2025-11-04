@@ -40,8 +40,8 @@ message SignedMessage {
 }
 
 message HashEcho {
-  bytes sessionUuid = 1; // should be the relevant uuid. without it, we cant math this echo with the tssContent that we receive a hash of.
-  bytes originalContetDigest = 2; // should be a hash of what the original sender signed.
+  bytes sessionUuid = 1; // should be the relevant uuid. without it, we cant match this echo with the tssContent that we receive a hash of.
+  bytes originalContentDigest = 2; // should be a hash of what the original sender signed.
 }
 
 // Echo is a message explicitly used by the Reliable Broadcast protocol.
