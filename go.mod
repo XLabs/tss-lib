@@ -1,12 +1,14 @@
 module github.com/xlabs/tss-lib/v2
 
-go 1.23
+go 1.24.0
+
+toolchain go1.24.5
 
 require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/stretchr/testify v1.9.0
-	github.com/xlabs/multi-party-sig v0.0.2-0.20251027070734-8ce22a563161
-	github.com/xlabs/tss-common v0.0.0-20251006064114-b1fcd9c2ce8e
+	github.com/xlabs/multi-party-sig v0.0.2-0.20251103131906-f369c25b6cef
+	github.com/xlabs/tss-common v0.0.0-20251103131551-3f0c57165d3e
 	golang.org/x/crypto v0.22.0
 	google.golang.org/protobuf v1.36.10
 )
@@ -23,7 +25,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
