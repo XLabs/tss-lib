@@ -179,26 +179,6 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	return t.beginTSSSign(protocol, d, excluded)
 }
 
-func (t *Engine) findExcludeesFromCommittee(members map[SenderIndex]*Identity) []*common.PartyID {
-	if len(members) == 0 {
-		return nil
-	}
-
-	if len(members) < t.GuardianStorage.Threshold {
-		return nil // not enough guardians to form a committee.
-	}
-
-	// grab everyone that is not in the committee
-	var excludedSigners []*common.PartyID
-	for _, id := range t.GuardianStorage.Identities {
-		if _, ok := members[id.CommunicationIndex]; !ok {
-			excludedSigners = append(excludedSigners, id.Pid)
-		}
-	}
-
-	return excludedSigners
-}
-
 func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, fauilties []*common.PartyID) error {
 	sigtask := party.SigningTask{
 		Digest: d,

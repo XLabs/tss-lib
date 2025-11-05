@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	common "github.com/xlabs/tss-common"
 )
 
 var errRepeatingCommitteeMembers = errors.New("couldn't map all committee members")
@@ -36,4 +37,24 @@ func (st *GuardianStorage) translateEthCommitteeMembers(committee [][]byte) (map
 	}
 
 	return signersID, nil
+}
+
+func (t *Engine) findExcludeesFromCommittee(members map[SenderIndex]*Identity) []*common.PartyID {
+	if len(members) == 0 {
+		return nil
+	}
+
+	if len(members) < t.GuardianStorage.Threshold {
+		return nil // not enough guardians to form a committee.
+	}
+
+	// grab everyone that is not in the committee
+	var excludedSigners []*common.PartyID
+	for _, id := range t.GuardianStorage.Identities {
+		if _, ok := members[id.CommunicationIndex]; !ok {
+			excludedSigners = append(excludedSigners, id.Pid)
+		}
+	}
+
+	return excludedSigners
 }
