@@ -18,7 +18,6 @@ import (
 	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
@@ -606,127 +605,6 @@ func TestBadInputs(t *testing.T) {
 		_, err := e1.fetchIdentityFromIndex(SenderIndex(e1.GuardianStorage.NumGuardians() + 1))
 		a.ErrorIs(err, ErrUnkownSender)
 	})
-
-	// t.Run("handle incoming VAAs", func(t *testing.T) {
-	// 	a := assert.New(t)
-
-	// 	v, gs := genVaaAndGuardianSet(a)
-
-	// 	gst := whcommon.NewGuardianSetState(nil)
-	// 	gst.Set(gs)
-
-	// 	engines := load5GuardiansSetupForBroadcastChecks(a)
-	// 	engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
-
-	// 	// engine.SetGuardianSetState(gst)
-
-	// 	ctx, cancel := context.WithCancel(context.Background())
-	// 	defer cancel()
-
-	// 	ctx = testutils.MakeSupervisorContext(ctx)
-
-	// 	engine.Start(ctx, logger)
-
-	// 	// bad verfication run
-	// 	v.Version = 2
-	// 	v.Nonce = 0
-
-	// 	bts, err := v.Marshal()
-	// 	a.NoError(err)
-
-	// 	engine.LeaderIdentity = engine.Self.KeyPEM
-
-	// 	t.Run("Bad Version", func(t *testing.T) {
-	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-	// 			Vaav1: &tsscommv1.VaaV1Info{
-	// 				Marshaled: bts,
-	// 			},
-	// 		})
-
-	// 		a.ErrorContains(err, errNotVaaV1.Error())
-	// 	})
-
-	// 	v.Version = vaa.VaaVersion1
-	// 	bts, err = v.Marshal()
-	// 	a.NoError(err)
-
-	// 	t.Run("Bad Signature", func(t *testing.T) {
-	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-	// 			Vaav1: &tsscommv1.VaaV1Info{
-	// 				Marshaled: bts,
-	// 			},
-	// 		})
-
-	// 		a.ErrorContains(err, "signature")
-	// 	})
-
-	// 	t.Run("Bad Marshal", func(t *testing.T) {
-	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-	// 			Vaav1: &tsscommv1.VaaV1Info{
-	// 				Marshaled: []byte("BadMarshal"),
-	// 			},
-	// 		})
-
-	// 		a.ErrorContains(err, "unmarshal")
-	// 	})
-
-	// 	t.Run("nil VAA", func(t *testing.T) {
-	// 		err = engine.handleUnicastVaaV1(nil)
-
-	// 		a.ErrorContains(err, "nil")
-	// 	})
-
-	// 	t.Run("no guardian set state", func(t *testing.T) {
-	// 		engine.gst = nil
-
-	// 		err = engine.handleUnicastVaaV1(&tsscommv1.Unicast_Vaav1{
-	// 			Vaav1: &tsscommv1.VaaV1Info{
-	// 				Marshaled: bts,
-	// 			},
-	// 		})
-
-	// 		a.ErrorContains(err, "guardianSet")
-	// 	})
-	// })
-
-	// t.Run("witness Vaas", func(t *testing.T) {
-	// 	a := assert.New(t)
-
-	// 	v, gs := genVaaAndGuardianSet(a)
-
-	// 	gst := whcommon.NewGuardianSetState(nil)
-	// 	gst.Set(gs)
-
-	// 	engines := load5GuardiansSetupForBroadcastChecks(a)
-	// 	engine := engines[0] // Not starting engine so it doesn't run BeginTSSSign
-
-	// 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	// 	defer cancel()
-
-	// 	ctx = testutils.MakeSupervisorContext(ctx)
-
-	// 	a.ErrorContains(engine.WitnessNewVaa(v), errTssEngineNotStarted.Error())
-
-	// 	engine.Start(ctx, logger)
-
-	// 	engine.isleader = true
-	// 	a.ErrorContains(engine.WitnessNewVaa(v), errNilGuardianSetState.Error())
-	// 	engine.gst = gst
-
-	// 	a.NoError(engine.WitnessNewVaa(v))
-
-	// 	a.ErrorContains(engine.WitnessNewVaa(nil), "nil")
-	// 	a.NoError(engine.WitnessNewVaa(v))
-
-	// 	engine.messageOutChan = nil
-	// 	a.NoError(engine.WitnessNewVaa(v)) //shouldn't output error but log.
-
-	// 	v.Version += 1
-	// 	a.NoError(engine.WitnessNewVaa(v))
-
-	// 	engine = nil
-	// 	a.ErrorContains(engine.WitnessNewVaa(v), errNilTssEngine.Error())
-	// })
 }
 
 func createX509Cert(dnsName string) *x509.Certificate {
@@ -859,8 +737,7 @@ func TestDefaultSameLeader(t *testing.T) {
 
 func TestNoFaultsFlow(t *testing.T) {
 	// checking metrics first since this is a bit flakey.
-	t.Run("with correct metrics", func(t *testing.T) {
-		sigProducedCntr.Reset()
+	t.Run("regularflow", func(t *testing.T) {
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)
@@ -880,8 +757,6 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		fmt.Println("engines started, requesting sigs")
 
-		m := dto.Metric{}
-
 		// all engines are started, now we can begin the protocol.
 		for _, engine := range engines {
 			tmp := make([]byte, 32)
@@ -898,11 +773,6 @@ func TestNoFaultsFlow(t *testing.T) {
 		if ctxExpiredFirst(ctx, dnchn) {
 			a.FailNow("context expired")
 		}
-
-		time.Sleep(time.Millisecond * 500) // ensuring all other engines have finished and not just one of them.
-
-		sigProducedCntr.WithLabelValues(common.ProtocolFROSTSign.ToString()).Write(&m) // TODO fix!
-		a.Equal(engines[0].Threshold+1, int(m.Counter.GetValue()))
 	})
 
 	// Setting up all engines (not just 5), each with a different guardian storage.
@@ -1019,7 +889,6 @@ func TestNoFaultsFlow(t *testing.T) {
 
 	t.Run("ECDSA signature", func(t *testing.T) {
 		// SLOW TEST.
-		sigProducedCntr.Reset()
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)
@@ -1076,69 +945,6 @@ func TestFT(t *testing.T) {
 	t.Run("server crashes during signing multiple digests", func(t *testing.T) { t.Skip("TODO: handle server crashes") })
 
 	t.Run("cant sign after f faults", func(t *testing.T) { t.Skip("TODO: handle server crashes") })
-
-	t.Run("metric cleanup", func(t *testing.T) {
-		// run for a few signatures, and ensure the metrics are cleaned up.
-		a := assert.New(t)
-		engines, err := loadGuardians(5, "tss5")
-		a.NoError(err)
-
-		n := 2
-
-		digests := make([]party.SigningTask, n)
-		for i := 0; i < n; i++ {
-			digests[i] = party.SigningTask{
-				Digest:        [32]byte{byte(i + 1)},
-				Faulties:      nil,
-				AuxiliaryData: []byte{1, 2, 3, 4},
-				ProtocolType:  common.ProtocolFROSTSign,
-			}
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*4)
-		defer cancel()
-
-		fmt.Println("starting engines.")
-		for _, engine := range engines {
-			engine.Configurations.MaxSignerTTL = time.Second * 4
-			a.NoError(engine.Start(ctx, logger))
-		}
-
-		e := getSigningGuardian(a, engines, digests...)
-		a.NotNil(e)
-
-		fmt.Println("msgHandler settup:")
-		dnchn := msgHandler(ctx, engines, len(digests))
-
-		fmt.Println("engines started, requesting sigs")
-
-		for _, d := range digests {
-			d := d
-
-			for _, engine := range engines {
-				engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
-					Digest:   d.Digest[:],
-					Protocol: common.ProtocolFROSTSign.ToString(),
-				})
-			}
-		}
-
-		timer := time.After(engines[0].maxSignerTTL() * 4)
-
-		if ctxExpiredFirst(ctx, dnchn) {
-			a.FailNow("context expired")
-		}
-
-		<-timer
-
-		for _, e := range engines {
-			e.SignatureMetrics.Range(func(k, v interface{}) bool {
-				fmt.Println(k, v)
-				a.Fail("metrics not cleaned up")
-				return false
-			})
-		}
-	})
 
 	t.Run("Two quorums only one guardian in conjunction", func(t *testing.T) {
 		t.Skip("TODO: Make one of the signers of VAAv1 send the VAAv1 (similar to leader mechanism), so the others will also sign.")

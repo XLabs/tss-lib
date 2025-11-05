@@ -53,8 +53,6 @@ type Engine struct {
 	received map[uuid]*broadcaststate
 
 	sigCounter activeSigCounter
-
-	SignatureMetrics sync.Map
 }
 
 type PEM []byte
@@ -208,8 +206,6 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 	if err := validateTrackingID(info.TrackingID); err != nil {
 		return err
 	}
-
-	t.createSignatureMetrics(info.TrackingID)
 
 	info, err = t.fp.AsyncRequestNewSignature(sigtask)
 	if err != nil {
@@ -491,8 +487,6 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 			zap.String("trackingId", sig.TrackingId.ToString()),
 		)
 	}
-
-	t.sigMetricDone(sig.TrackingId, false) // false since there were no issues.
 }
 
 func (t *Engine) handleFpError(err *common.Error) {
@@ -525,8 +519,6 @@ func (t *Engine) handleFpError(err *common.Error) {
 		trackid,
 		intToRound(err.Round()),
 	})
-
-	t.sigMetricDone(trackid, true)
 }
 
 func (t *Engine) handleFpOutput(m common.Message) {
@@ -564,28 +556,6 @@ func (t *Engine) handleFpOutput(m common.Message) {
 
 func (t *Engine) cleanup(maxTTL time.Duration) {
 	now := time.Now()
-
-	keysToBeRemoved := make([]any, 0)
-
-	t.SignatureMetrics.Range(func(k, v any) bool {
-		mt, ok := v.(*signatureMetadata)
-		if !ok {
-			keysToBeRemoved = append(keysToBeRemoved, k)
-
-			return true
-		}
-
-		tmp := now.Sub(mt.timeOfCreation)
-		if tmp > maxTTL {
-			keysToBeRemoved = append(keysToBeRemoved, k)
-		}
-
-		return true
-	})
-
-	for _, k := range keysToBeRemoved {
-		t.SignatureMetrics.Delete(k)
-	}
 
 	t.sigCounter.cleanSelf(maxTTL)
 
@@ -751,8 +721,6 @@ func (t *Engine) feedIncomingToFp(parsed common.ParsedMessage) error {
 	maxLiveSignatures := t.GuardianStorage.maxSimultaneousSignatures
 
 	if ok := t.sigCounter.add(trackId, from, maxLiveSignatures); !ok {
-		tooManySimulSigsErrCntr.Inc()
-
 		return fmt.Errorf("guardian %v has reached the maximum number of simultaneous signatures", id.Hostname)
 	}
 
