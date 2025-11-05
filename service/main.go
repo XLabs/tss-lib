@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	socket  = flag.String("socket", "localhost:50051", "The server's socket")
+	socket  = flag.String("socket", "localhost:50051", "The server's socket address")
 	secrets = flag.String("s", "", "the path to the signer secrets file (must be provided)")
 )
 
@@ -29,7 +29,6 @@ func main() {
 
 	if len(*secrets) == 0 {
 		flag.Usage()
-
 		return
 	}
 
@@ -74,26 +73,19 @@ func main() {
 		panic(err)
 	}
 
-	srvr := &Server{
+	srvr := &server{
 		UnimplementedSignerServer: signer.UnimplementedSignerServer{}, // grpc requirement
-
-		ctx:    ctx,
-		cancel: cancel,
-
-		logger: logger,
-		Signer: engine,
-
-		listener: l,
-		Server:   grpc.NewServer(),
-
-		waitersLock:  sync.Mutex{},
-		waiters:      map[uint64]chan<- *signer.SignResponse{},
-		nextWaiterID: 0,
+		ctx:                       ctx,
+		cancel:                    cancel,
+		logger:                    logger,
+		Signer:                    engine,
+		listener:                  l,
+		Server:                    grpc.NewServer(),
+		mtx:                       sync.Mutex{},
+		hasSubscriber:             false,
 	}
 
 	signer.RegisterSignerServer(srvr.Server, srvr)
-
-	go srvr.fanOutSignatures()
 
 	go func() {
 		if err := srvr.Serve(l); err != nil {
