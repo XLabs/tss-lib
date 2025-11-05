@@ -311,8 +311,6 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		started: atomic.Uint32{}, // default value is 0
 
 		sigCounter: newSigCounter(),
-
-		// ftCommandChan: make(chan ftCommand, expectedMsgs),
 	}
 
 	return t, nil
@@ -349,8 +347,6 @@ func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 
 	// closing the t.fp.start inside th listener
 	go t.fpListener()
-
-	// go t.sigTracker()
 
 	leaderIdentity, err := t.GuardianStorage.fetchIdentityFromKeyPEM(t.LeaderIdentity)
 	if err != nil {
@@ -500,15 +496,6 @@ func (t *Engine) handleFpError(err *common.Error) {
 
 		return
 	}
-
-	// select {
-	// case t.ftCommandChan <- &SigEndCommand{trackid}:
-	// default:
-	// 	t.logger.Error("couldn't inform the tracker of signature end due to error",
-	// 		zap.Error(err),
-	// 		zap.String("trackingId", trackid.ToString()),
-	// 	)
-	// }
 
 	// if someone sent a message that caused an error -> we don't
 	// accept an override to that message, therefore, we can remove it, since it won't change.
