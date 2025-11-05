@@ -183,8 +183,14 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 
 		sessionMap: &sessionMap{Map: sync.Map{}},
 
-		incomingMessagesChannel: make(chan feedMessageTask, len(p.PartyIDs)),
-		startSignerTaskChan:     make(chan *singleSession),
+		frostWorkerChans: workerChans{
+			incomingMessages: make(chan feedMessageTask, len(p.PartyIDs)),
+			startSigner:      make(chan *singleSession),
+		},
+		ecdsaWorkerChans: workerChans{
+			incomingMessages: make(chan feedMessageTask, len(p.PartyIDs)),
+			startSigner:      make(chan *singleSession),
+		},
 		// the following fields should be provided in Start()
 		outputChannels: OutputChannels{},
 
