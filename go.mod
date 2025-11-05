@@ -7,7 +7,7 @@ toolchain go1.24.5
 require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/stretchr/testify v1.9.0
-	github.com/xlabs/multi-party-sig v0.0.2-0.20251103131906-f369c25b6cef
+	github.com/xlabs/multi-party-sig v0.0.2-0.20251105064132-e70a652796d7
 	github.com/xlabs/tss-common v0.0.0-20251103131551-3f0c57165d3e
 	golang.org/x/crypto v0.22.0
 	google.golang.org/protobuf v1.36.10
