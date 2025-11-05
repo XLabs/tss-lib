@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
+	"errors"
 	"fmt"
 
 	"sync"
@@ -133,10 +134,12 @@ var (
 	errNilTssEngine        = fmt.Errorf("tss engine is nil")
 	errTssEngineNotStarted = fmt.Errorf("tss engine hasn't started")
 	errNilSignRequest      = fmt.Errorf("sign request is nil")
+
+	errDigestSize = errors.New("digest size is not 32 bytes")
+	errFPNotSet   = errors.New("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
 )
 
 // BeginAsyncThresholdSigningProtocol used to start the TSS protocol over a specific msg.
-
 func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) error {
 	if t == nil {
 		return errNilTssEngine
@@ -147,7 +150,7 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	}
 
 	if t.fp == nil {
-		return fmt.Errorf("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
+		return errFPNotSet
 	}
 
 	if req == nil {
@@ -159,8 +162,12 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 		return err
 	}
 
+	if protocol != common.ProtocolECDSASign && protocol != common.ProtocolFROSTSign {
+		return fmt.Errorf("unsupported signing protocol: %s", req.Protocol)
+	}
+
 	if len(req.Digest) != digestSize {
-		return fmt.Errorf("digest length is not 32 bytes")
+		return errDigestSize
 	}
 
 	d := party.Digest{}

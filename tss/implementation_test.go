@@ -592,7 +592,7 @@ func TestBadInputs(t *testing.T) {
 			Digest:    make([]byte, 31, 32),
 			Protocol:  common.ProtocolFROSTSign.ToString(),
 			Committee: [][]byte{},
-		}), "length is not 32 bytes")
+		}), "digest size is not 32 bytes")
 
 		tmp.fp = nil
 		a.ErrorContains(tmp.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
