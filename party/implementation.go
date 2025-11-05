@@ -132,22 +132,27 @@ func (p *Impl) Stop() {
 	p.pool.TearDown()
 }
 
-var ErrNoConfig = errors.New("signing protocol not configured")
+var (
+	ErrNoConfig          = errors.New("signing protocol not configured")
+	ErrDkgHasNoPublicKey = errors.New("dkg protocols have no public key to use")
+)
 
 func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
 	switch t {
-	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
+	case common.ProtocolECDSASign:
 		if p.ecdsaConfig == nil {
 			return nil, ErrNoConfig
 		}
 
 		return p.ecdsaConfig.PublicPoint().Clone(), nil
-	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
+	case common.ProtocolFROSTSign:
 		if p.frostConfig == nil {
 			return nil, ErrNoConfig
 		}
 
 		return p.frostConfig.PublicKey.Clone(), nil
+	case common.ProtocolFROSTDKG, common.ProtocolECDSADKG:
+		return nil, ErrDkgHasNoPublicKey
 	default:
 		return nil, fmt.Errorf("public not found for: %s", t.ToString())
 	}
@@ -672,7 +677,6 @@ func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
 	s.committee = common.SortPartyIDs(p.peers)
 
 	var sessionCreator protocol.StartFunc
-	// sessionCreator := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
 
 	switch s.protocol {
 	// TODO: find a nice way to merge all the switch cases that inspect protocol type.
