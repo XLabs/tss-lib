@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"net"
-	"strconv"
 	"sync"
 
 	"github.com/xlabs/tss-common/service/signer"
@@ -15,14 +14,12 @@ import (
 )
 
 var (
-	port    = flag.Int("p", 50052, "The server's port")
+	socket  = flag.String("socket", "localhost:50051", "The server's socket")
 	secrets = flag.String("s", "", "the path to the signer secrets file (must be provided)")
 )
 
 func main() {
 	flag.Parse()
-
-	prt := *port
 
 	logger, err := zap.NewDevelopment()
 	if err != nil {
@@ -30,7 +27,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	if *secrets == "" {
+	if len(*secrets) == 0 {
 		flag.Usage()
 
 		return
@@ -70,9 +67,9 @@ func main() {
 		}
 	}()
 
-	logger.Info("Starting gRPC server...", zap.Int("port", prt))
+	logger.Info("Starting gRPC server...", zap.String("socket", *socket))
 
-	l, err := net.Listen("tcp", "[::]:"+strconv.Itoa(prt))
+	l, err := net.Listen("tcp", *socket)
 	if err != nil {
 		panic(err)
 	}
