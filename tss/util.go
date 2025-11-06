@@ -1,29 +1,20 @@
 package tss
 
 import (
-	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	frostdkg "github.com/xlabs/multi-party-sig/protocols/frost/keygen"
 	frostsign "github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 )
-
-type logableError struct {
-	cause      error
-	trackingId *common.TrackingID
-	round      signingRound
-}
 
 type set[T comparable] map[T]struct{}
 
@@ -35,6 +26,7 @@ type strPartyId string
 // a guardian is allowed to send how many messages it want per signature, but not allowed to
 // participate in more than maxActiveSignaturesPerGuardian signatures at a time.
 type activeSigCounter struct {
+	// TODO: Merge with rateLimiter in party/limiter.go
 	mtx sync.RWMutex
 
 	digestToGuardians map[sigKey]set[strPartyId]
@@ -129,48 +121,6 @@ func (c *activeSigCounter) cleanSelf(maxDuration time.Duration) {
 
 }
 
-func (l logableError) Error() string {
-	if l.cause == nil {
-		return ""
-	}
-
-	return l.cause.Error()
-}
-
-// Unwrap ensures logableError supports errors.Is and errors.As methods.
-func (l logableError) Unwrap() error {
-	return l.cause
-}
-
-func logErr(l *zap.Logger, err error) {
-	if l == nil {
-		return
-	}
-
-	if err == nil {
-		return
-	}
-
-	informativeErr, ok := err.(logableError)
-	if !ok {
-		l.Error(err.Error())
-
-		return
-	}
-
-	var zapFields []zap.Field
-	if informativeErr.trackingId != nil {
-		zapFields = append(zapFields, zap.String("trackingId", informativeErr.trackingId.ToString()))
-		zapFields = append(zapFields, zap.String("chainID", extractChainIDFromTrackingID(informativeErr.trackingId).String()))
-	}
-
-	if informativeErr.round != "" {
-		zapFields = append(zapFields, zap.String("round", string(informativeErr.round)))
-	}
-
-	l.Error(informativeErr.Error(), zapFields...)
-}
-
 var (
 	ErrBroadcastIsNil     = fmt.Errorf("broadcast is nil")
 	ErrNilPartyId         = fmt.Errorf("party id is nil")
@@ -214,7 +164,7 @@ func validateHashEchoMessageCorrectForm(v *tsscommv1.SignedMessage_HashEcho) err
 		return errNilEcho
 	}
 
-	if len(v.HashEcho.OriginalContetDigest) != len(digest{}) {
+	if len(v.HashEcho.OriginalContentDigest) != len(digest{}) {
 		return errEchoDigestBadSize
 	}
 
@@ -267,14 +217,6 @@ var _intToRoundArr = []signingRound{
 	round5Message,
 }
 
-func intToRound(i int) signingRound {
-	if i < 0 || i > 2 {
-		return ""
-	}
-
-	return _intToRoundArr[i-1]
-}
-
 func getRound(m common.ParsedMessage) (signingRound, error) {
 	if m == nil {
 		return "", fmt.Errorf("message is nil")
@@ -293,7 +235,7 @@ func getRound(m common.ParsedMessage) (signingRound, error) {
 }
 
 // ensures content of a known broadcast type.
-func isKnownBroadcastType(m common.ParsedMessage) bool {
+func isBroadcastType(m common.ParsedMessage) bool {
 	switch m.Content().(type) {
 	case *frostsign.Broadcast2, *frostsign.Broadcast3:
 		return true
@@ -309,7 +251,7 @@ func isKnownBroadcastType(m common.ParsedMessage) bool {
 	}
 }
 
-func isKnownUnicastType(m common.ParsedMessage) bool {
+func isUnicastType(m common.ParsedMessage) bool {
 	switch m.Content().(type) {
 	case *cmpsign.Message2, *cmpsign.Message3, *cmpsign.Message4:
 		return true
@@ -317,25 +259,6 @@ func isKnownUnicastType(m common.ParsedMessage) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func intoChannelOrDone[T any](ctx context.Context, c chan T, v T) error {
-	select {
-	case c <- v:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("error sending to channel: %w", ctx.Err())
-	}
-}
-
-func outOfChannelOrDone[T any](ctx context.Context, c chan T) (T, error) {
-	var v T
-	select {
-	case v = <-c:
-		return v, nil
-	case <-ctx.Done():
-		return v, ctx.Err()
 	}
 }
 
@@ -358,42 +281,46 @@ func (st *GuardianStorage) validateTrackingIDForm(tid *common.TrackingID) error 
 	return nil
 }
 
-func extractChainIDFromTrackingID(tid *common.TrackingID) vaa.ChainID {
-	bts := [2]byte{}
-	copy(bts[:], tid.AuxiliaryData)
-
-	return vaa.ChainID(binary.BigEndian.Uint16(bts[:]))
-}
-
-func chainIDToBytes(chainID vaa.ChainID) []byte {
-	bts := [2]byte{}
-	binary.BigEndian.PutUint16(bts[:], uint16(chainID))
-
-	return bts[:]
-}
-
-// sigKey contains two main parts of common.TrackID: the digest and the chainID.
-// it doesan't contain the faulty bitmap since we want to point to the same signature even if the faulty bitmap changes.
-type sigKey [party.DigestSize + auxiliaryDataSize]byte
-
-func intoSigKey(dgst party.Digest, chain vaa.ChainID) sigKey {
-	var key sigKey
-
-	copy(key[:party.DigestSize], dgst[:])
-	copy(key[party.DigestSize:], chainIDToBytes(chain))
-
-	return key
-}
+type sigKey string
 
 func trackingIdIntoSigKey(tid *common.TrackingID) sigKey {
-	dgst := party.Digest{}
-	copy(dgst[:], tid.Digest)
-
-	return intoSigKey(dgst, extractChainIDFromTrackingID(tid))
+	return sigKey(tid.ToString())
 }
 
 type SenderIndex uint32
 
 func (s SenderIndex) toProto() uint32 {
 	return uint32(s)
+}
+
+var discardLogger = zap.NewNop()
+
+func validateTrackingID(tid *common.TrackingID) error {
+	if tid == nil {
+		return fmt.Errorf("trackingID is nil or empty")
+	}
+
+	if _, err := tid.GetProtocolType(); err != nil {
+		return fmt.Errorf("trackingID has invalid protocol type: %w", err)
+	}
+
+	if len(tid.GetDigest()) != digestSize {
+		return fmt.Errorf("trackingID has invalid digest size: expected %d bytes, got %d bytes", digestSize, len(tid.GetDigest()))
+	}
+
+	if len(tid.GetAuxiliaryData()) > maxAuxiliaryDataSize {
+		return fmt.Errorf("trackingID has invalid auxiliary data size")
+	}
+
+	// since GetPartiesState is a bit array, we need to convert it to bools.
+	if len(tid.GetPartiesState()) == 0 {
+		return nil
+
+	}
+
+	if len(tid.GetPartiesState()) > maxParties/8 {
+		return fmt.Errorf("trackingID has invalid parties state size")
+	}
+
+	return nil
 }

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 
 	common "github.com/xlabs/tss-common"
 )
@@ -43,6 +43,7 @@ type serialzeable interface {
 type deliverable interface {
 	serialzeable
 
+	getTrackingID() *common.TrackingID
 	deliver(*Engine) error
 }
 
@@ -96,10 +97,14 @@ func (p *parsedHashEcho) getUUID(loadDistKey []byte) uuid {
 // this is used by the broadcast protocol to check no two messages from the same sender will be used to update the full party
 // in the same round for the specific session of the protocol.
 func serializeTSSMessage(msg common.Message) []byte {
-	// The TackingID of a parsed message is tied to the run of the protocol for a single
+	// The TrackingID of a parsed message is tied to the run of the protocol for a single
 	//  signature, thus we use it as a sessionID.
+
+	tidString := []byte(msg.WireMsg().GetTrackingID().ToString())
+
+	// Assumes the trackingID is of the correct size. (see validateTrackingIDForm).
 	messageTrackingID := [trackingIDHexStrSize]byte{}
-	copy(messageTrackingID[:], []byte(msg.WireMsg().GetTrackingID().ToString()))
+	copy(messageTrackingID[:], tidString)
 
 	fromId := [pemKeySize]byte{}
 	copy(fromId[:], []byte(msg.GetFrom().GetID()))
@@ -126,11 +131,7 @@ func (p *parsedTssContent) wrapError(err error) error {
 		return err
 	}
 
-	return logableError{
-		cause:      err,
-		trackingId: p.getTrackingID(),
-		round:      p.signingRound,
-	}
+	return common.NewTrackableError(err, "", p.Content().RoundNumber(), nil, p.getTrackingID(), nil)
 }
 
 func (p *parsedTssContent) getTrackingID() *common.TrackingID {
@@ -332,8 +333,6 @@ func (t *Engine) validateBroadcastState(s *broadcaststate, parsed broadcastMessa
 		s.verifiedDigest = &signedMsgHash
 
 	} else if *s.verifiedDigest != signedMsgHash {
-		// TODO: VaaV1 leader can cause two signatures with the same trackingID, to run.
-		//       Perhaps we need to add auxilary data to the uuid to remove this bug.
 		if err := t.verifySignedMessage(uid, unparsedSignedMessage); err != nil {
 			// two different digest and bad signature.
 			return fmt.Errorf("caught bad behaviour: Echoer %v sent a digest that can't be verified", src.Hostname)

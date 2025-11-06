@@ -6,24 +6,25 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
+	"errors"
 	"fmt"
 
 	"sync"
 	"sync/atomic"
 	"time"
 
-	whcommon "github.com/certusone/wormhole/node/pkg/common"
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
 	ethcommon "github.com/ethereum/go-ethereum/common"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	frosteth "github.com/xlabs/multi-party-sig/pkg/eth"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type uuid digest // distinguishing between types to avoid confusion.
@@ -42,9 +43,9 @@ type Engine struct {
 	fpParams *party.Parameters
 	fp       party.FullParty
 
-	fpCommChans    fpCommunicationChannels
-	sigOutChan     chan *common.SignatureData // actual sig output.
-	messageOutChan chan Sendable
+	fpCommChans      fpCommunicationChannels
+	signResponseChan chan *signer.SignResponse // actual sig output.
+	messageOutChan   chan Sendable
 
 	started         atomic.Uint32
 	msgSerialNumber uint64
@@ -54,13 +55,6 @@ type Engine struct {
 	received map[uuid]*broadcaststate
 
 	sigCounter activeSigCounter
-
-	// informs a central tracker of the guardian's actions.
-	ftCommandChan chan ftCommand
-
-	SignatureMetrics sync.Map
-
-	gst *whcommon.GuardianSetState
 }
 
 type PEM []byte
@@ -79,7 +73,7 @@ type Configurations struct {
 	LeaderIdentity PEM // The public key of the leader in PEM format.
 
 	// The list of chains that use ECDSA signatures.
-	EcdsaChains []vaa.ChainID
+
 }
 
 // GuardianStorage is a struct that holds the data needed for a guardian to participate in the TSS protocol
@@ -121,9 +115,9 @@ func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
 	return &storage, nil
 }
 
-// ProducedSignature lets a listener receive the output signatures once they're ready.
-func (t *Engine) ProducedSignature() <-chan *common.SignatureData {
-	return t.sigOutChan
+// Responses lets a listener receive the output signatures once they're ready.
+func (t *Engine) Responses() <-chan *signer.SignResponse {
+	return t.signResponseChan
 }
 
 // ProducedOutputMessages ensures a listener can send the output messages to the network.
@@ -139,20 +133,14 @@ func (st *GuardianStorage) GetCertificate() *tls.Certificate {
 var (
 	errNilTssEngine        = fmt.Errorf("tss engine is nil")
 	errTssEngineNotStarted = fmt.Errorf("tss engine hasn't started")
+	errNilSignRequest      = fmt.Errorf("sign request is nil")
+
+	errDigestSize = errors.New("digest size is not 32 bytes")
+	errFPNotSet   = errors.New("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
 )
 
 // BeginAsyncThresholdSigningProtocol used to start the TSS protocol over a specific msg.
-
-func (t *Engine) BeginAsyncThresholdSigningProtocol(vaaDigest []byte, chainID vaa.ChainID, consistencyLvl uint8) error {
-	return t.beginTSSSign(vaaDigest, chainID, consistencyLvl, signingMeta{})
-}
-
-type signingMeta struct {
-	isFromVaav1   bool
-	verifiedVAAv1 *vaa.VAA
-}
-
-func (t *Engine) beginTSSSign(vaaDigest []byte, chainID vaa.ChainID, consistencyLvl uint8, mt signingMeta) error {
+func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) error {
 	if t == nil {
 		return errNilTssEngine
 	}
@@ -162,109 +150,79 @@ func (t *Engine) beginTSSSign(vaaDigest []byte, chainID vaa.ChainID, consistency
 	}
 
 	if t.fp == nil {
-		return fmt.Errorf("tss engine is not set up correctly, use NewReliableTSS to create a new engine")
+		return errFPNotSet
 	}
 
-	if len(vaaDigest) != digestSize {
-		return fmt.Errorf("vaaDigest length is not 32 bytes")
+	if req == nil {
+		return errNilSignRequest
 	}
 
-	d := party.Digest{}
-	copy(d[:], vaaDigest)
-
-	sigtask := party.SigningTask{
-		Digest: d,
-		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      t.getExcludedFromCommittee(mt),
-		AuxiliaryData: chainIDToBytes(chainID),
-		ProtocolType:  t.getProtocolForChain(chainID),
-	}
-
-	if err := t.prepareThenAnounceNewDigest(sigtask, consistencyLvl, mt); err != nil {
-		return err
-	}
-
-	sigPrepInfo, err := t.getSigPrepInfo(chainID, d)
+	protocol, err := common.ProtocolTypeFromString(req.Protocol)
 	if err != nil {
 		return err
 	}
 
-	t.logger.Info("signature for VAA requested",
-		zap.String("digest", fmt.Sprintf("%x", vaaDigest)),
-		zap.String("chainID", chainID.String()),
-		zap.Uint8("consistency", consistencyLvl),
-		zap.Bool("isFromVaav1", mt.isFromVaav1),
-		zap.Int("numMatchingTrackIDS", len(sigPrepInfo.alreadyStartedSigningTrackingIDs)),
+	if protocol != common.ProtocolECDSASign && protocol != common.ProtocolFROSTSign {
+		return fmt.Errorf("unsupported signing protocol: %s", req.Protocol)
+	}
+
+	if len(req.Digest) != digestSize {
+		return errDigestSize
+	}
+
+	d := party.Digest{}
+	copy(d[:], req.Digest)
+
+	excluded := []*common.PartyID{}
+	if len(req.Committee) != 0 {
+		members, err := t.translateEthCommitteeMembers(req.Committee)
+		if err != nil {
+			return err
+		}
+
+		excluded = t.findExcludeesFromCommittee(members)
+	}
+
+	return t.beginTSSSign(protocol, d, excluded)
+}
+
+func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, fauilties []*common.PartyID) error {
+	sigtask := party.SigningTask{
+		Digest: d,
+		// indicating the reviving guardian will be given a chance to join the protocol.
+		Faulties:      fauilties,
+		AuxiliaryData: nil, // not used anymore.
+		ProtocolType:  protocolType,
+	}
+
+	t.logger.Info("signature requested",
+		zap.String("digest", fmt.Sprintf("%x", d[:])),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
-
-	t.createSignatureMetrics(vaaDigest, chainID)
 
 	info, err := t.fp.GetSigningInfo(sigtask)
 	if err != nil {
 		return fmt.Errorf("couldnt generate signing task: %w", err)
 	}
 
-	if sigPrepInfo.alreadyStartedSigningTrackingIDs[trackidStr(info.TrackingID.ToString())] {
-		return nil // skipping signing.
-	}
-
-	// TODO: cosider not recomputing the info, and just used it from `t.fp.GetSigningInfo(sigTask)`
-	info, err = t.fp.AsyncRequestNewSignature(sigtask)
-
-	if err != nil {
+	if err := validateTrackingID(info.TrackingID); err != nil {
 		return err
 	}
 
-	flds := []zap.Field{
-		zap.String("trackingID", info.TrackingID.ToString()),
-		zap.String("ChainID", chainID.String()),
-		zap.Any("committee", t.getCommitteeNetworkNames(info.SigningCommittee)),
+	info, err = t.fp.AsyncRequestNewSignature(sigtask)
+	if err != nil {
+		return err
 	}
 
 	t.logger.Info(
 		"guardian started signing protocol",
-		flds...,
+
+		zap.String("trackingID", info.TrackingID.ToString()),
+		// zap.String("ChainID", chainID.String()),
+		zap.Any("committee", t.getCommitteeNetworkNames(info.SigningCommittee)),
 	)
 
-	scmd := signCommand{SigningInfo: info, passedToFP: true, signingMeta: mt, digestconsistancy: consistencyLvl}
-	if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, &scmd); err != nil {
-		t.logger.Error("couldn't inform the tracker of the signature start",
-			zap.Error(err),
-			zap.String("trackingID", info.TrackingID.ToString()),
-		)
-
-		return err
-	}
-
 	return nil
-}
-
-// getExcludedFromCommittee follows the Leader's recommendation for the committee
-// by returning the list of guardians that should be excluded from the committee (as 'faulties' list).
-func (t *Engine) getExcludedFromCommittee(mt signingMeta) []*common.PartyID {
-	if !mt.isFromVaav1 || mt.verifiedVAAv1 == nil {
-		return nil
-	}
-
-	signersID, err := t.translateVaaV1Signers(mt.verifiedVAAv1)
-	if err != nil {
-		return nil
-	}
-
-	if len(signersID) < t.GuardianStorage.Threshold {
-		return nil // not enough guardians to form a committee.
-	}
-
-	// grab everyone that is not a signer in the VAAv1.
-	var excludedSigners []*common.PartyID
-	for _, id := range t.GuardianStorage.Identities {
-		if _, ok := signersID[id.CommunicationIndex]; !ok {
-			excludedSigners = append(excludedSigners, id.Pid)
-		}
-	}
-
-	return excludedSigners
 }
 
 func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
@@ -281,75 +239,6 @@ func (t *Engine) getCommitteeNetworkNames(pids []*common.PartyID) []string {
 	}
 
 	return ids
-}
-
-func (t *Engine) SetGuardianSetState(gss *whcommon.GuardianSetState) error {
-	if gss == nil {
-		return fmt.Errorf("guardian set state is nil")
-	}
-
-	if t == nil {
-		return errNilTssEngine
-	}
-
-	if t.started.Load() != notStarted {
-		return fmt.Errorf("tss engine has started, and cannot receive new guardian set state")
-	}
-
-	t.gst = gss
-
-	return nil
-}
-
-func (t *Engine) getSigPrepInfo(chainID vaa.ChainID, d party.Digest) (sigPreparationInfo, error) {
-	cmd := prepareToSignCommand{
-		ChainID: chainID,
-		Digest:  d,
-		reply:   make(chan sigPreparationInfo, 1),
-	}
-
-	if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, &cmd); err != nil {
-		return sigPreparationInfo{}, fmt.Errorf("failed to request for inactive guardians: %w", err)
-	}
-
-	// waiting for the reply.
-	sigPrepInfo, err := outOfChannelOrDone(t.ctx, cmd.reply)
-	if err != nil {
-		return sigPreparationInfo{}, fmt.Errorf("failed to get inactive guardians: %w", err)
-	}
-
-	return sigPrepInfo, nil
-}
-
-// prepareThenAnounceNewDigest updates the inner state of the engine before announcing to others about a new digest seen.
-func (t *Engine) prepareThenAnounceNewDigest(sigtask party.SigningTask, consistencyLvl uint8, mt signingMeta) error {
-	signinginfo, err := t.fp.GetSigningInfo(sigtask)
-	if err != nil {
-		return fmt.Errorf("couldnt generate signing task: %w", err)
-	}
-
-	sgCmd := &signCommand{
-		SigningInfo:       signinginfo,
-		passedToFP:        false, // set to true only after FP actually received the message.
-		digestconsistancy: consistencyLvl,
-		signingMeta:       mt,
-	}
-
-	if err := intoChannelOrDone[ftCommand](t.ctx, t.ftCommandChan, sgCmd); err != nil {
-		return fmt.Errorf("couldn't inform the tracker of the signature start: %w", err)
-	}
-
-	return nil
-}
-
-func (t *Engine) getProtocolForChain(chainID vaa.ChainID) common.ProtocolType {
-	for _, ecdsaChain := range t.GuardianStorage.EcdsaChains {
-		if ecdsaChain == chainID {
-			return common.ProtocolECDSASign
-		}
-	}
-
-	return common.ProtocolFROSTSign
 }
 
 func NewKeyGenerator(storage *GuardianStorage) (KeyGenerator, error) {
@@ -401,7 +290,7 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 	t := &Engine{
 		ctx: nil,
 
-		logger:          &zap.Logger{},
+		logger:          discardLogger,
 		GuardianStorage: *storage,
 
 		fpParams: fpParams,
@@ -414,8 +303,8 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 			KeygenOutputChannel:    make(chan *party.TSSSecrets, 1), // shouldn't output often.
 		},
 
-		sigOutChan:     make(chan *common.SignatureData, storage.maxSimultaneousSignatures),
-		messageOutChan: make(chan Sendable, expectedMsgs),
+		signResponseChan: make(chan *signer.SignResponse, storage.maxSimultaneousSignatures),
+		messageOutChan:   make(chan Sendable, expectedMsgs),
 
 		msgSerialNumber: 0,
 		mtx:             &sync.Mutex{},
@@ -424,8 +313,6 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		started: atomic.Uint32{}, // default value is 0
 
 		sigCounter: newSigCounter(),
-
-		ftCommandChan: make(chan ftCommand, expectedMsgs),
 	}
 
 	return t, nil
@@ -436,7 +323,7 @@ func (t *Engine) MaxTTL() time.Duration {
 }
 
 // Start starts the TSS engine, and listens for the outputs of the full party.
-func (t *Engine) Start(ctx context.Context) error {
+func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 	if t == nil {
 		return fmt.Errorf("tss engine is nil")
 	}
@@ -446,9 +333,13 @@ func (t *Engine) Start(ctx context.Context) error {
 	}
 
 	t.ctx = ctx
-	t.logger = supervisor.Logger(ctx).
-		With(zap.String("hostname", t.GuardianStorage.Self.Hostname)).
-		Named("tss")
+
+	if zapLogger != nil {
+		t.logger = zapLogger.
+			With(zap.String("hostname", t.GuardianStorage.Self.NetworkName())).
+			Named("engine")
+		t.logger.Debug("TSS Engine logger initialized")
+	}
 
 	if err := t.fp.Start(party.OutputChannels(t.fpCommChans)); err != nil {
 		t.started.Store(notStarted)
@@ -459,8 +350,6 @@ func (t *Engine) Start(ctx context.Context) error {
 	// closing the t.fp.start inside th listener
 	go t.fpListener()
 
-	go t.sigTracker()
-
 	leaderIdentity, err := t.GuardianStorage.fetchIdentityFromKeyPEM(t.LeaderIdentity)
 	if err != nil {
 		return fmt.Errorf("leader identity not found in guardian storage: %w", err)
@@ -469,7 +358,6 @@ func (t *Engine) Start(ctx context.Context) error {
 	t.logger.Info(
 		"tss engine started",
 		zap.Any("configs", t.GuardianStorage.Configurations),
-		zap.Bool("hasGuardianSet", t.gst != nil),
 		zap.String("leaderID", leaderIdentity.Hostname),
 	)
 
@@ -555,6 +443,55 @@ func (t *Engine) handleFPWarning(warn *party.Warning) {
 		return
 	}
 
+	t.logReceivedWarning(warn)
+
+	if warn.TrackingID == nil {
+		return
+	}
+
+	tid := warn.TrackingID
+	tidStr := tid.ToString()
+
+	prot, err := tid.GetProtocolType()
+	if err != nil {
+		t.logger.Error("failed to get protocol type from trackingID while reporting warning", zap.String("trackingId", tidStr), zap.Error(err))
+		return
+	}
+
+	clprt := []*common.PartyID{}
+	if warn.PossibleCulprit != nil {
+		clprt = append(clprt, warn.PossibleCulprit)
+	}
+	// report warning to output channel:
+	w := signer.WarningDetails{
+		Culprits: clprt, // TODO: consider translate into eth address.
+		Round:    int32(warn.SessionRound),
+	}
+
+	dt, err := anypb.New(&w)
+	if err != nil {
+		t.logger.Error("failed to create Any proto for warning details", zap.Error(err))
+		return
+	}
+
+	resp := &signer.SignResponse{
+		Response: &signer.SignResponse_Status{
+			Status: &signer.SignStatus{
+				// TODO: improve code mapping. currently using PermissionDenied since we warn when peers send
+				// messages when not in committee or when they send more than one message.
+				Code:     int32(codes.PermissionDenied),
+				Message:  warn.Message,
+				Details:  dt,
+				Digest:   tid.GetDigest(),
+				Protocol: prot.ToString(),
+			},
+		},
+	}
+
+	t.sendResp(resp, tidStr)
+}
+
+func (t *Engine) logReceivedWarning(warn *party.Warning) {
 	flds := []zap.Field{}
 
 	if warn.TrackingID != nil {
@@ -588,64 +525,108 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 
 	t.sigCounter.remove(sig.TrackingId)
 
-	select {
-	case t.ftCommandChan <- &SigEndCommand{sig.TrackingId}:
-	default:
-		// This is a warning, since the ftTracker will eventually clean the sigState matching the trackingID.
-		t.logger.Warn(
-			"couldn't inform the tracker of the signature end",
-			zap.String("trackingId", sig.TrackingId.ToString()),
-		)
-	}
-
-	select {
-	case t.sigOutChan <- sig:
-	default:
-		// if the signature can't be delivered, we can't do much about it.
-		t.logger.Error(
-			"Couldn't deliver the signature, signature output channel buffer is full",
-			zap.String("trackingId", sig.TrackingId.ToString()),
-		)
-	}
-
-	t.sigMetricDone(sig.TrackingId, false) // false since there were no issues.
+	t.sendResp(
+		&signer.SignResponse{
+			Response: &signer.SignResponse_Signature{Signature: sig},
+		},
+		sig.TrackingId.ToString(),
+	)
 }
 
-func (t *Engine) handleFpError(err *common.Error) {
-	if err == nil {
-		return
-	}
-
-	trackid := err.TrackingId()
+// recceives an error, logs it and wraps it as a response to the output channel.
+func (t *Engine) handleFpError(detailedErr *common.Error) {
+	trackid := t.reportDetailedErr(detailedErr)
 	if trackid == nil {
-		t.logger.Error("error (without trackingID) in signing protocol ", zap.Error(err.Cause()))
-
 		return
-	}
-
-	select {
-	case t.ftCommandChan <- &SigEndCommand{trackid}:
-	default:
-		t.logger.Error("couldn't inform the tracker of signature end due to error",
-			zap.Error(err),
-			zap.String("trackingId", trackid.ToString()),
-		)
 	}
 
 	// if someone sent a message that caused an error -> we don't
 	// accept an override to that message, therefore, we can remove it, since it won't change.
 	t.sigCounter.remove(trackid)
 
-	logErr(t.logger, &logableError{
-		fmt.Errorf("error in signing protocol: %w", err.Cause()),
-		trackid,
-		intToRound(err.Round()),
-	})
+	t.logger.Error(
+		"received detailed error from tss-lib.FullParty",
+		zap.String("trackingId", trackid.ToString()),
+		zap.Any("details", detailedErr),
+	)
+}
 
-	t.sigMetricDone(trackid, true)
+func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID {
+	if detailedErr == nil {
+		return nil
+	}
+
+	trackid := detailedErr.TrackingId()
+	if trackid == nil {
+		t.logger.Error(
+			"Can't output error: missing trackingID ",
+			zap.Any("details", detailedErr),
+		)
+
+		return nil
+	}
+
+	tidStr := trackid.ToString()
+	pp, err := trackid.GetProtocolType()
+	if err != nil {
+		t.logger.Error(
+			"error while reporting fp error.couldn't get protocol type from trackingID",
+			zap.String("trackingId", tidStr),
+			zap.Error(err),
+		)
+	}
+
+	dt, err := anypb.New(&signer.ErrorDetails{
+		Task:     detailedErr.Task(),
+		Round:    int32(detailedErr.Round()),
+		Culprits: detailedErr.Culprits(),
+	})
+	if err != nil {
+		t.logger.Error(
+			"error while reporting fp error. couldn't create errDetails proto",
+			zap.String("trackingId", tidStr),
+			zap.Error(err),
+		)
+	}
+
+	resp := &signer.SignResponse{
+		Response: &signer.SignResponse_Status{
+			Status: &signer.SignStatus{
+				Code:     int32(codes.Internal), // TODO: Improve error code mapping.
+				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Cause().Error()),
+				Digest:   trackid.GetDigest(),
+				Protocol: pp.ToString(),
+				Details:  dt,
+			},
+		},
+	}
+
+	t.sendResp(resp, tidStr)
+
+	return trackid
+}
+
+func (t *Engine) sendResp(resp *signer.SignResponse, tidStr string) {
+	select {
+	case t.signResponseChan <- resp:
+	default:
+		flds := []zap.Field{}
+		if tidStr != "" {
+			flds = append(flds, zap.String("trackingId", tidStr))
+		}
+
+		flds = append(flds, zap.String("responseType", fmt.Sprintf("%T", resp.Response)))
+
+		// if the signature can't be delivered, we can't do much about it.
+		t.logger.Error("Couldn't deliver SignResponse, output channel buffer is full", flds...)
+	}
 }
 
 func (t *Engine) handleFpOutput(m common.Message) {
+	if m == nil {
+		return
+	}
+
 	tssMsg, err := t.intoSendable(m)
 	if err == nil {
 
@@ -660,48 +641,25 @@ func (t *Engine) handleFpOutput(m common.Message) {
 		return
 	}
 
-	// else log error:
-	lgErr := logableError{
-		fmt.Errorf("failed to convert tss message and send it to network: %w", err),
-		m.WireMsg().GetTrackingID(),
-		"",
+	if m.WireMsg() == nil {
+		t.logger.Error("received message with nil WireMsg, can't report error further", zap.Error(err))
+
+		return
 	}
 
-	// The following should always pass, since FullParty outputs a
-	// common.ParsedMessage and a valid message with a specific round.
-	if parsed, ok := m.(common.ParsedMessage); ok {
-		if rnd, e := getRound(parsed); e == nil {
-			lgErr.round = rnd
-		}
-	}
-
-	logErr(t.logger, lgErr)
+	t.reportDetailedErr(
+		common.NewTrackableError(
+			fmt.Errorf("received err %w while trying to send %T", err, m.Type()),
+			"handleFpOutput:intoSendable",
+			-1,
+			nil,
+			m.WireMsg().TrackingID,
+		),
+	)
 }
 
 func (t *Engine) cleanup(maxTTL time.Duration) {
 	now := time.Now()
-
-	keysToBeRemoved := make([]any, 0)
-
-	t.SignatureMetrics.Range(func(k, v any) bool {
-		mt, ok := v.(*signatureMetadata)
-		if !ok {
-			keysToBeRemoved = append(keysToBeRemoved, k)
-
-			return true
-		}
-
-		tmp := now.Sub(mt.timeOfCreation)
-		if tmp > maxTTL {
-			keysToBeRemoved = append(keysToBeRemoved, k)
-		}
-
-		return true
-	})
-
-	for _, k := range keysToBeRemoved {
-		t.SignatureMetrics.Delete(k)
-	}
 
 	t.sigCounter.cleanSelf(maxTTL)
 
@@ -773,7 +731,7 @@ func (t *Engine) HandleIncomingTssMessage(msg Incoming) {
 	}
 
 	if err := t.handleIncomingTssMessage(msg); err != nil {
-		logErr(t.logger, err)
+		t.logger.Error("failed to handle incoming TSS message", zap.Error(err))
 	}
 }
 
@@ -824,8 +782,8 @@ func (t *Engine) makeEcho(m Incoming, parsed broadcastMessage) *Echo {
 		Signature: e.Message.Signature,
 		Content: &tsscommv1.SignedMessage_HashEcho{
 			HashEcho: &tsscommv1.HashEcho{
-				SessionUuid:          uuid[:],
-				OriginalContetDigest: contentDigest[:],
+				SessionUuid:           uuid[:],
+				OriginalContentDigest: contentDigest[:],
 			},
 		},
 	}
@@ -867,8 +825,6 @@ func (t *Engine) feedIncomingToFp(parsed common.ParsedMessage) error {
 	maxLiveSignatures := t.GuardianStorage.maxSimultaneousSignatures
 
 	if ok := t.sigCounter.add(trackId, from, maxLiveSignatures); !ok {
-		tooManySimulSigsErrCntr.Inc()
-
 		return fmt.Errorf("guardian %v has reached the maximum number of simultaneous signatures", id.Hostname)
 	}
 
@@ -887,10 +843,6 @@ func (t *Engine) handleUnicast(m Incoming) error {
 	}
 
 	switch v := unicast.Content.(type) {
-	case *tsscommv1.Unicast_Vaav1:
-		if err := t.handleUnicastVaaV1(v); err != nil {
-			return fmt.Errorf("failed to handle unicast vaav1: %w", err)
-		}
 	case *tsscommv1.Unicast_Tss:
 		if err := t.handleUnicastTSS(v, m.GetSource()); err != nil {
 			return fmt.Errorf("failed to handle unicast tss message: %w", err)
@@ -914,8 +866,12 @@ func (t *Engine) handleUnicastTSS(v *tsscommv1.Unicast_Tss, src *Identity) error
 		return err
 	}
 
-	if !isKnownUnicastType(fpmsg) {
+	if !isUnicastType(fpmsg) {
 		return fmt.Errorf("unknown unicast message type received: %T", fpmsg.Content())
+	}
+
+	if err := validateTrackingID(fpmsg.getTrackingID()); err != nil {
+		return err
 	}
 
 	err = t.validateUnicastDoesntExist(fpmsg)

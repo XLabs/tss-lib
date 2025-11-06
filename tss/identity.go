@@ -8,9 +8,9 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 	"google.golang.org/protobuf/proto"
 )
 

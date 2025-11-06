@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -34,13 +33,18 @@ func hashSignedMessage(msg *tsscommv1.SignedMessage) digest {
 		b = bytes.NewBuffer(nil)
 
 		b.Write(m.TssContent.Payload)
-		vaa.MustWrite(b, binary.BigEndian, m.TssContent.MsgSerialNumber)
 
-		vaa.MustWrite(b, binary.BigEndian, msg.Sender)
+		serNum := [8]byte{}
+		binary.BigEndian.PutUint64(serNum[:], m.TssContent.MsgSerialNumber)
+		b.Write(serNum[:])
+
+		sender := [4]byte{}
+		binary.BigEndian.PutUint32(sender[:], msg.Sender)
+		b.Write(sender[:])
 
 	case *tsscommv1.SignedMessage_HashEcho:
 		d := digest{}
-		copy(d[:], m.HashEcho.OriginalContetDigest)
+		copy(d[:], m.HashEcho.OriginalContentDigest)
 
 		return d
 	}

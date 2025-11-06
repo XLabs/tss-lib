@@ -1,7 +1,7 @@
 package tss
 
 import (
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"google.golang.org/protobuf/proto"
 )
 

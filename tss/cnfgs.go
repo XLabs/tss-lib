@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -17,6 +16,7 @@ import (
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-lib/v2/party"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 func (s *GuardianStorage) unmarshalFromJSON(storageData []byte) error {
@@ -63,10 +63,6 @@ func (s *GuardianStorage) attemptLoadTssSecrets() error {
 func (st *GuardianStorage) storeCmpConf(cnf *party.TSSSecrets) error {
 	if cnf == nil {
 		return fmt.Errorf("TSSSecrets is nil")
-	}
-
-	if len(st.Configurations.EcdsaChains) == 0 {
-		return nil // we do not need to load cmp config since there are no chains that use ecdsa.
 	}
 
 	// also validates conf != nil.

@@ -4,10 +4,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
-
-	"github.com/xlabs/multi-party-sig/protocols/frost/keygen"
-	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
+	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
+	frostdkg "github.com/xlabs/multi-party-sig/protocols/frost/keygen"
+	frostsign "github.com/xlabs/multi-party-sig/protocols/frost/sign"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -17,8 +17,11 @@ var tssProtoMessageNames = []string{}
 var tssProtoMessageSize = 0
 
 func init() {
-	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(sign.File_proto_frost_signing_proto)...)
-	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(keygen.File_proto_frost_keygen_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(frostsign.File_proto_frost_signing_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(cmpsign.File_proto_cmp_signing_proto)...)
+
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(frostdkg.File_proto_frost_keygen_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(cmpdkg.File_proto_cmp_keygen_proto)...)
 
 	for _, name := range tssProtoMessageNames {
 		tssProtoMessageSize = max(tssProtoMessageSize, len(name))
@@ -38,7 +41,8 @@ func extractProtoTypeNames(protoreflectDesc protoreflect.FileDescriptor) []strin
 const (
 	DefaultPort = "8998"
 
-	digestSize = 32
+	digestSize           = 32
+	maxAuxiliaryDataSize = 32
 
 	notStarted uint32 = 0 // using 0 since it's the default value
 	started    uint32 = 1
@@ -47,13 +51,11 @@ const (
 	hostnameSize = 255
 	pemKeySize   = 178
 
-	// auxiliaryData is emmiterChain in bytes.
-	auxiliaryDataSize = int(unsafe.Sizeof(vaa.ChainID(0)))
-	maxParties        = 256
+	maxParties = 256
 
 	// hex string sizes use 2x since each byte is represented by 2 hex characters
 	// e.g. 0xFF = "FF"
-	auxiliaryDataStrHexSize  = 2 * auxiliaryDataSize
+	auxStrHexSize            = 2 * maxAuxiliaryDataSize
 	maxPartiesStrHexSize     = 2 * (maxParties / 8) // divided by 8 since it's a bitmap
 	digestStrHexSize         = 2 * digestSize
 	protocolTypeSize         = int(unsafe.Sizeof(uint8(0))) // uint8 currently
@@ -64,7 +66,7 @@ const (
 	// *Digest is 32 bytes (sha256)
 	// *AuxiliaryData is 2 bytes (emitterChain)
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
-	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxiliaryDataStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
+	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 
 	defaultMaxLiveSignatures = 20000
 
@@ -92,12 +94,6 @@ const (
 
 	defaultMaxDownTimeJitter = time.Minute
 	maxHeartbeatInterval     = defaultGuardianDownTime
-
-	// Consistency levels (following https://wormhole.com/docs/build/reference/consistency-levels/):
-	instantConsistencyLevel uint8 = vaa.ConsistencyLevelPublishImmediately // low consistancy
-
-	pythnetFinalizedConsistencyLevel uint8 = 1
-	solanaFinalizedConsistencyLevel  uint8 = 1
 
 	senderIndexSize = int(unsafe.Sizeof(SenderIndex(0)))
 )

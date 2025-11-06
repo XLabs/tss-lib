@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	engine "github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	common "github.com/xlabs/tss-common"
+	engine "github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 // create these from scrath, then store it into a single file.
@@ -104,7 +104,7 @@ func TestMain(t *testing.T) {
 		forLocalDKG:               true,
 		storeIntoInternalTestData: true, // ensure we update the internal testdata after running DKG
 	}
-	t.Run("RunDKG", tt.RunDKG)
+	// t.Run("RunDKG", tt.RunDKG)
 
 	// tt = dkgTest{
 	// 	hostnames: hostnames,

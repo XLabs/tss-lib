@@ -3,8 +3,8 @@ package tss
 import (
 	"fmt"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
 	common "github.com/xlabs/tss-common"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 )
 
 func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
@@ -36,8 +36,12 @@ func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
 			return nil, err
 		}
 
-		if !isKnownBroadcastType(p) {
+		if !isBroadcastType(p) {
 			return nil, fmt.Errorf("unknown broadcast message received: %T. sender: %s", p.Content(), m.GetSource().NetworkName())
+		}
+
+		if err := validateTrackingID(p.WireMsg().GetTrackingID()); err != nil {
+			return nil, err
 		}
 
 		parsed := &parsedTssContent{p, ""}
@@ -49,12 +53,6 @@ func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
 		}
 
 		parsed.signingRound = rnd
-
-		// TODO: once keygen/reshare is implemented, we need to redefine this check, since we'll be using unicasts in round 1.
-		// according to gg18 (tss ecdsa paper), unicasts are sent in these rounds.
-		// if rnd == round1Message1 || rnd == round2Message {
-		// 	return res, errBadRoundsInBroadcast
-		// }
 
 		if err := t.validateTrackingIDForm(parsed.getTrackingID()); err != nil {
 			return res, err

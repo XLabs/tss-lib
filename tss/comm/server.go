@@ -10,14 +10,14 @@ import (
 	"net"
 	"time"
 
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/gogo/status"
+	"github.com/xlabs/tss-lib/v2/tss"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 type connection struct {
@@ -321,7 +321,7 @@ func (s *server) Send(inStream tsscommv1.DirectLink_SendServer) error {
 			s.logger.Error(
 				"error receiving from guardian. Closing connection",
 				zap.Error(err),
-				zap.String("peer", clientId.Hostname),
+				zap.String("peer", clientId.NetworkName()),
 			)
 
 			return status.Error(codes.Unknown, "error receiving message from client "+err.Error()) //fmt.Errorf("received error while receiving message: %w", err)

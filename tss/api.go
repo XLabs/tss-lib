@@ -6,13 +6,13 @@ import (
 	"crypto/x509"
 	"time"
 
-	whcommon "github.com/certusone/wormhole/node/pkg/common"
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
 	ethcommon "github.com/ethereum/go-ethereum/common"
-	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
+	"go.uber.org/zap"
 )
 
 type message interface {
@@ -57,9 +57,14 @@ type ReliableMessenger interface {
 
 // Signer is the interface to give any component with the ability to authorise a new threshold signature over a message.
 type Signer interface {
-	// for consistency level see https://wormhole.com/docs/build/reference/consistency-levels/
-	BeginAsyncThresholdSigningProtocol(vaaDigest []byte, chainID vaa.ChainID, vaaconsistency uint8) error
-	ProducedSignature() <-chan *common.SignatureData
+	// starts a new threshold signing protocol over the given digest (32 bytes).
+	// aux is optional auxiliary data that can be used to distinguish different signing
+	// requests over the same digest.
+	// returns error if the signing protocol couldn't be started.
+	BeginAsyncThresholdSigningProtocol(*signer.SignRequest) error
+
+	// outputs a channel that will produce signature data once available.
+	Responses() <-chan *signer.SignResponse
 
 	// Since signatures may be produced for different protocols (FROST, CMP),
 	// we need to be able to query the public key and the address for each protocol.
@@ -69,15 +74,13 @@ type Signer interface {
 	// tells the maximal duration one might wait on a signature to be produced
 	// (realisticly, it should be produced within a few seconds).
 	MaxTTL() time.Duration
-
-	// WitnessNewVaa is a method to witness a new VAA, andto start a signing protocol for it.
-	WitnessNewVaa(v *vaa.VAA) error
 }
 
 type Starter interface {
 	// Start deploys the component and allocates its resources.
 	// The context is used to control the lifetime of the component.
-	Start(ctx context.Context) error
+	// if logger is not nil, the component should use it for logging.
+	Start(ctx context.Context, logger *zap.Logger) error
 }
 
 type KeyGenerator interface {
@@ -101,6 +104,4 @@ type ReliableTSS interface {
 	// or via a hash-broadcast protocol.
 	ReliableMessenger
 	Signer
-
-	SetGuardianSetState(gs *whcommon.GuardianSetState) error
 }

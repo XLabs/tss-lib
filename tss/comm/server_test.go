@@ -16,12 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/internal/testutils"
-	tsscommv1 "github.com/certusone/wormhole/node/pkg/proto/tsscomm/v1"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
-	"github.com/certusone/wormhole/node/pkg/tss"
-	"github.com/certusone/wormhole/node/pkg/tss/internal"
 	"github.com/stretchr/testify/require"
+	"github.com/xlabs/tss-lib/v2/tss"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
+	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
+	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -81,12 +80,13 @@ func TestTLSConnectAndRedial(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(2)
 	a.NoError(err)
 
-	tmpSrvr, err := newServer(workingServerSock, supervisor.Logger(ctx), &mockTssMessageHandler{
+	tmpSrvr, err := newServer(workingServerSock, logger, &mockTssMessageHandler{
 		chn:      nil,
 		selfCert: en[0].GetCertificate(),
 		// connect to no one.
@@ -118,7 +118,7 @@ func TestTLSConnectAndRedial(t *testing.T) {
 	a.NoError(err)
 
 	msgChan := make(chan tss.Sendable)
-	srvr, err := newServer("localhost:5930", supervisor.Logger(ctx), &mockTssMessageHandler{
+	srvr, err := newServer("localhost:5930", logger, &mockTssMessageHandler{
 		chn:              msgChan,
 		selfCert:         en[1].GetCertificate(),
 		peersToConnectTo: []*x509.Certificate{serverCert}, // will ask to fetch each peer (and return the below peerId)
@@ -158,7 +158,8 @@ func TestRelentlessReconnections(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(2)
 	a.NoError(err)
@@ -168,7 +169,7 @@ func TestRelentlessReconnections(t *testing.T) {
 	a.NoError(err)
 
 	msgChan := make(chan tss.Sendable)
-	srvr, err := newServer("localhost:5930", supervisor.Logger(ctx), &mockTssMessageHandler{
+	srvr, err := newServer("localhost:5930", logger, &mockTssMessageHandler{
 		chn:              msgChan,
 		selfCert:         en[1].GetCertificate(),
 		peersToConnectTo: []*x509.Certificate{serverCert}, // will ask to fetch each peer (and return the below peerId)
@@ -185,7 +186,7 @@ func TestRelentlessReconnections(t *testing.T) {
 	// setting up server dailer and sender
 	srv.run()
 
-	tmpSrvr, err := newServer(workingServerSock, supervisor.Logger(ctx), &mockTssMessageHandler{
+	tmpSrvr, err := newServer(workingServerSock, logger, &mockTssMessageHandler{
 		chn:      nil,
 		selfCert: en[0].GetCertificate(),
 		// connect to no one.
@@ -252,7 +253,7 @@ func TestNonBlockedBroadcast(t *testing.T) {
 	workingServers := []string{"localhost:5500", "localhost:5501"}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(3)
 	a.NoError(err)
@@ -260,7 +261,7 @@ func TestNonBlockedBroadcast(t *testing.T) {
 	donechns := make([]chan struct{}, 2)
 	// set servers up.
 	for i := 0; i < 2; i++ {
-		tmpSrvr, err := newServer(workingServers[i], supervisor.Logger(ctx), &mockTssMessageHandler{
+		tmpSrvr, err := newServer(workingServers[i], logger, &mockTssMessageHandler{
 			chn:              nil,
 			selfCert:         en[i].GetCertificate(),
 			peersToConnectTo: en[0].GetPeers(), // Give the peer a certificate.
@@ -310,7 +311,7 @@ func TestNonBlockedBroadcast(t *testing.T) {
 	en[2].GuardianStorage.SetInnerFields()
 
 	msgChan := make(chan tss.Sendable)
-	srvr, err := newServer("localhost:5930", supervisor.Logger(ctx), &tssMockJustForMessageGeneration{
+	srvr, err := newServer("localhost:5930", logger, &tssMockJustForMessageGeneration{
 		ReliableMessenger: en[2],
 		chn:               msgChan,
 	})
@@ -528,9 +529,9 @@ func TestNotAcceptNonCAs(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
-	tmp, err := newServer(workingServerSock, supervisor.Logger(ctx), &mockTssMessageHandler{
+	tmp, err := newServer(workingServerSock, logger, &mockTssMessageHandler{
 		chn:      nil,
 		selfCert: en[0].GetCertificate(),
 		// connect to no one.
@@ -611,7 +612,7 @@ func TestDialWithDefaultPort(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(3)
 	a.NoError(err)
@@ -621,7 +622,7 @@ func TestDialWithDefaultPort(t *testing.T) {
 
 	listenerServerPath := "localhost:" + tss.DefaultPort
 	// set up server that only listent and aren't able to connect to anyone.
-	listenerServer, err := newServer(listenerServerPath, supervisor.Logger(ctx), &mockTssMessageHandler{
+	listenerServer, err := newServer(listenerServerPath, logger, &mockTssMessageHandler{
 		chn:      nil,
 		selfCert: listenerEngine.GetCertificate(),
 		// the listening server will expect this cert to connect with.
@@ -666,7 +667,7 @@ func TestDialWithDefaultPort(t *testing.T) {
 	a.NoError(communicatingEngine.GuardianStorage.SetInnerFields())
 
 	msgChan := make(chan tss.Sendable)
-	communicator, err := newServer("localhost:5930", supervisor.Logger(ctx), &tssMockJustForMessageGeneration{
+	communicator, err := newServer("localhost:5930", logger, &tssMockJustForMessageGeneration{
 		ReliableMessenger: communicatingEngine,
 		chn:               msgChan,
 	})
@@ -711,7 +712,7 @@ func TestDialWithDefaultPortDeliverCorrectSrc(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(3)
 	a.NoError(err)
@@ -751,7 +752,7 @@ func TestDialWithDefaultPortDeliverCorrectSrc(t *testing.T) {
 	senderEngine.GuardianStorage.SetInnerFields()
 
 	incomingDataChan := make(chan tss.Incoming)
-	listenerServer, err := newServer(streamReceiverPath, supervisor.Logger(ctx),
+	listenerServer, err := newServer(streamReceiverPath, logger,
 		&mockJustHandleIncomingMessage{
 			ReliableMessenger: streamReceiverEngine,
 			receivedData:      incomingDataChan,
@@ -773,7 +774,7 @@ func TestDialWithDefaultPortDeliverCorrectSrc(t *testing.T) {
 	go gserver.Serve(l)
 
 	msgChan := make(chan tss.Sendable)
-	sender, err := newServer("nonsensePort", supervisor.Logger(ctx), &tssMockJustForMessageGeneration{
+	sender, err := newServer("nonsensePort", logger, &tssMockJustForMessageGeneration{
 		ReliableMessenger: senderEngine,
 		chn:               msgChan,
 	})
@@ -825,7 +826,7 @@ func TestConnectingToServers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(5)
 	a.NoError(err)
@@ -844,8 +845,8 @@ func TestConnectingToServers(t *testing.T) {
 		}
 
 		e.GuardianStorage.SetInnerFields()
-		e.Start(ctx)
-		s, err := newServer(e.GuardianStorage.Self.NetworkName(), supervisor.Logger(ctx), &mockProduceOutputMessages{
+		e.Start(ctx, logger)
+		s, err := newServer(e.GuardianStorage.Self.NetworkName(), logger, &mockProduceOutputMessages{
 			mockJustHandleIncomingMessage: mockJustHandleIncomingMessage{
 				ReliableMessenger: e,
 				receivedData:      incomingMsgChn[i],
@@ -887,12 +888,12 @@ func TestDetectConnectionsDone(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(2)
 	a.NoError(err)
 
-	tmpSrvr, err := newServer(workingServerSock, supervisor.Logger(ctx), &mockTssMessageHandler{
+	tmpSrvr, err := newServer(workingServerSock, logger, &mockTssMessageHandler{
 		chn:      nil,
 		selfCert: en[0].GetCertificate(),
 		// connect to no one.
@@ -924,7 +925,7 @@ func TestDetectConnectionsDone(t *testing.T) {
 	a.NoError(err)
 
 	msgChan := make(chan tss.Sendable)
-	srvr, err := newServer("localhost:5930", supervisor.Logger(ctx), &mockTssMessageHandler{
+	srvr, err := newServer("localhost:5930", logger, &mockTssMessageHandler{
 		chn:              msgChan,
 		selfCert:         en[1].GetCertificate(),
 		peersToConnectTo: []*x509.Certificate{serverCert}, // will ask to fetch each peer (and return the below peerId)
@@ -967,7 +968,7 @@ func TestSocketPathCreation(t *testing.T) {
 	a := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	ctx = testutils.MakeSupervisorContext(ctx)
+	logger := testutils.NewTestLogger(t)
 
 	en, err := _loadGuardians(2)
 	a.NoError(err)
@@ -975,7 +976,7 @@ func TestSocketPathCreation(t *testing.T) {
 	en[0].Self.Port = 1233456
 	en[0].GuardianStorage.Identities[en[0].Self.CommunicationIndex].Port = 1233456
 
-	tmpSrvr, err := NewServer(supervisor.Logger(ctx), en[0])
+	tmpSrvr, err := NewServer(logger, en[0])
 	a.NoError(err)
 
 	a.Equal(fmt.Sprintf("[::]:%d", en[0].Self.Port), tmpSrvr.(*server).socketPath)
@@ -983,7 +984,7 @@ func TestSocketPathCreation(t *testing.T) {
 	// now checking correct behavior when port is 0
 	en[1].Self.Port = 0
 	en[1].GuardianStorage.Identities[en[1].Self.CommunicationIndex].Port = 0
-	tmpSrvr2, err := NewServer(supervisor.Logger(ctx), en[1])
+	tmpSrvr2, err := NewServer(logger, en[1])
 	a.NoError(err)
 	a.Equal(fmt.Sprintf("[::]:%s", tss.DefaultPort), tmpSrvr2.(*server).socketPath)
 

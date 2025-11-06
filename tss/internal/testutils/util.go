@@ -1,16 +1,14 @@
 package testutils
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"runtime"
+	"testing"
 
-	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // MustGetMockGuardianTssStorage returns the path to a mock guardian storage file.
@@ -36,29 +34,17 @@ func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...strin
 	return guardianStorageFname, nil
 }
 
-func MakeSupervisorContext(ctx context.Context) context.Context {
-	var supervisedCtx context.Context
-
-	logger := zap.New(
-		zapcore.NewCore(
-			zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
-			zapcore.AddSync(zapcore.Lock(os.Stderr)),
-			zap.NewAtomicLevelAt(zapcore.Level(zapcore.DebugLevel)),
-		),
-	)
-
-	// used to block this function until the supervisor sets the supervisedCtx
-	barrier := make(chan struct{})
-
-	supervisor.New(ctx, logger, func(ctx context.Context) error {
-		supervisedCtx = ctx
-
-		close(barrier)
-
-		<-ctx.Done()
-		return ctx.Err()
+func NewTestLogger(t testing.TB) *zap.Logger {
+	core, recorded := observer.New(zap.DebugLevel)
+	t.Cleanup(func() {
+		logs := recorded.All()
+		for _, log := range logs {
+			t.Logf("TSS LOG [%s]: %s\n", log.Level.String(), log.Message)
+			for _, field := range log.Context {
+				t.Logf("    %s: %v\n", field.Key, field.Interface)
+			}
+		}
 	})
 
-	<-barrier
-	return supervisedCtx
+	return zap.New(core)
 }
