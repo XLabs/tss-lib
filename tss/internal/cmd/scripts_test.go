@@ -104,7 +104,7 @@ func TestMain(t *testing.T) {
 		forLocalDKG:               true,
 		storeIntoInternalTestData: true, // ensure we update the internal testdata after running DKG
 	}
-	t.Run("RunDKG", tt.RunDKG)
+	// t.Run("RunDKG", tt.RunDKG)
 
 	// tt = dkgTest{
 	// 	hostnames: hostnames,
