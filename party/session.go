@@ -518,8 +518,8 @@ func (session *singleSession) extractOutput() (*TSSSecrets, *common.SignatureDat
 	case frost.Signature:
 		sig, err := frostSigToCommonSig(&res, session.self, session.trackingId)
 		return nil, sig, err
-	case *ecdsa.Signature:
-		sig, err := ecdsaSigToCommonSig(res, session.self, session.trackingId)
+	case ecdsa.Signature:
+		sig, err := ecdsaSigToCommonSig(&res, session.self, session.trackingId)
 		return nil, sig, err
 	default:
 		return nil, nil, common.NewTrackableError(

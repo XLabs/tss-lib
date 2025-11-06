@@ -37,8 +37,8 @@ type Impl struct {
 
 	sessionMap *sessionMap
 
-	incomingMessagesChannel chan feedMessageTask
-	startSignerTaskChan     chan *singleSession
+	frostWorkerChans workerChans
+	ecdsaWorkerChans workerChans
 
 	outputChannels OutputChannels
 
@@ -50,6 +50,11 @@ type Impl struct {
 	rateLimiter rateLimiter
 
 	pool *pool.Pool
+}
+
+type workerChans struct {
+	incomingMessages chan feedMessageTask // used to feed incoming messages to the worker
+	startSigner      chan *singleSession  // used to start a signer on the worker
 }
 
 func hash(msg []byte) Digest {
@@ -72,23 +77,15 @@ func (p *Impl) cleanupWorker() {
 }
 
 // The worker serves as messages courier to all singelSession instances.
-func (p *Impl) worker() {
+func (p *Impl) worker(chns workerChans) {
 	defer p.workersWg.Done()
 
 	for {
 		select {
-		case task := <-p.incomingMessagesChannel:
-			switch task.message.Content().GetProtocol() {
-			case common.ProtocolFROSTSign, common.ProtocolFROSTDKG,
-				common.ProtocolECDSADKG, common.ProtocolECDSASign:
-				p.handleMessage(task)
-			default:
-				p.outputChannels.ErrChannel <- common.NewError(errors.New("received unknown message type"), "incomingMessage", 0, p.self, task.message.GetFrom())
-			}
-
-		case signer := <-p.startSignerTaskChan:
+		case task := <-chns.incomingMessages:
+			p.handleMessage(task)
+		case signer := <-chns.startSigner:
 			p.startSigner(signer)
-
 		case <-p.ctx.Done():
 			return
 		}
@@ -112,8 +109,11 @@ func (p *Impl) Start(out OutputChannels) error {
 	p.workersWg.Add(numHandlerWorkers + 1) // +1 for cleanup worker.
 
 	// since the worker needs to contend for locks, we can add more than the number of CPUs.
-	for i := 0; i < numHandlerWorkers; i++ {
-		go p.worker()
+	for i := 0; i < numHandlerWorkers/2; i++ {
+		go p.worker(p.frostWorkerChans)
+	}
+	for i := 0; i < numHandlerWorkers/2; i++ {
+		go p.worker(p.ecdsaWorkerChans)
 	}
 
 	go p.cleanupWorker()
@@ -132,22 +132,27 @@ func (p *Impl) Stop() {
 	p.pool.TearDown()
 }
 
-var ErrNoConfig = errors.New("signing protocol not configured")
+var (
+	ErrNoConfig          = errors.New("signing protocol not configured")
+	ErrDkgHasNoPublicKey = errors.New("dkg protocols have no public key to use")
+)
 
 func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
 	switch t {
-	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
+	case common.ProtocolECDSASign:
 		if p.ecdsaConfig == nil {
 			return nil, ErrNoConfig
 		}
 
 		return p.ecdsaConfig.PublicPoint().Clone(), nil
-	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
+	case common.ProtocolFROSTSign:
 		if p.frostConfig == nil {
 			return nil, ErrNoConfig
 		}
 
 		return p.frostConfig.PublicKey.Clone(), nil
+	case common.ProtocolFROSTDKG, common.ProtocolECDSADKG:
+		return nil, ErrDkgHasNoPublicKey
 	default:
 		return nil, fmt.Errorf("public not found for: %s", t.ToString())
 	}
@@ -174,11 +179,16 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 		return nil, err
 	}
 
+	wrkrchan := p.frostWorkerChans
+	if s.ProtocolType == common.ProtocolECDSASign {
+		wrkrchan = p.ecdsaWorkerChans
+	}
+
 	select {
 	case <-p.ctx.Done():
 		return nil, p.ctx.Err()
 
-	case p.startSignerTaskChan <- signer:
+	case wrkrchan.startSigner <- signer:
 	}
 
 	return info, nil
@@ -478,13 +488,29 @@ func (p *Impl) Update(message common.ParsedMessage) error {
 		return fmt.Errorf("unknown sender: %s", message.GetFrom().ToString())
 	}
 
+	chn := p.frostWorkerChans
+	protocol, err := trackid.GetProtocolType()
+	if err != nil {
+		return err
+	}
+
+	switch protocol {
+	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
+		chn = p.frostWorkerChans
+	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
+		chn = p.ecdsaWorkerChans
+	default:
+		return fmt.Errorf("unsupported protocol type in message: %s", protocol.ToString())
+	}
+
+	// we check rate limiting last so we don't have to cancel it if the message is invalid.
 	canFeed := p.rateLimiter.add(message.WireMsg().GetTrackingID(), peer)
 	if !canFeed {
 		return fmt.Errorf("peer %v has reached the maximum number of simultaneous sessions", peerID)
 	}
 
 	select {
-	case p.incomingMessagesChannel <- feedMessageTask{message: message}:
+	case chn.incomingMessages <- feedMessageTask{message: message}:
 		return nil
 	case <-p.ctx.Done():
 		return p.ctx.Err()
@@ -651,7 +677,6 @@ func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
 	s.committee = common.SortPartyIDs(p.peers)
 
 	var sessionCreator protocol.StartFunc
-	// sessionCreator := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
 
 	switch s.protocol {
 	// TODO: find a nice way to merge all the switch cases that inspect protocol type.
