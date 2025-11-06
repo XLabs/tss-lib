@@ -1,0 +1,60 @@
+package tss
+
+import (
+	"errors"
+	"fmt"
+
+	ethcommon "github.com/ethereum/go-ethereum/common"
+	common "github.com/xlabs/tss-common"
+)
+
+var errRepeatingCommitteeMembers = errors.New("couldn't map all committee members")
+var errCommitteeTooSmall = errors.New("committee is too small")
+
+func (st *GuardianStorage) translateEthCommitteeMembers(committee [][]byte) (map[SenderIndex]*Identity, error) {
+	signersID := make(map[SenderIndex]*Identity, len(committee))
+
+	for _, member := range committee {
+		if len(member) != ethcommon.AddressLength {
+			return nil, fmt.Errorf("invalid committee member length: %d", len(member))
+		}
+
+		memberAddress := ethcommon.BytesToAddress(member)
+		id, err := st.fetchIdentityFromVaav1Pubkey(memberAddress)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't map committee member %s to guardian identity: %w", memberAddress.String(), err)
+		}
+
+		signersID[id.CommunicationIndex] = id
+	}
+
+	if len(signersID) != len(committee) {
+		return nil, errRepeatingCommitteeMembers
+	}
+
+	if st.Threshold > len(signersID) {
+		return nil, errCommitteeTooSmall
+	}
+
+	return signersID, nil
+}
+
+func (t *Engine) findExcludeesFromCommittee(members map[SenderIndex]*Identity) []*common.PartyID {
+	if len(members) == 0 {
+		return nil
+	}
+
+	if len(members) < t.GuardianStorage.Threshold {
+		return nil // not enough guardians to form a committee.
+	}
+
+	// grab everyone that is not in the committee
+	var excludedSigners []*common.PartyID
+	for _, id := range t.GuardianStorage.Identities {
+		if _, ok := members[id.CommunicationIndex]; !ok {
+			excludedSigners = append(excludedSigners, id.Pid)
+		}
+	}
+
+	return excludedSigners
+}
