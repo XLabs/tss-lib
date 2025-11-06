@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -685,7 +686,7 @@ func (b *badtssMessage) IsBroadcast() bool              { panic("unimplemented")
 func (b *badtssMessage) IsToOldAndNewCommittees() bool  { panic("unimplemented") }
 func (b *badtssMessage) IsToOldCommittee() bool         { panic("unimplemented") }
 func (b *badtssMessage) String() string                 { panic("unimplemented") }
-func (b *badtssMessage) Type() string                   { panic("unimplemented") }
+func (b *badtssMessage) Type() string                   { return "badmessageType" }
 func (b *badtssMessage) WireMsg() *common.MessageWrapper {
 	return &common.MessageWrapper{
 		TrackingID: nil,
@@ -1212,7 +1213,15 @@ func msgHandler(ctx context.Context, engines []*Engine, numDiffSigsExpected int)
 							continue
 						}
 						unicast(m, chns, engine)
-					case sig := <-engine.ProducedSignature():
+					case s := <-engine.Responses():
+						tmp, ok := s.Response.(*signer.SignResponse_Signature)
+						if !ok {
+							fmt.Printf("received non-signature response from engine (%T), ignoring.\n", s.Response)
+							continue
+						}
+
+						sig := tmp.Signature
+
 						mustVerify(sig, engine)
 
 						lck.Lock()
@@ -1516,7 +1525,10 @@ func TestSigCounter(t *testing.T) {
 			M:                 []byte{},
 			TrackingId:        parsed.getTrackingID(),
 		}
-		<-e1.sigOutChan
+		s := <-e1.signResponseChan
+		_, ok := s.Response.(*signer.SignResponse_Signature)
+		a.True(ok, "expected signature response. got %T", s.Response)
+
 		time.Sleep(time.Second * 1)
 		a.Equal(e1.sigCounter.digestToGuardiansLen(), 0)
 	})
@@ -1708,7 +1720,7 @@ func TestDKG(t *testing.T) {
 	}
 }
 
-func TestHandleFPWarning_IntegrationStyle_UsesEngineBootstrap(t *testing.T) {
+func TestHandleFPWarningLogging(t *testing.T) {
 	// Create engines & give them their normal logger via your loader.
 	engines, err := loadGuardians(5, "tss5")
 	if err != nil {
@@ -1775,9 +1787,6 @@ func TestHandleFPWarning_IntegrationStyle_UsesEngineBootstrap(t *testing.T) {
 	}
 	e.handleFPWarning(w)
 
-	if logs.Len() != 1 {
-		t.Fatalf("engine expected 1 log, got %d", logs.Len())
-	}
 	entry = logs.All()[0]
 	if entry.Level != zapcore.WarnLevel {
 		t.Fatalf("engine expected warn level, got %v", entry.Level)
@@ -1802,16 +1811,10 @@ func TestHandleFPWarning_IntegrationStyle_UsesEngineBootstrap(t *testing.T) {
 	e.logger = zap.New(core)
 	w.PossibleCulprit = e.Self.Pid
 	e.handleFPWarning(w)
-	if logs.Len() != 1 {
-		t.Fatalf("engine expected 1 log, got %d", logs.Len())
-	}
 	got = observerToMap(logs.All()[0])
 	if got["possibleCulprit"] != e.Self.Hostname {
 		t.Fatalf("engine expected possibleCulprit field mismatch: got %q, want %q", got["possibleCulprit"], e.Self.Hostname)
 	}
-	// if got["trackingId"] != "trk-123" {
-	//     t.Fatalf("engine %d: trackingId mismatch: got %q, want %q", i, got["trackingId"], "trk-123")
-	// }
 }
 
 func TestTranslateEthCommitteeMembers(t *testing.T) {
@@ -2024,4 +2027,195 @@ func TestHandleIncomingTssMessage_NilHashEcho(t *testing.T) {
 
 	// Results in a panic, because the HashEcho is nil.
 	_ = receiver.handleIncomingTssMessage(incoming)
+}
+
+func TestEngineErrorAndWarningHandling(t *testing.T) { // Renamed the function
+	a := assert.New(t)
+	// Create engines & give them their normal logger via your loader.
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	e := engines[0]                                          // Use the first engine for testing
+	e.signResponseChan = make(chan *signer.SignResponse, 10) // Buffer to avoid blocking
+
+	// Start the engine once. The logger will be swapped for observed ones in sub-tests.
+	// Use a nop logger for the initial start to avoid polluting the global observedLogs if any.
+	if err := e.Start(ctx, zap.New(zapcore.NewNopCore())); err != nil {
+		t.Fatalf("engine.Start failed: %v", err)
+	}
+
+	// --- Test handleFPWarning ---
+	t.Run("handleFPWarning", func(t *testing.T) {
+		// 1) nil warning => no logs
+		e.handleFPWarning(nil)
+		select {
+		case <-e.signResponseChan:
+			a.Fail("unexpected message on signResponseChan for nil warning")
+		default:
+			// Expected
+		}
+
+		// 2) empty message => no logs
+		e.handleFPWarning(&party.Warning{Message: ""})
+		select {
+		case <-e.signResponseChan:
+			a.Fail("unexpected message on signResponseChan for empty message warning")
+		default:
+			// Expected
+		}
+
+		// 3) message only => single warn, no structured fields
+		msgOnly := &party.Warning{Message: "just a note"}
+		e.handleFPWarning(msgOnly)
+		// Ensure no response is sent for message-only warning without TrackingID
+		select {
+		case <-e.signResponseChan:
+			a.Fail("unexpected message on signResponseChan for message-only warning")
+		default:
+			// Expected
+		}
+
+		// 4) protocol + round + nil culprit => fields for protocol, round; no possibleCulprit
+		dgst := sha512.Sum512_256([]byte("123"))
+		tid := &common.TrackingID{
+			Digest:        dgst[:],
+			PartiesState:  []byte{0xFF}, // Assuming maxParties is 256, this covers all.
+			AuxiliaryData: []byte{dgst[0]},
+			Protocol:      uint32(common.ProtocolFROSTSign.ToInt()),
+		}
+		w := &party.Warning{
+			Message:      "something happened",
+			Protocol:     common.ProtocolFROSTSign,
+			SessionRound: round.Number(7),
+			TrackingID:   tid,
+			// PossibleCulprit is nil on purpose → fetch should fail/skip, so field omitted
+		}
+		e.handleFPWarning(w)
+
+		// Check response on signResponseChan
+		select {
+		case resp := <-e.signResponseChan:
+			a.NotNil(resp, "expected a response on signResponseChan")
+			statusResp := resp.GetStatus()
+			a.NotNil(statusResp, "expected a status response")
+			a.Equal(int32(codes.PermissionDenied), statusResp.Code)
+			a.Contains(statusResp.Message, w.Message)
+			a.Equal(tid.GetDigest(), statusResp.Digest)
+			a.Equal(common.ProtocolFROSTSign.ToString(), statusResp.Protocol)
+			var details signer.WarningDetails
+			err := statusResp.Details.UnmarshalTo(&details)
+			a.NoError(err)
+			a.Len(details.Culprits, 0) // No culprit if PossibleCulprit is nil or not found
+			a.Equal(int32(7), details.Round)
+		default:
+			a.Fail("expected message on signResponseChan for valid warning")
+		}
+
+		// last but not least, adding a valid culprit:
+		w.PossibleCulprit = e.Identities[1].Pid // Use an existing identity as culprit
+		e.handleFPWarning(w)
+
+		// Check response on signResponseChan again for culprit
+		select {
+		case resp := <-e.signResponseChan:
+			a.NotNil(resp, "expected a response on signResponseChan")
+			statusResp := resp.GetStatus()
+			a.NotNil(statusResp, "expected a status response")
+			var details signer.WarningDetails
+			err := statusResp.Details.UnmarshalTo(&details)
+			a.NoError(err)
+			a.Len(details.Culprits, 1)
+			a.True(details.Culprits[0].Equals(e.Identities[1].Pid))
+		default:
+			a.Fail("expected message on signResponseChan for valid warning with culprit")
+		}
+	})
+
+	// --- Test handleFpError ---
+	t.Run("handleFpError", func(t *testing.T) {
+		// Scenario 1: detailedErr is nil
+		e.handleFpError(nil)
+		select {
+		case <-e.signResponseChan:
+			a.Fail("unexpected message on signResponseChan for nil detailedErr")
+		default:
+			// Expected
+		}
+
+		// Scenario 2: detailedErr has a nil TrackingID
+		errWithNilTID := common.NewError(errors.New("some error"), "task", 1, e.Self.Pid)
+		e.handleFpError(errWithNilTID)
+		select {
+		case <-e.signResponseChan:
+			a.Fail("unexpected message on signResponseChan for error with nil TrackingID")
+		default:
+			// Expected
+		}
+
+		// Scenario 3: detailedErr has a valid TrackingID
+		initialSigCount := e.sigCounter.digestToGuardiansLen()
+
+		// Add a dummy entry to sigCounter to ensure `remove` has an effect
+		dummyDigest := party.Digest{1, 2, 3}
+		dummyTID := &common.TrackingID{
+			Digest:        dummyDigest[:],
+			PartiesState:  []byte{0xFF},
+			AuxiliaryData: []byte{},
+			Protocol:      uint32(common.ProtocolFROSTSign.ToInt()),
+		}
+		// Simulate a guardian participating in a signature
+		e.sigCounter.add(dummyTID, e.Self.Pid, 10)
+		a.Equal(initialSigCount+1, e.sigCounter.digestToGuardiansLen(), "expected sigCounter to increase")
+
+		testErr := errors.New("test error message")
+		detailedErr := common.NewTrackableError(
+			testErr,
+			"testTask",
+			2,
+			e.Self.Pid,
+			dummyTID,
+			e.Identities[1].Pid, // Culprit
+		)
+
+		e.handleFpError(detailedErr)
+
+		a.Equal(initialSigCount, e.sigCounter.digestToGuardiansLen(), "expected sigCounter to decrease after remove")
+
+		select {
+		case resp := <-e.signResponseChan:
+			a.NotNil(resp, "expected a response on signResponseChan")
+			statusResp := resp.GetStatus()
+			a.NotNil(statusResp, "expected a status response")
+			a.Equal(int32(codes.Internal), statusResp.Code)
+			a.Contains(statusResp.Message, testErr.Error())
+			a.Equal(dummyTID.GetDigest(), statusResp.Digest)
+			a.Equal(common.ProtocolFROSTSign.ToString(), statusResp.Protocol)
+			// Check details
+			var details signer.ErrorDetails
+			err := statusResp.Details.UnmarshalTo(&details)
+			a.NoError(err)
+			a.Equal("testTask", details.Task)
+			a.Equal(int32(2), details.Round)
+			a.Len(details.Culprits, 1)
+			a.True(details.Culprits[0].Equals(e.Identities[1].Pid))
+		default:
+			a.Fail("expected message on signResponseChan for error with valid TrackingID")
+		}
+	})
+}
+
+func TestGetEthAddress(t *testing.T) {
+	a := assert.New(t)
+
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	e := engines[0]
+
+	address, err := e.GetEthAddress(common.ProtocolFROSTSign)
+	a.NoError(err)
+	a.NotEmpty(address)
+
+	_, err = e.GetEthAddress("invalid_protocol")
+	a.Error(err)
 }

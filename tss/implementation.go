@@ -23,6 +23,8 @@ import (
 	"github.com/xlabs/tss-lib/v2/party"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type uuid digest // distinguishing between types to avoid confusion.
@@ -41,9 +43,9 @@ type Engine struct {
 	fpParams *party.Parameters
 	fp       party.FullParty
 
-	fpCommChans    fpCommunicationChannels
-	sigOutChan     chan *common.SignatureData // actual sig output.
-	messageOutChan chan Sendable
+	fpCommChans      fpCommunicationChannels
+	signResponseChan chan *signer.SignResponse // actual sig output.
+	messageOutChan   chan Sendable
 
 	started         atomic.Uint32
 	msgSerialNumber uint64
@@ -113,9 +115,9 @@ func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
 	return &storage, nil
 }
 
-// ProducedSignature lets a listener receive the output signatures once they're ready.
-func (t *Engine) ProducedSignature() <-chan *common.SignatureData {
-	return t.sigOutChan
+// Responses lets a listener receive the output signatures once they're ready.
+func (t *Engine) Responses() <-chan *signer.SignResponse {
+	return t.signResponseChan
 }
 
 // ProducedOutputMessages ensures a listener can send the output messages to the network.
@@ -301,8 +303,8 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 			KeygenOutputChannel:    make(chan *party.TSSSecrets, 1), // shouldn't output often.
 		},
 
-		sigOutChan:     make(chan *common.SignatureData, storage.maxSimultaneousSignatures),
-		messageOutChan: make(chan Sendable, expectedMsgs),
+		signResponseChan: make(chan *signer.SignResponse, storage.maxSimultaneousSignatures),
+		messageOutChan:   make(chan Sendable, expectedMsgs),
 
 		msgSerialNumber: 0,
 		mtx:             &sync.Mutex{},
@@ -441,6 +443,55 @@ func (t *Engine) handleFPWarning(warn *party.Warning) {
 		return
 	}
 
+	t.logReceivedWarning(warn)
+
+	if warn.TrackingID == nil {
+		return
+	}
+
+	tid := warn.TrackingID
+	tidStr := tid.ToString()
+
+	prot, err := tid.GetProtocolType()
+	if err != nil {
+		t.logger.Error("failed to get protocol type from trackingID while reporting warning", zap.String("trackingId", tidStr), zap.Error(err))
+		return
+	}
+
+	clprt := []*common.PartyID{}
+	if warn.PossibleCulprit != nil {
+		clprt = append(clprt, warn.PossibleCulprit)
+	}
+	// report warning to output channel:
+	w := signer.WarningDetails{
+		Culprits: clprt, // TODO: consider translate into eth address.
+		Round:    int32(warn.SessionRound),
+	}
+
+	dt, err := anypb.New(&w)
+	if err != nil {
+		t.logger.Error("failed to create Any proto for warning details", zap.Error(err))
+		return
+	}
+
+	resp := &signer.SignResponse{
+		Response: &signer.SignResponse_Status{
+			Status: &signer.SignStatus{
+				// TODO: improve code mapping. currently using PermissionDenied since we warn when peers send
+				// messages when not in committee or when they send more than one message.
+				Code:     int32(codes.PermissionDenied),
+				Message:  warn.Message,
+				Details:  dt,
+				Digest:   tid.GetDigest(),
+				Protocol: prot.ToString(),
+			},
+		},
+	}
+
+	t.sendResp(resp, tidStr)
+}
+
+func (t *Engine) logReceivedWarning(warn *party.Warning) {
 	flds := []zap.Field{}
 
 	if warn.TrackingID != nil {
@@ -474,26 +525,18 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 
 	t.sigCounter.remove(sig.TrackingId)
 
-	select {
-	case t.sigOutChan <- sig:
-	default:
-		// if the signature can't be delivered, we can't do much about it.
-		t.logger.Error(
-			"Couldn't deliver the signature, signature output channel buffer is full",
-			zap.String("trackingId", sig.TrackingId.ToString()),
-		)
-	}
+	t.sendResp(
+		&signer.SignResponse{
+			Response: &signer.SignResponse_Signature{Signature: sig},
+		},
+		sig.TrackingId.ToString(),
+	)
 }
 
-func (t *Engine) handleFpError(err *common.Error) {
-	if err == nil {
-		return
-	}
-
-	trackid := err.TrackingId()
+// recceives an error, logs it and wraps it as a response to the output channel.
+func (t *Engine) handleFpError(detailedErr *common.Error) {
+	trackid := t.reportDetailedErr(detailedErr)
 	if trackid == nil {
-		t.logger.Error("error (without trackingID) in signing protocol ", zap.Error(err.Cause()))
-
 		return
 	}
 
@@ -501,14 +544,89 @@ func (t *Engine) handleFpError(err *common.Error) {
 	// accept an override to that message, therefore, we can remove it, since it won't change.
 	t.sigCounter.remove(trackid)
 
-	logErr(t.logger, &logableError{
-		fmt.Errorf("error in signing protocol: %w", err.Cause()),
-		trackid,
-		intToRound(err.Round()),
+	t.logger.Error(
+		"received detailed error from tss-lib.FullParty",
+		zap.String("trackingId", trackid.ToString()),
+		zap.Any("details", detailedErr),
+	)
+}
+
+func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID {
+	if detailedErr == nil {
+		return nil
+	}
+
+	trackid := detailedErr.TrackingId()
+	if trackid == nil {
+		t.logger.Error(
+			"Can't output error: missing trackingID ",
+			zap.Any("details", detailedErr),
+		)
+
+		return nil
+	}
+
+	tidStr := trackid.ToString()
+	pp, err := trackid.GetProtocolType()
+	if err != nil {
+		t.logger.Error(
+			"error while reporting fp error.couldn't get protocol type from trackingID",
+			zap.String("trackingId", tidStr),
+			zap.Error(err),
+		)
+	}
+
+	dt, err := anypb.New(&signer.ErrorDetails{
+		Task:     detailedErr.Task(),
+		Round:    int32(detailedErr.Round()),
+		Culprits: detailedErr.Culprits(),
 	})
+	if err != nil {
+		t.logger.Error(
+			"error while reporting fp error. couldn't create errDetails proto",
+			zap.String("trackingId", tidStr),
+			zap.Error(err),
+		)
+	}
+
+	resp := &signer.SignResponse{
+		Response: &signer.SignResponse_Status{
+			Status: &signer.SignStatus{
+				Code:     int32(codes.Internal), // TODO: Improve error code mapping.
+				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Cause().Error()),
+				Digest:   trackid.GetDigest(),
+				Protocol: pp.ToString(),
+				Details:  dt,
+			},
+		},
+	}
+
+	t.sendResp(resp, tidStr)
+
+	return trackid
+}
+
+func (t *Engine) sendResp(resp *signer.SignResponse, tidStr string) {
+	select {
+	case t.signResponseChan <- resp:
+	default:
+		flds := []zap.Field{}
+		if tidStr != "" {
+			flds = append(flds, zap.String("trackingId", tidStr))
+		}
+
+		flds = append(flds, zap.String("responseType", fmt.Sprintf("%T", resp.Response)))
+
+		// if the signature can't be delivered, we can't do much about it.
+		t.logger.Error("Couldn't deliver SignResponse, output channel buffer is full", flds...)
+	}
 }
 
 func (t *Engine) handleFpOutput(m common.Message) {
+	if m == nil {
+		return
+	}
+
 	tssMsg, err := t.intoSendable(m)
 	if err == nil {
 
@@ -523,22 +641,21 @@ func (t *Engine) handleFpOutput(m common.Message) {
 		return
 	}
 
-	// else log error:
-	lgErr := logableError{
-		fmt.Errorf("failed to convert tss message and send it to network: %w", err),
-		m.WireMsg().GetTrackingID(),
-		"",
+	if m.WireMsg() == nil {
+		t.logger.Error("received message with nil WireMsg, can't report error further", zap.Error(err))
+
+		return
 	}
 
-	// The following should always pass, since FullParty outputs a
-	// common.ParsedMessage and a valid message with a specific round.
-	if parsed, ok := m.(common.ParsedMessage); ok {
-		if rnd, e := getRound(parsed); e == nil {
-			lgErr.round = rnd
-		}
-	}
-
-	logErr(t.logger, lgErr)
+	t.reportDetailedErr(
+		common.NewTrackableError(
+			fmt.Errorf("received err %w while trying to send %T", err, m.Type()),
+			"handleFpOutput:intoSendable",
+			-1,
+			nil,
+			m.WireMsg().TrackingID,
+		),
+	)
 }
 
 func (t *Engine) cleanup(maxTTL time.Duration) {

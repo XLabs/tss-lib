@@ -129,8 +129,8 @@ func (s *server) responseSender(stream signer.Signer_SignMessageServer, ch <-cha
 			return s.ctx.Err()
 		case <-stream.Context().Done():
 			return stream.Context().Err()
-		case sig := <-s.Signer.ProducedSignature():
-			SignResponse = wrapsig(sig)
+		case sig := <-s.Signer.Responses():
+			SignResponse = sig
 		case sig, ok := <-ch:
 			if !ok {
 				// Channel is closed.

@@ -1,7 +1,6 @@
 package tss
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -16,12 +15,6 @@ import (
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 )
-
-type logableError struct {
-	cause      error
-	trackingId *common.TrackingID
-	round      signingRound
-}
 
 type set[T comparable] map[T]struct{}
 
@@ -128,47 +121,6 @@ func (c *activeSigCounter) cleanSelf(maxDuration time.Duration) {
 
 }
 
-func (l logableError) Error() string {
-	if l.cause == nil {
-		return ""
-	}
-
-	return l.cause.Error()
-}
-
-// Unwrap ensures logableError supports errors.Is and errors.As methods.
-func (l logableError) Unwrap() error {
-	return l.cause
-}
-
-func logErr(l *zap.Logger, err error) {
-	if l == nil {
-		return
-	}
-
-	if err == nil {
-		return
-	}
-
-	informativeErr, ok := err.(logableError)
-	if !ok {
-		l.Error(err.Error())
-
-		return
-	}
-
-	var zapFields []zap.Field
-	if informativeErr.trackingId != nil {
-		zapFields = append(zapFields, zap.String("trackingId", informativeErr.trackingId.ToString()))
-	}
-
-	if informativeErr.round != "" {
-		zapFields = append(zapFields, zap.String("round", string(informativeErr.round)))
-	}
-
-	l.Error(informativeErr.Error(), zapFields...)
-}
-
 var (
 	ErrBroadcastIsNil     = fmt.Errorf("broadcast is nil")
 	ErrNilPartyId         = fmt.Errorf("party id is nil")
@@ -265,14 +217,6 @@ var _intToRoundArr = []signingRound{
 	round5Message,
 }
 
-func intToRound(i int) signingRound {
-	if i < 0 || i > 2 {
-		return ""
-	}
-
-	return _intToRoundArr[i-1]
-}
-
 func getRound(m common.ParsedMessage) (signingRound, error) {
 	if m == nil {
 		return "", fmt.Errorf("message is nil")
@@ -315,25 +259,6 @@ func isKnownUnicastType(m common.ParsedMessage) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func intoChannelOrDone[T any](ctx context.Context, c chan T, v T) error {
-	select {
-	case c <- v:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("error sending to channel: %w", ctx.Err())
-	}
-}
-
-func outOfChannelOrDone[T any](ctx context.Context, c chan T) (T, error) {
-	var v T
-	select {
-	case v = <-c:
-		return v, nil
-	case <-ctx.Done():
-		return v, ctx.Err()
 	}
 }
 

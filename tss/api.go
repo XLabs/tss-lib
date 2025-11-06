@@ -64,7 +64,7 @@ type Signer interface {
 	BeginAsyncThresholdSigningProtocol(*signer.SignRequest) error
 
 	// outputs a channel that will produce signature data once available.
-	ProducedSignature() <-chan *common.SignatureData
+	Responses() <-chan *signer.SignResponse
 
 	// Since signatures may be produced for different protocols (FROST, CMP),
 	// we need to be able to query the public key and the address for each protocol.

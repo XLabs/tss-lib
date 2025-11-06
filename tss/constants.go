@@ -4,8 +4,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/xlabs/multi-party-sig/protocols/frost/keygen"
-	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
+	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
+	frostdkg "github.com/xlabs/multi-party-sig/protocols/frost/keygen"
+	frostsign "github.com/xlabs/multi-party-sig/protocols/frost/sign"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -15,8 +17,11 @@ var tssProtoMessageNames = []string{}
 var tssProtoMessageSize = 0
 
 func init() {
-	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(sign.File_proto_frost_signing_proto)...)
-	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(keygen.File_proto_frost_keygen_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(frostsign.File_proto_frost_signing_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(cmpsign.File_proto_cmp_signing_proto)...)
+
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(frostdkg.File_proto_frost_keygen_proto)...)
+	tssProtoMessageNames = append(tssProtoMessageNames, extractProtoTypeNames(cmpdkg.File_proto_cmp_keygen_proto)...)
 
 	for _, name := range tssProtoMessageNames {
 		tssProtoMessageSize = max(tssProtoMessageSize, len(name))

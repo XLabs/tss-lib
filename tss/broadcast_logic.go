@@ -131,11 +131,7 @@ func (p *parsedTssContent) wrapError(err error) error {
 		return err
 	}
 
-	return logableError{
-		cause:      err,
-		trackingId: p.getTrackingID(),
-		round:      p.signingRound,
-	}
+	return common.NewTrackableError(err, "", p.Content().RoundNumber(), nil, p.getTrackingID(), nil)
 }
 
 func (p *parsedTssContent) getTrackingID() *common.TrackingID {
