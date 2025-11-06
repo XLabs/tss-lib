@@ -36,7 +36,7 @@ func (t *Engine) parseBroadcast(m Incoming) (broadcastMessage, error) {
 			return nil, err
 		}
 
-		if !isKnownBroadcastType(p) {
+		if !isBroadcastType(p) {
 			return nil, fmt.Errorf("unknown broadcast message received: %T. sender: %s", p.Content(), m.GetSource().NetworkName())
 		}
 

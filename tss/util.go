@@ -235,7 +235,7 @@ func getRound(m common.ParsedMessage) (signingRound, error) {
 }
 
 // ensures content of a known broadcast type.
-func isKnownBroadcastType(m common.ParsedMessage) bool {
+func isBroadcastType(m common.ParsedMessage) bool {
 	switch m.Content().(type) {
 	case *frostsign.Broadcast2, *frostsign.Broadcast3:
 		return true
@@ -251,7 +251,7 @@ func isKnownBroadcastType(m common.ParsedMessage) bool {
 	}
 }
 
-func isKnownUnicastType(m common.ParsedMessage) bool {
+func isUnicastType(m common.ParsedMessage) bool {
 	switch m.Content().(type) {
 	case *cmpsign.Message2, *cmpsign.Message3, *cmpsign.Message4:
 		return true

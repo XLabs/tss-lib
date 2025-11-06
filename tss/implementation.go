@@ -866,7 +866,7 @@ func (t *Engine) handleUnicastTSS(v *tsscommv1.Unicast_Tss, src *Identity) error
 		return err
 	}
 
-	if !isKnownUnicastType(fpmsg) {
+	if !isUnicastType(fpmsg) {
 		return fmt.Errorf("unknown unicast message type received: %T", fpmsg.Content())
 	}
 
