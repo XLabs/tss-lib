@@ -19,48 +19,124 @@ import (
 	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
-func (s *GuardianStorage) unmarshalFromJSON(storageData []byte) error {
-	if err := json.Unmarshal(storageData, &s); err != nil {
+// StorageLoader is a helper struct to load GuardianStorage from file.
+// It allows configuring whether missing TSS secrets are allowed.
+type StorageLoader struct {
+	Path string
+
+	AllowMissingECDSA bool
+	AllowMissingFrost bool
+
+	// Allows
+	AllowNilTSSSecrets bool
+
+	// The GuardianStorage to load into. is set by the loading functions.
+	gs *GuardianStorage
+}
+
+// Default loader that does not allow missing TSS secrets.
+// for a more configurable loader, use LoadGuardianStorage.
+func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
+	loader := StorageLoader{
+		Path: storagePath,
+		gs:   &GuardianStorage{},
+
+		// not allowing missing TSS secrets by default.
+		AllowNilTSSSecrets: false,
+		AllowMissingECDSA:  false,
+		AllowMissingFrost:  false,
+	}
+
+	if err := loader.load(); err != nil {
+		return nil, err
+	}
+
+	return loader.gs, nil
+}
+
+// LoadGuardianStorage loads GuardianStorage from file using the provided StorageLoader.
+func LoadGuardianStorage(loader StorageLoader) (*GuardianStorage, error) {
+	if err := loader.load(); err != nil {
+		return nil, err
+	}
+
+	return loader.gs, nil
+}
+
+func (s *StorageLoader) load() error {
+	if s == nil {
+		return fmt.Errorf("GuardianStorage is nil")
+	}
+	if s.gs == nil {
+		s.gs = &GuardianStorage{}
+	}
+
+	storageData, err := os.ReadFile(s.Path)
+	if err != nil {
 		return err
 	}
 
-	if s.PrivateKey == nil {
+	if err := s.unmarshalFromJSON(storageData); err != nil {
+		return err
+	}
+
+	return s.gs.SetInnerFields()
+}
+
+func (s *StorageLoader) unmarshalFromJSON(storageData []byte) error {
+	if err := json.Unmarshal(storageData, &s.gs); err != nil {
+		return err
+	}
+
+	if s.gs.PrivateKey == nil {
 		return fmt.Errorf("TlsPrivateKey is nil")
 	}
 
-	if len(s.IdentitiesKeep.Identities) == 0 {
+	if len(s.gs.IdentitiesKeep.Identities) == 0 {
 		return fmt.Errorf("no guardians array given")
 	}
 
-	if s.Threshold > len(s.IdentitiesKeep.Identities) {
+	if s.gs.Threshold > len(s.gs.IdentitiesKeep.Identities) {
 		return fmt.Errorf("threshold is higher than the number of guardians")
 	}
 
 	return s.attemptLoadTssSecrets()
 }
 
-func (s *GuardianStorage) attemptLoadTssSecrets() error {
-	if s.TSSSecrets == nil {
+func (s *StorageLoader) attemptLoadTssSecrets() error {
+	if s.gs.TSSSecrets == nil {
+		if !s.AllowNilTSSSecrets {
+			return fmt.Errorf("missing TSSSecrets")
+		}
+
 		return nil
 	}
 
-	cnf, err := UnmarshalTssSecrets(s.TSSSecrets)
+	cnf, err := UnmarshalTssSecrets(s.gs.TSSSecrets)
 	if err != nil {
 		return err
 	}
 
 	if err := s.storeFrostConf(cnf); err != nil {
-		return err
+		if !s.AllowMissingFrost {
+			return err
+		}
+
+		s.gs.frostconf = nil
 	}
 
 	if err := s.storeCmpConf(cnf); err != nil {
-		return err
+		if !s.AllowMissingECDSA {
+			return err
+		}
+
+		s.gs.ecdsaconf = nil
 	}
 
 	return nil
 }
 
-func (st *GuardianStorage) storeCmpConf(cnf *party.TSSSecrets) error {
+func (st *StorageLoader) storeCmpConf(cnf *party.TSSSecrets) error {
 	if cnf == nil {
 		return fmt.Errorf("TSSSecrets is nil")
 	}
@@ -70,12 +146,12 @@ func (st *GuardianStorage) storeCmpConf(cnf *party.TSSSecrets) error {
 		return fmt.Errorf("invalid ecdsa configs in stored TSSSecrets")
 	}
 
-	st.ecdsaconf = cnf.EcdsaConfigs
+	st.gs.ecdsaconf = cnf.EcdsaConfigs
 
 	return nil
 }
 
-func (s *GuardianStorage) storeFrostConf(cnf *party.TSSSecrets) error {
+func (s *StorageLoader) storeFrostConf(cnf *party.TSSSecrets) error {
 	if cnf == nil {
 		return fmt.Errorf("TSSSecrets is nil")
 	}
@@ -85,11 +161,11 @@ func (s *GuardianStorage) storeFrostConf(cnf *party.TSSSecrets) error {
 		return fmt.Errorf("invalid frost configs in stored TSSSecrets")
 	}
 
-	if len(cnf.FrostConfigs.VerificationShares.Points) != len(s.IdentitiesKeep.Identities) {
+	if len(cnf.FrostConfigs.VerificationShares.Points) != len(s.gs.IdentitiesKeep.Identities) {
 		return fmt.Errorf("number of verification shares does not match number of guardians")
 	}
 
-	s.frostconf = cnf.FrostConfigs
+	s.gs.frostconf = cnf.FrostConfigs
 
 	return nil
 }
@@ -106,23 +182,6 @@ func UnmarshalTssSecrets(TSSsecrets []byte) (*party.TSSSecrets, error) {
 	}
 
 	return cnf, nil
-}
-
-func (s *GuardianStorage) load(storagePath string) error {
-	if s == nil {
-		return fmt.Errorf("GuardianStorage is nil")
-	}
-
-	storageData, err := os.ReadFile(storagePath)
-	if err != nil {
-		return err
-	}
-
-	if err := s.unmarshalFromJSON(storageData); err != nil {
-		return err
-	}
-
-	return s.SetInnerFields()
 }
 
 func (s *GuardianStorage) SetInnerFields() error {
