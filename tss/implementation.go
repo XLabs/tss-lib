@@ -104,17 +104,6 @@ type GuardianStorage struct {
 	isleader bool
 }
 
-// GuardianStorageFromFile loads a guardian storage from a file.
-// If the storage file hadn't contained symetric keys, it'll compute them.
-func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
-	var storage GuardianStorage
-	if err := storage.load(storagePath); err != nil {
-		return nil, err
-	}
-
-	return &storage, nil
-}
-
 // Responses lets a listener receive the output signatures once they're ready.
 func (t *Engine) Responses() <-chan *signer.SignResponse {
 	return t.signResponseChan
