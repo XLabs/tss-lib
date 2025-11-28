@@ -24,11 +24,9 @@ import (
 type StorageLoader struct {
 	Path string
 
+	// Whether to allow loading GuardianStorage with nil TSSSecrets.
 	AllowMissingECDSA bool
 	AllowMissingFrost bool
-
-	// Allows
-	AllowNilTSSSecrets bool
 
 	// The GuardianStorage to load into. is set by the loading functions.
 	gs *GuardianStorage
@@ -42,9 +40,8 @@ func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
 		gs:   &GuardianStorage{},
 
 		// not allowing missing TSS secrets by default.
-		AllowNilTSSSecrets: false,
-		AllowMissingECDSA:  false,
-		AllowMissingFrost:  false,
+		AllowMissingECDSA: false,
+		AllowMissingFrost: false,
 	}
 
 	if err := loader.load(); err != nil {
@@ -105,11 +102,7 @@ func (s *StorageLoader) unmarshalFromJSON(storageData []byte) error {
 
 func (s *StorageLoader) attemptLoadTssSecrets() error {
 	if s.gs.TSSSecrets == nil {
-		if !s.AllowNilTSSSecrets {
-			return fmt.Errorf("missing TSSSecrets")
-		}
-
-		return nil
+		return fmt.Errorf("missing TSSSecrets")
 	}
 
 	cnf, err := UnmarshalTssSecrets(s.gs.TSSSecrets)
