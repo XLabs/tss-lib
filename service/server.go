@@ -22,6 +22,7 @@ const bufferSize = 100
 
 type server struct {
 	signer.UnimplementedSignerServer
+	unsafe bool // if true, disables safety checks
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *zap.Logger
