@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"sync"
-
-	common "github.com/xlabs/tss-common"
 
 	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss"
@@ -14,7 +13,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -43,6 +41,7 @@ func (s *server) SignMessage(stream signer.Signer_SignMessageServer) error {
 		return err
 	}
 	defer s.removeSubscriber()
+	fmt.Println("New SignMessage subscriber connected")
 
 	ch := make(chan *signer.SignResponse, bufferSize) // Buffered channel for sending status updates
 	errChan := make(chan error, 2)                    // Buffer size 2 to avoid blocking
@@ -109,14 +108,6 @@ func (s *server) requestReader(stream signer.Signer_SignMessageServer, errChan c
 		default:
 			s.logger.Warn("Couldn't inform subscriber about signing error, channel full")
 		}
-	}
-}
-
-func wrapsig(sig *common.SignatureData) *signer.SignResponse {
-	return &signer.SignResponse{
-		Response: &signer.SignResponse_Signature{
-			Signature: proto.CloneOf(sig), // ensures a deep copy
-		},
 	}
 }
 
