@@ -22,110 +22,142 @@ var (
 	unsafe  = flag.Bool("unsafe", false, "if set, disables safety checks")
 )
 
+type runParams struct {
+	ctx    context.Context // set as parameter to allow test injection
+	logger *zap.Logger     // set as parameter to allow test injection
+
+	socket  string
+	secrets string
+	unsafe  bool
+}
+
 func main() {
 	flag.Parse()
 
-	runMain(*socket, *secrets, *unsafe)
-}
+	if *secrets == "" {
+		flag.Usage()
+		return
+	}
 
-func runMain(socket, secrets string, unsafe bool) bool {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		panic(err)
 	}
 	defer logger.Sync()
 
-	if len(secrets) == 0 {
-		flag.Usage()
-		return true
+	runMain(runParams{
+		ctx:    context.Background(),
+		logger: logger,
+
+		socket:  *socket,
+		secrets: *secrets,
+		unsafe:  *unsafe,
+	})
+}
+
+// separated to allow test injection
+func runMain(p runParams) {
+	if p.logger == nil {
+		panic("logger must be provided")
+	}
+	if p.ctx == nil {
+		p.logger.Fatal("main context must be provided")
+	}
+	if p.secrets == "" {
+		p.logger.Fatal("secrets file path must be provided")
 	}
 
-	logger.Info("Loading secrets...")
+	p.logger.Info("Loading secrets...")
 
-	st, err := tss.NewGuardianStorageFromFile(secrets)
+	st, err := tss.NewGuardianStorageFromFile(p.secrets)
 	if err != nil {
-		logger.Fatal("failed to load secrets file", zap.Error(err))
+		p.logger.Fatal("failed to load secrets file", zap.Error(err))
 	}
 
-	logger.Info("starting TSS engine...")
+	p.logger.Info("starting TSS engine...")
 	engine, err := tss.NewReliableTSS(st)
 	if err != nil {
-		logger.Fatal("failed to create TSS signer", zap.Error(err))
+		p.logger.Fatal("failed to create TSS signer", zap.Error(err))
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(p.ctx)
 	defer cancel()
 
-	if err := engine.Start(ctx, logger); err != nil {
-		logger.Fatal("failed to start TSS signer", zap.Error(err))
+	if err := engine.Start(ctx, p.logger); err != nil {
+		p.logger.Fatal("failed to start TSS signer", zap.Error(err))
 	}
 
-	logger.Info("Starting peer-to-peer communication layer...")
-	comms, err := comm.NewServer(logger, engine)
+	p.logger.Info("Starting peer-to-peer communication layer...")
+	comms, err := comm.NewServer(p.logger, engine)
 	if err != nil {
-		logger.Fatal("failed to create peer-to-peer communication layer", zap.Error(err))
+		p.logger.Fatal("failed to create peer-to-peer communication layer", zap.Error(err))
 	}
 
 	go func() {
 		if err := comms.Run(ctx); err != nil {
 			cancel()
 
-			logger.Fatal("peer-to-peer communication layer closing, shutting down.", zap.Error(err))
+			if err == context.Canceled {
+				p.logger.Info("peer-to-peer communication layer closed")
+
+				return
+			}
+
+			p.logger.Fatal("peer-to-peer communication layer closing, shutting down.", zap.Error(err))
 		}
 	}()
 
-	logger.Info("Starting gRPC server...", zap.String("socket", socket))
+	p.logger.Info("Starting gRPC server...", zap.String("socket", p.socket))
 
-	l, err := net.Listen("tcp", socket)
+	l, err := net.Listen("tcp", p.socket)
 	if err != nil {
-		panic(err)
+		p.logger.Fatal("failed to listen on socket", zap.String("socket", p.socket), zap.Error(err))
 	}
 
 	// set up gRPC server options
 	serverOpts := []grpc.ServerOption{}
 
 	// add TLS credentials if not disabled
-	if unsafe {
-		logger.Warn("running in unsafe mode, TLS disabled!")
+	if p.unsafe {
+		p.logger.Warn("running in unsafe mode, TLS disabled!")
 	} else {
-		serverOpts = append(serverOpts, makeCreds(logger, st))
+		serverOpts = append(serverOpts, makeCreds(st))
 	}
 
 	grpcServer := grpc.NewServer(serverOpts...)
 
 	srvr := &server{
 		UnimplementedSignerServer: signer.UnimplementedSignerServer{}, // grpc requirement
-		unsafe:                    unsafe,
-		ctx:                       ctx,
-		cancel:                    cancel,
-		logger:                    logger,
-		Signer:                    engine,
-		listener:                  l,
-		Server:                    grpcServer,
-		mtx:                       sync.Mutex{},
-		hasSubscriber:             false,
+
+		ctx:           ctx,
+		cancel:        cancel,
+		logger:        p.logger,
+		Signer:        engine,
+		listener:      l,
+		Server:        grpcServer,
+		mtx:           sync.Mutex{},
+		hasSubscriber: false,
 	}
 
 	signer.RegisterSignerServer(srvr.Server, srvr)
 
 	go func() {
 		if err := srvr.Serve(l); err != nil {
-			logger.Error("gRPC server stopped with error", zap.Error(err))
+			p.logger.Error("gRPC server stopped with error", zap.Error(err))
 		}
 
 		cancel()
 	}()
 
-	logger.Info("Server is running and accepting requests.\nNotice: signature requests demand peers to be online.")
+	p.logger.Info("Server is running and accepting requests.\nNotice: signature requests demand peers to be online.")
 
 	<-ctx.Done()
 
-	logger.Info("Shutting down gRPC server...")
+	p.logger.Info("Shutting down gRPC server...")
 	srvr.GracefulStop()
-	return false
 }
 
-func makeCreds(lg *zap.Logger, st *tss.GuardianStorage) grpc.ServerOption {
+func makeCreds(st *tss.GuardianStorage) grpc.ServerOption {
 	clientAcceptedCerts := x509.NewCertPool()
 
 	// We only accept connections from clients that pesent the same cert as we use for ourselves.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path"
 	"sync"
 	"testing"
 
@@ -30,9 +31,11 @@ func TestSecureConn(t *testing.T) {
 	}
 	defer logger.Sync()
 
-	serverSecrets, err := tss.NewGuardianStorageFromFile("../tss/internal/testutils/testdata/tss5/guardian0.json")
+	secretsDir := path.Join(getProjectRootDir(), "tss", "internal", "testutils", "testdata", "tss5")
+
+	serverSecrets, err := tss.NewGuardianStorageFromFile(path.Join(secretsDir, "guardian0.json"))
 	a.NoError(err)
-	invalidSecrets, err := tss.NewGuardianStorageFromFile("../tss/internal/testutils/testdata/tss5/guardian1.json")
+	invalidSecrets, err := tss.NewGuardianStorageFromFile(path.Join(secretsDir, "guardian1.json"))
 	a.NoError(err)
 
 	pool := x509.NewCertPool()
@@ -43,7 +46,7 @@ func TestSecureConn(t *testing.T) {
 	a.NoError(err)
 	defer l.Close()
 
-	serverOpts := []grpc.ServerOption{makeCreds(logger, serverSecrets)}
+	serverOpts := []grpc.ServerOption{makeCreds(serverSecrets)}
 	grpcServer := grpc.NewServer(serverOpts...)
 
 	// Mock tss.Signer

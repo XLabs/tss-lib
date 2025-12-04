@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -20,7 +19,7 @@ const bufferSize = 100
 
 type server struct {
 	signer.UnimplementedSignerServer
-	unsafe bool // if true, disables safety checks
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *zap.Logger
@@ -41,7 +40,8 @@ func (s *server) SignMessage(stream signer.Signer_SignMessageServer) error {
 		return err
 	}
 	defer s.removeSubscriber()
-	fmt.Println("New SignMessage subscriber connected")
+
+	s.logger.Info("Client subscribed to signing stream")
 
 	ch := make(chan *signer.SignResponse, bufferSize) // Buffered channel for sending status updates
 	errChan := make(chan error, 2)                    // Buffer size 2 to avoid blocking
