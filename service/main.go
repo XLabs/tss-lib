@@ -160,7 +160,8 @@ func runMain(p runParams) {
 func makeCreds(st *tss.GuardianStorage) grpc.ServerOption {
 	clientAcceptedCerts := x509.NewCertPool()
 
-	// We only accept connections from clients that pesent the same cert as we use for ourselves.
+	// We only accept connections from clients that present the same cert as we use for ourselves.
+	// That is, only the entity that has the authority to request signatures can connect.
 	clientAcceptedCerts.AddCert(st.GetCertificate().Leaf)
 
 	return grpc.Creds(credentials.NewTLS(

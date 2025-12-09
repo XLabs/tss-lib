@@ -58,7 +58,7 @@ func TestRunMain(t *testing.T) {
 			runMain(runParams{
 				ctx:     ctx,
 				logger:  testLogger,
-				socket:  "localhost:57777",
+				socket:  "localhost:0",
 				secrets: secretsPath,
 				unsafe:  false,
 			})
@@ -77,7 +77,7 @@ func TestRunMain(t *testing.T) {
 			runMain(runParams{
 				ctx:     ctx,
 				logger:  testLogger,
-				socket:  "localhost:57777",
+				socket:  "localhost:0",
 				secrets: secretsPath,
 				unsafe:  true,
 			})
@@ -100,7 +100,7 @@ func TestRunMain(t *testing.T) {
 		runMain(runParams{
 			ctx:     context.Background(),
 			logger:  testLogger,
-			socket:  "localhost:50051",
+			socket:  "localhost:0",
 			secrets: "nonexistent.json",
 			unsafe:  true,
 		})

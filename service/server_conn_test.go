@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"net"
 	"path"
 	"sync"
@@ -21,7 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// ensures that an safe connection is made by checking the peer certificate from the gRPC stream
+// ensures that a secure connection is made by checking the peer certificate from the gRPC stream
 func TestSecureConn(t *testing.T) {
 	a := require.New(t)
 
@@ -41,10 +40,13 @@ func TestSecureConn(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(serverSecrets.GetCertificate().Leaf) // only accepting the server's cert.
 
-	socket := "localhost:50051"
-	l, err := net.Listen("tcp", socket)
+	l, err := net.Listen("tcp", "localhost:0")
 	a.NoError(err)
 	defer l.Close()
+
+	// socket specifies to the clients the address of the server.
+	socket := l.Addr().String()
+	t.Log("Socket address chosen by OS: " + socket)
 
 	serverOpts := []grpc.ServerOption{makeCreds(serverSecrets)}
 	grpcServer := grpc.NewServer(serverOpts...)
@@ -143,7 +145,7 @@ func TestSecureConn(t *testing.T) {
 			grpc.WithTransportCredentials(
 				credentials.NewTLS(&tls.Config{
 					Certificates: []tls.Certificate{*invalidSecrets.GetCertificate()},
-					RootCAs:      nil,
+					RootCAs:      pool, // accepting server's cert.
 					ServerName:   "localhost",
 				}),
 			),
@@ -154,7 +156,6 @@ func TestSecureConn(t *testing.T) {
 		client := signer.NewSignerClient(conn)
 		_, err = client.SignMessage(ctx) // This will actually establish the connection.
 		a.Error(err)
-		fmt.Println(err)
 	})
 
 }
