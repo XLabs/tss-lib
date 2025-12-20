@@ -24,10 +24,11 @@ import (
 )
 
 var (
-	cnfgPath     = flag.String("cnfg", "", "path to config file in json format used to run the protocol")
-	existingPath = flag.String("secrets", "", "path to existing secrets.json. Used to ensure the result of DKG contains any existing keys for other protocols.")
-	protocolMsg  = fmt.Sprintf("the TSS protocol type to use ( '%s' | '%s')", common.ProtocolFROSTDKG, common.ProtocolECDSADKG)
-	protocol     = flag.String("protocol", "", protocolMsg)
+	cnfgPath      = flag.String("cnfg", "", "path to config file in json format used to run the protocol")
+	secretKeyPath = flag.String("sk", "", "path to secret key file in PEM format (should match the TLS certificate in the config file)")
+	existingPath  = flag.String("secrets", "", "path to existing secrets.json. Used to ensure the result of DKG contains any existing keys for other protocols.")
+	protocolMsg   = fmt.Sprintf("the TSS protocol type to use ( '%s' | '%s')", common.ProtocolFROSTDKG, common.ProtocolECDSADKG)
+	protocol      = flag.String("protocol", "", protocolMsg)
 )
 
 var logger *zap.Logger
@@ -291,6 +292,19 @@ func loadConfigsFromFlags(logger *zap.Logger) (*cmd.SetupConfigs, common.Protoco
 
 	if err = json.Unmarshal(f, cnfg); err != nil {
 		logger.Fatal("failed to unmarshal config file", zap.Error(err))
+	}
+
+	if *secretKeyPath != "" {
+		// read file:
+		skBts, err := os.ReadFile(*secretKeyPath)
+		if err != nil {
+			logger.Fatal("failed to read secret key file", zap.Error(err))
+		}
+		cnfg.SelfSecret = skBts
+	}
+
+	if len(cnfg.SelfSecret) == 0 {
+		logger.Fatal("missing secret key. Please provide a path to the secret key, or set it in the config file.")
 	}
 
 	if *protocol != common.ProtocolECDSADKG.ToString() && *protocol != common.ProtocolFROSTDKG.ToString() {
