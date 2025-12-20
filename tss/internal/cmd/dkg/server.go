@@ -181,9 +181,10 @@ func attemptMergingTssSecretsToOld(lg *zap.Logger, prms runParams, tssConfigs *p
 
 	lg.Info("loading existing GuardianStorage from file", zap.String("file", *existingPath))
 	tmp, err := engine.LoadGuardianStorage(engine.StorageLoader{
-		Path:              *existingPath,
-		AllowMissingECDSA: prms.prot == common.ProtocolECDSADKG, // if we are doing ECDSA DKG, allow missing ECDSA keys
-		AllowMissingFrost: prms.prot == common.ProtocolFROSTDKG, // if we are doing FROST DKG, allow missing FROST keys
+		Path: *existingPath,
+
+		DemandFrost: prms.prot == common.ProtocolECDSADKG, // if we're doing ECDSA DKG, and want to merge, we assume Frost secrets must exist.
+		DemandECDSA: prms.prot == common.ProtocolFROSTDKG, // if we're doing Frost DKG, and want to merge, we assume ECDSA secrets must exist.
 	})
 	if err != nil {
 		return err

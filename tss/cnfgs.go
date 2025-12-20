@@ -23,9 +23,13 @@ import (
 type StorageLoader struct {
 	Path string
 
-	// Whether to allow loading GuardianStorage with nil TSSSecrets.
-	AllowMissingECDSA bool
-	AllowMissingFrost bool
+	// DemandAllSecrets indicates whether all TSS secrets must be present.
+	DemandAllSecrets bool
+
+	// DemandFrost indicates whether FROST secrets must be present.
+	DemandFrost bool
+	// DemandECDSA indicates whether ECDSA secrets must be present.
+	DemandECDSA bool
 
 	// The GuardianStorage to load into. is set by the loading functions.
 	gs *GuardianStorage
@@ -39,8 +43,8 @@ func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
 		gs:   &GuardianStorage{},
 
 		// not allowing missing TSS secrets by default.
-		AllowMissingECDSA: false,
-		AllowMissingFrost: false,
+		DemandFrost: true,
+		DemandECDSA: true,
 	}
 
 	if err := loader.load(); err != nil {
@@ -66,6 +70,10 @@ func (s *StorageLoader) load() error {
 	if s.gs == nil {
 		s.gs = &GuardianStorage{}
 	}
+	if s.DemandAllSecrets {
+		s.DemandFrost = true
+		s.DemandECDSA = true
+	}
 
 	storageData, err := internal.ReadFileWithLimit(s.Path, maxConfigFileSize)
 	if err != nil {
@@ -76,7 +84,21 @@ func (s *StorageLoader) load() error {
 		return err
 	}
 
-	return s.gs.SetInnerFields()
+	if err := s.gs.SetInnerFields(); err != nil {
+		return err
+	}
+
+	if s.DemandAllSecrets {
+		// assumes all wanted secrets are loaded correctly, otherwise error would have been returned earlier.
+		return nil
+	}
+
+	// Check that at least one secret is present.
+	if s.gs.frostconf == nil && s.gs.ecdsaconf == nil {
+		return fmt.Errorf("no TSS secrets found in GuardianStorage")
+	}
+
+	return nil
 }
 
 func (s *StorageLoader) unmarshalFromJSON(storageData []byte) error {
@@ -110,7 +132,7 @@ func (s *StorageLoader) attemptLoadTssSecrets() error {
 	}
 
 	if err := s.storeFrostConf(cnf); err != nil {
-		if !s.AllowMissingFrost {
+		if s.DemandFrost {
 			return err
 		}
 
@@ -118,7 +140,7 @@ func (s *StorageLoader) attemptLoadTssSecrets() error {
 	}
 
 	if err := s.storeCmpConf(cnf); err != nil {
-		if !s.AllowMissingECDSA {
+		if s.DemandECDSA {
 			return err
 		}
 
@@ -311,4 +333,18 @@ func (s *GuardianStorage) NumGuardians() int {
 	}
 
 	return len(s.Identities)
+}
+
+func (s *GuardianStorage) ExistingSecretsTypes() []common.ProtocolType {
+	types := []common.ProtocolType{}
+
+	if s.frostconf != nil {
+		types = append(types, common.ProtocolFROSTDKG)
+	}
+
+	if s.ecdsaconf != nil {
+		types = append(types, common.ProtocolECDSADKG)
+	}
+
+	return types
 }
