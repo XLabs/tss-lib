@@ -39,7 +39,8 @@ func extractProtoTypeNames(protoreflectDesc protoreflect.FileDescriptor) []strin
 }
 
 const (
-	DefaultPort = "8998"
+	maxConfigFileSize = 10 * 1024 * 1024 // 10 MB
+	DefaultPort       = "8998"
 
 	digestSize           = 32
 	maxAuxiliaryDataSize = 32

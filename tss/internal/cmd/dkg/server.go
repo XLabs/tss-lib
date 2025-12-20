@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -19,6 +20,7 @@ import (
 	"github.com/xlabs/tss-lib/v2/party"
 	engine "github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/comm"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 	"github.com/xlabs/tss-lib/v2/tss/internal/cmd"
 	"go.uber.org/zap"
 )
@@ -283,23 +285,27 @@ func loadConfigsFromFlags(logger *zap.Logger) (*cmd.SetupConfigs, common.Protoco
 
 	logger.Info("Loading config file", zap.String("path", *cnfgPath))
 
-	f, err := os.ReadFile(*cnfgPath)
+	cnfgData, err := internal.ReadFileWithLimit(*cnfgPath, 4*1024*1024) // 4MB max
 	if err != nil {
 		logger.Fatal("failed to read file, err: ", zap.Error(err))
 	}
 
 	cnfg := &cmd.SetupConfigs{}
-
-	if err = json.Unmarshal(f, cnfg); err != nil {
+	if err = json.Unmarshal(cnfgData, cnfg); err != nil {
 		logger.Fatal("failed to unmarshal config file", zap.Error(err))
 	}
 
 	if *secretKeyPath != "" {
-		// read file:
-		skBts, err := os.ReadFile(*secretKeyPath)
+		skBts, err := internal.ReadFileWithLimit(*secretKeyPath, 1024*1024) // Assuming key size of atmost 1MB.
 		if err != nil {
 			logger.Fatal("failed to read secret key file", zap.Error(err))
 		}
+
+		// inspect cert and secret match:
+		if _, err := tls.X509KeyPair(cnfg.Self.TlsX509, skBts); err != nil {
+			logger.Fatal("issue with TLS certificate and private key pair", zap.Error(err))
+		}
+
 		cnfg.SelfSecret = skBts
 	}
 

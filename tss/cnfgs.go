@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/fxamacker/cbor/v2"
@@ -68,7 +67,7 @@ func (s *StorageLoader) load() error {
 		s.gs = &GuardianStorage{}
 	}
 
-	storageData, err := os.ReadFile(s.Path)
+	storageData, err := internal.ReadFileWithLimit(s.Path, maxConfigFileSize)
 	if err != nil {
 		return err
 	}

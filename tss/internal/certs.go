@@ -10,6 +10,12 @@ import (
 	"log"
 )
 
+const (
+	PRIVATE_KEY_TYPE = "PRIVATE KEY"
+	PUBLIC_KEY_TYPE  = "PUBLIC KEY"
+	CERTIFICATE_TYPE = "CERTIFICATE"
+)
+
 // CreateCert invokes x509.CreateCertificate and returns it in the x509.Certificate format
 func CreateCert(template, parent *x509.Certificate, pub *ecdsa.PublicKey, parentPriv *ecdsa.PrivateKey) (
 	cert *x509.Certificate, certPEM []byte, err error) {
@@ -52,7 +58,7 @@ func PrivateKeyToPem(pkey *ecdsa.PrivateKey) []byte {
 	}
 
 	return pem.EncodeToMemory(&pem.Block{
-		Type: "PRIVATE KEY", Bytes: keyBytes,
+		Type: PRIVATE_KEY_TYPE, Bytes: keyBytes,
 	})
 }
 
@@ -63,7 +69,7 @@ func PublicKeyToPem(pkey *ecdsa.PublicKey) ([]byte, error) {
 	}
 
 	return pem.EncodeToMemory(&pem.Block{
-		Type: "PUBLIC KEY", Bytes: keyBytes,
+		Type: PUBLIC_KEY_TYPE, Bytes: keyBytes,
 	}), nil
 }
 
@@ -72,7 +78,7 @@ func PemToPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing the public key")
 	}
-	if block.Type != "PUBLIC KEY" {
+	if block.Type != PUBLIC_KEY_TYPE {
 		return nil, errors.New("PEM block is not a public key")
 	}
 
@@ -88,12 +94,13 @@ func PemToPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 
 	return publicKey, nil
 }
+
 func PemToPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing the private key")
 	}
-	if block.Type != "PRIVATE KEY" {
+	if block.Type != PRIVATE_KEY_TYPE {
 		return nil, errors.New("PEM block is not a private key")
 	}
 
