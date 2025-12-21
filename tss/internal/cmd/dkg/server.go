@@ -297,7 +297,8 @@ func loadConfigsFromFlags(logger *zap.Logger) (*cmd.SetupConfigs, common.Protoco
 	}
 
 	if *secretKeyPath != "" {
-		skBts, err := internal.ReadFileWithLimit(*secretKeyPath, 1024*1024) // Assuming key size of atmost 1MB.
+		// Assuming key size of at most 1MB.
+		skBts, err := internal.ReadFileWithLimit(*secretKeyPath, 1024*1024)
 		if err != nil {
 			logger.Fatal("failed to read secret key file", zap.Error(err))
 		}

@@ -214,8 +214,6 @@ func TestLoadGuardianStorage_WithSecrets(t *testing.T) {
 		if _, err := LoadGuardianStorage(StorageLoader{
 			Path:             path,
 			DemandAllSecrets: true,
-			DemandECDSA:      false,
-			DemandFrost:      false,
 		}); err == nil {
 			t.Fatal("expected missing ecdsa error")
 		}
