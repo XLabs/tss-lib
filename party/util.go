@@ -162,10 +162,10 @@ func rsToCommonSig(R curve.Point, S curve.Scalar, self *common.PartyID, tid *com
 	}, nil
 }
 
-func frostSigToCommonSig(sig *frost.Signature, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
+func FrostSigToCommonSig(sig *frost.Signature, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
 	return rsToCommonSig(sig.R, sig.Z, self, tid)
 }
 
-func ecdsaSigToCommonSig(res *ecdsa.Signature, partyID *common.PartyID, trackingID *common.TrackingID) (*common.SignatureData, *common.Error) {
+func EcdsaSigToCommonSig(res *ecdsa.Signature, partyID *common.PartyID, trackingID *common.TrackingID) (*common.SignatureData, *common.Error) {
 	return rsToCommonSig(res.R, res.S, partyID, trackingID)
 }
