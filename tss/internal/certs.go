@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	PRIVATE_KEY_TYPE = "PRIVATE KEY"
-	PUBLIC_KEY_TYPE  = "PUBLIC KEY"
-	CERTIFICATE_TYPE = "CERTIFICATE"
+	privateKeyType  = "PRIVATE KEY"
+	publicKeyType   = "PUBLIC KEY"
+	certificateType = "CERTIFICATE"
 )
 
 // CreateCert invokes x509.CreateCertificate and returns it in the x509.Certificate format
@@ -30,7 +30,7 @@ func CreateCert(template, parent *x509.Certificate, pub *ecdsa.PublicKey, parent
 		return
 	}
 	// PEM encode the certificate (this is a standard TLS encoding)
-	b := pem.Block{Type: "CERTIFICATE", Bytes: certDER}
+	b := pem.Block{Type: certificateType, Bytes: certDER}
 	certPEM = pem.EncodeToMemory(&b)
 	return
 }
@@ -58,7 +58,7 @@ func PrivateKeyToPem(pkey *ecdsa.PrivateKey) []byte {
 	}
 
 	return pem.EncodeToMemory(&pem.Block{
-		Type: PRIVATE_KEY_TYPE, Bytes: keyBytes,
+		Type: privateKeyType, Bytes: keyBytes,
 	})
 }
 
@@ -69,7 +69,7 @@ func PublicKeyToPem(pkey *ecdsa.PublicKey) ([]byte, error) {
 	}
 
 	return pem.EncodeToMemory(&pem.Block{
-		Type: PUBLIC_KEY_TYPE, Bytes: keyBytes,
+		Type: publicKeyType, Bytes: keyBytes,
 	}), nil
 }
 
@@ -78,7 +78,7 @@ func PemToPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing the public key")
 	}
-	if block.Type != PUBLIC_KEY_TYPE {
+	if block.Type != publicKeyType {
 		return nil, errors.New("PEM block is not a public key")
 	}
 
@@ -100,7 +100,7 @@ func PemToPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing the private key")
 	}
-	if block.Type != PRIVATE_KEY_TYPE {
+	if block.Type != privateKeyType {
 		return nil, errors.New("PEM block is not a private key")
 	}
 
@@ -118,7 +118,7 @@ func PemToPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 }
 
 func CertToPem(cert *x509.Certificate) []byte {
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	return pem.EncodeToMemory(&pem.Block{Type: certificateType, Bytes: cert.Raw})
 }
 
 func PemToCert(pemBytes []byte) (*x509.Certificate, error) {
@@ -126,7 +126,7 @@ func PemToCert(pemBytes []byte) (*x509.Certificate, error) {
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing the certificate")
 	}
-	if block.Type != "CERTIFICATE" {
+	if block.Type != certificateType {
 		return nil, errors.New("PEM block is not a certificate")
 	}
 
