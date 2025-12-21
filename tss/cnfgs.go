@@ -23,12 +23,10 @@ import (
 type StorageLoader struct {
 	Path string
 
-	// DemandAllSecrets indicates whether all TSS secrets must be present.
-	DemandAllSecrets bool
-
-	// DemandFrost indicates whether FROST secrets must be present.
+	// Used to demand a specific TSS scheme's secrets (or both).
+	// Even if no demand exists, if no TSS secrets are found, an error is returned.
+	// If both are false, then any existing TSS secrets is sufficient.
 	DemandFrost bool
-	// DemandECDSA indicates whether ECDSA secrets must be present.
 	DemandECDSA bool
 
 	// The GuardianStorage to load into. is set by the loading functions.
@@ -70,10 +68,6 @@ func (s *StorageLoader) load() error {
 	if s.gs == nil {
 		s.gs = &GuardianStorage{}
 	}
-	if s.DemandAllSecrets {
-		s.DemandFrost = true
-		s.DemandECDSA = true
-	}
 
 	storageData, err := internal.ReadFileWithLimit(s.Path, maxConfigFileSize)
 	if err != nil {
@@ -88,14 +82,8 @@ func (s *StorageLoader) load() error {
 		return err
 	}
 
-	if s.DemandAllSecrets {
-		// assumes all wanted secrets are loaded correctly, otherwise error would have been returned earlier.
-		return nil
-	}
-
-	// Check that at least one secret is present.
 	if s.gs.frostconf == nil && s.gs.ecdsaconf == nil {
-		return fmt.Errorf("no TSS secrets found in GuardianStorage")
+		return fmt.Errorf("no TSS secrets found in storage")
 	}
 
 	return nil
