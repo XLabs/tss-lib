@@ -8,9 +8,9 @@ require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/stretchr/testify v1.11.1
 	github.com/xlabs/multi-party-sig v0.0.2-0.20251106111445-bf7821c135f2
-	github.com/xlabs/tss-common v0.0.0-20251105153320-7da4a3182636
+	github.com/xlabs/tss-common v0.0.0-20251221102900-176518c9e1c6
 	golang.org/x/crypto v0.41.0
-	google.golang.org/protobuf v1.36.10
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

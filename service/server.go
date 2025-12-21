@@ -6,6 +6,10 @@ import (
 	"net"
 	"sync"
 
+	"github.com/xlabs/multi-party-sig/pkg/math/curve"
+	"github.com/xlabs/multi-party-sig/protocols/cmp"
+	"github.com/xlabs/multi-party-sig/protocols/frost"
+	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"go.uber.org/zap"
@@ -27,6 +31,8 @@ type server struct {
 	*grpc.Server
 	tss.Signer
 	listener net.Listener
+
+	pubData *signer.PublicData
 
 	mtx           sync.Mutex
 	hasSubscriber bool
@@ -136,4 +142,88 @@ func (s *server) responseSender(stream signer.Signer_SignMessageServer, ch <-cha
 			return err
 		}
 	}
+}
+
+func (s *server) GetPublicData(ctx context.Context, _ *signer.PublicDataRequest) (*signer.PublicData, error) {
+	if s.pubData == nil {
+		return nil, status.Error(codes.Internal, "public data not initialized")
+	}
+
+	return s.pubData, nil
+}
+
+func genPubData(s tss.Signer) (*signer.PublicData, error) {
+	frostPubBytes, err := getPubkey(s, common.ProtocolFROSTSign)
+	if err != nil {
+		return nil, err
+	}
+
+	ecdsaPubBytes, err := getPubkey(s, common.ProtocolECDSASign)
+	if err != nil {
+		return nil, err
+	}
+
+	return &signer.PublicData{
+		FrostPublicData: frostPubBytes,
+		EcdsaPublicData: ecdsaPubBytes,
+	}, nil
+}
+
+func getPubkey(s tss.Signer, prot common.ProtocolType) ([]byte, error) {
+	key, err := s.GetPublicKey(prot)
+	if err != nil {
+		return nil, err
+	}
+
+	return key.Curve().MarshalPoint(key)
+}
+
+func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatureRequest) (*signer.VerifySignatureResponse, error) {
+	if req == nil || req.Signature == nil || req.Signature.TrackingId == nil || req.PublicData == nil {
+		return nil, status.Error(codes.InvalidArgument, "request, signature, public data, or tracking ID is missing")
+	}
+
+	// inspect that req has the same public key as ours for the given protocol
+	protocol, err := req.GetSignature().GetTrackingId().GetProtocolType()
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid protocol type in tracking ID")
+	}
+
+	var pkeyBytes []byte
+	switch protocol {
+	case common.ProtocolFROSTSign:
+		pkeyBytes = req.GetPublicData().GetFrostPublicData()
+	case common.ProtocolECDSASign:
+		pkeyBytes = req.GetPublicData().GetEcdsaPublicData()
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported protocol type: %s", protocol.ToString())
+	}
+
+	// we currently support only a single curve: secp256k1
+	pubkey, err := (&curve.Secp256k1{}).UnmarshalPoint(pkeyBytes)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid public key")
+	}
+
+	var isValid bool
+	msg := req.GetSignature().GetM()
+
+	switch protocol {
+	case common.ProtocolFROSTSign:
+		sig, err := frost.Secp256k1SignatureTranslate(req.GetSignature())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid signature")
+		}
+
+		isValid = sig.Verify(pubkey, msg) == nil
+	case common.ProtocolECDSASign:
+		sig, err := cmp.Secp256k1SignatureTranslate(req.GetSignature())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid signature")
+		}
+
+		isValid = sig.Verify(pubkey, msg)
+	}
+
+	return &signer.VerifySignatureResponse{IsValid: isValid}, nil
 }
