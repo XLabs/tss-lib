@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/fxamacker/cbor/v2"
@@ -24,31 +23,14 @@ import (
 type StorageLoader struct {
 	Path string
 
-	// Whether to allow loading GuardianStorage with nil TSSSecrets.
-	AllowMissingECDSA bool
-	AllowMissingFrost bool
+	// Used to demand a specific TSS scheme's secrets (or both).
+	// Even if no demand exists, if no TSS secrets are found, an error is returned.
+	// If both are false, then any existing TSS secrets is sufficient.
+	DemandFrost bool
+	DemandECDSA bool
 
 	// The GuardianStorage to load into. is set by the loading functions.
 	gs *GuardianStorage
-}
-
-// Default loader that does not allow missing TSS secrets.
-// for a more configurable loader, use LoadGuardianStorage.
-func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
-	loader := StorageLoader{
-		Path: storagePath,
-		gs:   &GuardianStorage{},
-
-		// not allowing missing TSS secrets by default.
-		AllowMissingECDSA: false,
-		AllowMissingFrost: false,
-	}
-
-	if err := loader.load(); err != nil {
-		return nil, err
-	}
-
-	return loader.gs, nil
 }
 
 // LoadGuardianStorage loads GuardianStorage from file using the provided StorageLoader.
@@ -68,7 +50,7 @@ func (s *StorageLoader) load() error {
 		s.gs = &GuardianStorage{}
 	}
 
-	storageData, err := os.ReadFile(s.Path)
+	storageData, err := internal.ReadFileWithLimit(s.Path, maxConfigFileSize)
 	if err != nil {
 		return err
 	}
@@ -77,7 +59,15 @@ func (s *StorageLoader) load() error {
 		return err
 	}
 
-	return s.gs.SetInnerFields()
+	if err := s.gs.SetInnerFields(); err != nil {
+		return err
+	}
+
+	if s.gs.frostconf == nil && s.gs.ecdsaconf == nil {
+		return fmt.Errorf("no TSS secrets found in storage")
+	}
+
+	return nil
 }
 
 func (s *StorageLoader) unmarshalFromJSON(storageData []byte) error {
@@ -111,7 +101,7 @@ func (s *StorageLoader) attemptLoadTssSecrets() error {
 	}
 
 	if err := s.storeFrostConf(cnf); err != nil {
-		if !s.AllowMissingFrost {
+		if s.DemandFrost {
 			return err
 		}
 
@@ -119,7 +109,7 @@ func (s *StorageLoader) attemptLoadTssSecrets() error {
 	}
 
 	if err := s.storeCmpConf(cnf); err != nil {
-		if !s.AllowMissingECDSA {
+		if s.DemandECDSA {
 			return err
 		}
 
@@ -312,4 +302,18 @@ func (s *GuardianStorage) NumGuardians() int {
 	}
 
 	return len(s.Identities)
+}
+
+func (s *GuardianStorage) ExistingSecretsTypes() []common.ProtocolType {
+	types := []common.ProtocolType{}
+
+	if s.frostconf != nil {
+		types = append(types, common.ProtocolFROSTDKG)
+	}
+
+	if s.ecdsaconf != nil {
+		types = append(types, common.ProtocolECDSADKG)
+	}
+
+	return types
 }

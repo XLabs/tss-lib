@@ -465,7 +465,7 @@ func loadMockGuardianStorage(gstorageIndex int) (*tss.GuardianStorage, error) {
 		return nil, err
 	}
 
-	st, err := tss.NewGuardianStorageFromFile(path)
+	st, err := tss.LoadGuardianStorage(tss.StorageLoader{Path: path})
 	if err != nil {
 		return nil, err
 	}

@@ -13,10 +13,10 @@ const (
 
 func TestGuardianStorageUnmarshal(t *testing.T) {
 	loader := StorageLoader{
-		Path:              testutils.MustGetMockGuardianTssStorage(),
-		gs:                &GuardianStorage{},
-		AllowMissingECDSA: false,
-		AllowMissingFrost: false,
+		Path:        testutils.MustGetMockGuardianTssStorage(),
+		gs:          &GuardianStorage{},
+		DemandFrost: true,
+		DemandECDSA: true,
 	}
 
 	if err := loader.load(); err != nil {

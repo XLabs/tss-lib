@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -19,15 +20,17 @@ import (
 	"github.com/xlabs/tss-lib/v2/party"
 	engine "github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/comm"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 	"github.com/xlabs/tss-lib/v2/tss/internal/cmd"
 	"go.uber.org/zap"
 )
 
 var (
-	cnfgPath     = flag.String("cnfg", "", "path to config file in json format used to run the protocol")
-	existingPath = flag.String("secrets", "", "path to existing secrets.json. Used to ensure the result of DKG contains any existing keys for other protocols.")
-	protocolMsg  = fmt.Sprintf("the TSS protocol type to use ( '%s' | '%s')", common.ProtocolFROSTDKG, common.ProtocolECDSADKG)
-	protocol     = flag.String("protocol", "", protocolMsg)
+	cnfgPath      = flag.String("cnfg", "", "path to config file in json format used to run the protocol")
+	secretKeyPath = flag.String("sk", "", "path to secret key file in PEM format (should match the TLS certificate in the config file)")
+	existingPath  = flag.String("secrets", "", "path to existing secrets.json. Used to ensure the result of DKG contains any existing keys for other protocols.")
+	protocolMsg   = fmt.Sprintf("the TSS protocol type to use ( '%s' | '%s')", common.ProtocolFROSTDKG, common.ProtocolECDSADKG)
+	protocol      = flag.String("protocol", "", protocolMsg)
 )
 
 var logger *zap.Logger
@@ -178,9 +181,10 @@ func attemptMergingTssSecretsToOld(lg *zap.Logger, prms runParams, tssConfigs *p
 
 	lg.Info("loading existing GuardianStorage from file", zap.String("file", *existingPath))
 	tmp, err := engine.LoadGuardianStorage(engine.StorageLoader{
-		Path:              *existingPath,
-		AllowMissingECDSA: prms.prot == common.ProtocolECDSADKG, // if we are doing ECDSA DKG, allow missing ECDSA keys
-		AllowMissingFrost: prms.prot == common.ProtocolFROSTDKG, // if we are doing FROST DKG, allow missing FROST keys
+		Path: *existingPath,
+
+		DemandFrost: prms.prot == common.ProtocolECDSADKG, // if we're doing ECDSA DKG, and want to merge, we assume Frost secrets must exist.
+		DemandECDSA: prms.prot == common.ProtocolFROSTDKG, // if we're doing Frost DKG, and want to merge, we assume ECDSA secrets must exist.
 	})
 	if err != nil {
 		return err
@@ -282,15 +286,33 @@ func loadConfigsFromFlags(logger *zap.Logger) (*cmd.SetupConfigs, common.Protoco
 
 	logger.Info("Loading config file", zap.String("path", *cnfgPath))
 
-	f, err := os.ReadFile(*cnfgPath)
+	cnfgData, err := internal.ReadFileWithLimit(*cnfgPath, 4*1024*1024) // 4MB max
 	if err != nil {
 		logger.Fatal("failed to read file, err: ", zap.Error(err))
 	}
 
 	cnfg := &cmd.SetupConfigs{}
-
-	if err = json.Unmarshal(f, cnfg); err != nil {
+	if err = json.Unmarshal(cnfgData, cnfg); err != nil {
 		logger.Fatal("failed to unmarshal config file", zap.Error(err))
+	}
+
+	if *secretKeyPath != "" {
+		// Assuming key size of at most 1MB.
+		skBts, err := internal.ReadFileWithLimit(*secretKeyPath, 1024*1024)
+		if err != nil {
+			logger.Fatal("failed to read secret key file", zap.Error(err))
+		}
+
+		// inspect cert and secret match:
+		if _, err := tls.X509KeyPair(cnfg.Self.TlsX509, skBts); err != nil {
+			logger.Fatal("issue with TLS certificate and private key pair", zap.Error(err))
+		}
+
+		cnfg.SelfSecret = skBts
+	}
+
+	if len(cnfg.SelfSecret) == 0 {
+		logger.Fatal("missing secret key. Please provide a path to the secret key, or set it in the config file.")
 	}
 
 	if *protocol != common.ProtocolECDSADKG.ToString() && *protocol != common.ProtocolFROSTDKG.ToString() {

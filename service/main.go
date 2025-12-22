@@ -69,10 +69,20 @@ func runMain(p runParams) {
 
 	p.logger.Info("Loading secrets...")
 
-	st, err := tss.NewGuardianStorageFromFile(p.secrets)
+	st, err := tss.LoadGuardianStorage(tss.StorageLoader{
+		Path: p.secrets,
+	})
 	if err != nil {
 		p.logger.Fatal("failed to load secrets file", zap.Error(err))
 	}
+
+	tmp := st.ExistingSecretsTypes()
+	types := make([]string, 0, len(tmp))
+	for _, t := range tmp {
+		types = append(types, t.ToString())
+	}
+
+	p.logger.Info("Loaded secrets, starting server...", zap.Strings("loaded_schemes", types))
 
 	p.logger.Info("starting TSS engine...")
 	engine, err := tss.NewReliableTSS(st)

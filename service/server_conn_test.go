@@ -32,9 +32,9 @@ func TestSecureConn(t *testing.T) {
 
 	secretsDir := path.Join(getProjectRootDir(), "tss", "internal", "testutils", "testdata", "tss5")
 
-	serverSecrets, err := tss.NewGuardianStorageFromFile(path.Join(secretsDir, "guardian0.json"))
+	serverSecrets, err := tss.LoadGuardianStorage(tss.StorageLoader{Path: path.Join(secretsDir, "guardian0.json")})
 	a.NoError(err)
-	invalidSecrets, err := tss.NewGuardianStorageFromFile(path.Join(secretsDir, "guardian1.json"))
+	invalidSecrets, err := tss.LoadGuardianStorage(tss.StorageLoader{Path: path.Join(secretsDir, "guardian1.json")})
 	a.NoError(err)
 
 	pool := x509.NewCertPool()
