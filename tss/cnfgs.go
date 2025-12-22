@@ -33,25 +33,6 @@ type StorageLoader struct {
 	gs *GuardianStorage
 }
 
-// Default loader that does not allow missing TSS secrets.
-// for a more configurable loader, use LoadGuardianStorage.
-func NewGuardianStorageFromFile(storagePath string) (*GuardianStorage, error) {
-	loader := StorageLoader{
-		Path: storagePath,
-		gs:   &GuardianStorage{},
-
-		// not allowing missing TSS secrets by default.
-		DemandFrost: true,
-		DemandECDSA: true,
-	}
-
-	if err := loader.load(); err != nil {
-		return nil, err
-	}
-
-	return loader.gs, nil
-}
-
 // LoadGuardianStorage loads GuardianStorage from file using the provided StorageLoader.
 func LoadGuardianStorage(loader StorageLoader) (*GuardianStorage, error) {
 	if err := loader.load(); err != nil {

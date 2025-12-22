@@ -141,7 +141,7 @@ func TestNewGuardianStorageFromFile(t *testing.T) {
 
 	writeMockGuardianStorage(t, gs, path)
 
-	_, err := NewGuardianStorageFromFile(path)
+	_, err := LoadGuardianStorage(StorageLoader{Path: path, DemandECDSA: true, DemandFrost: true})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
