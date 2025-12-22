@@ -104,7 +104,7 @@ func TestMain(t *testing.T) {
 		forLocalDKG:               true,
 		storeIntoInternalTestData: true, // ensure we update the internal testdata after running DKG
 	}
-	// t.Run("RunDKG", tt.RunDKG)
+	t.Run("RunDKG", tt.RunDKG)
 
 	// tt = dkgTest{
 	// 	hostnames: hostnames,
@@ -375,7 +375,7 @@ func (d dkgTest) RunDKG(t *testing.T) {
 		_path := path.Join(d.saveFolder, saveLocation, "secrets.json")
 
 		//read the file into a GuardianStorage struct
-		gst, err := engine.NewGuardianStorageFromFile(_path)
+		gst, err := engine.LoadGuardianStorage(engine.StorageLoader{Path: _path})
 		if err != nil {
 			t.Fatalf("failed to read guardian storage from file: %v", err)
 		}

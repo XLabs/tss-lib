@@ -1122,7 +1122,11 @@ func loadMockGuardianStorage(gstorageIndex int, from string) *GuardianStorage {
 		panic(err)
 	}
 
-	st, err := NewGuardianStorageFromFile(path)
+	st, err := LoadGuardianStorage(StorageLoader{
+		Path:        path,
+		DemandFrost: true,
+		DemandECDSA: true,
+	})
 	if err != nil {
 		panic(err)
 	}

@@ -71,8 +71,6 @@ func runMain(p runParams) {
 
 	st, err := tss.LoadGuardianStorage(tss.StorageLoader{
 		Path: p.secrets,
-		// allowing to load with at least one TSS scheme present, but not demanding all of them.
-		DemandAllSecrets: false,
 	})
 	if err != nil {
 		p.logger.Fatal("failed to load secrets file", zap.Error(err))

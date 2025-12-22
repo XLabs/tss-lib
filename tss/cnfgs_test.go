@@ -86,8 +86,7 @@ func TestLoadGuardianStorage(t *testing.T) {
 
 	t.Run("Fail missing secrets", func(t *testing.T) {
 		loader := StorageLoader{
-			Path:             path,
-			DemandAllSecrets: true,
+			Path: path,
 		}
 		_, err := LoadGuardianStorage(loader)
 		if err == nil {
@@ -142,7 +141,7 @@ func TestNewGuardianStorageFromFile(t *testing.T) {
 
 	writeMockGuardianStorage(t, gs, path)
 
-	_, err := NewGuardianStorageFromFile(path)
+	_, err := LoadGuardianStorage(StorageLoader{Path: path, DemandECDSA: true, DemandFrost: true})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -175,10 +174,9 @@ func TestLoadGuardianStorage_WithSecrets(t *testing.T) {
 		writeMockGuardianStorage(t, gs, path)
 
 		_, err := LoadGuardianStorage(StorageLoader{
-			Path:             path,
-			DemandAllSecrets: false,
-			DemandECDSA:      true,
-			DemandFrost:      false,
+			Path:        path,
+			DemandECDSA: true,
+			DemandFrost: false,
 		})
 		if err != nil {
 			t.Fatal("expected no error, got:", err)
@@ -194,28 +192,44 @@ func TestLoadGuardianStorage_WithSecrets(t *testing.T) {
 		writeMockGuardianStorage(t, gs, path)
 
 		if _, err := LoadGuardianStorage(StorageLoader{
-			Path:             path,
-			DemandAllSecrets: false,
-			DemandECDSA:      false,
-			DemandFrost:      true,
+			Path:        path,
+			DemandECDSA: false,
+			DemandFrost: true,
 		}); err != nil {
 			t.Fatal("expected no error, got:", err)
 		}
 
 		if _, err := LoadGuardianStorage(StorageLoader{
-			Path:             path,
-			DemandAllSecrets: false,
-			DemandECDSA:      true,
-			DemandFrost:      false,
+			Path:        path,
+			DemandECDSA: true,
+			DemandFrost: false,
 		}); err == nil {
 			t.Fatal("expected error")
 		}
 
 		if _, err := LoadGuardianStorage(StorageLoader{
-			Path:             path,
-			DemandAllSecrets: true,
-		}); err == nil {
-			t.Fatal("expected missing ecdsa error")
+			Path:        path,
+			DemandECDSA: false,
+			DemandFrost: false,
+		}); err != nil {
+			t.Fatal("no error should've occurred, got:", err)
+		}
+	})
+
+	t.Run("missing secrets not allowed", func(t *testing.T) {
+		secretsAsString := string(gs.TSSSecrets)
+		// corrupt both configs so CBOR unmarshal fails
+		gs.TSSSecrets = []byte(strings.Replace(strings.Replace(secretsAsString, "FrostConfigs", "fr0stc0nf!gs", 1), "EcdsaConfigs", "3cds4c0nf!gs", 1))
+		defer func() { gs.TSSSecrets = []byte(secretsAsString) }() // restore
+
+		writeMockGuardianStorage(t, gs, path)
+		_, err := LoadGuardianStorage(StorageLoader{
+			Path:        path,
+			DemandECDSA: false,
+			DemandFrost: false,
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
 		}
 	})
 }
