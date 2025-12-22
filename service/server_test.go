@@ -22,6 +22,32 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func TestGetPublicData(t *testing.T) {
+	s := &server{}
+	ctx := context.Background()
+
+	t.Run("PublicDataNotInitialized", func(t *testing.T) {
+		resp, err := s.GetPublicData(ctx, &signer.PublicDataRequest{})
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, _ := status.FromError(err)
+		assert.Equal(t, codes.Internal, st.Code())
+		assert.Contains(t, err.Error(), "public data not initialized")
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		expectedPubData := &signer.PublicData{
+			FrostPublicData: []byte("frost-key"),
+			EcdsaPublicData: []byte("ecdsa-key"),
+		}
+		s.pubData = expectedPubData
+
+		resp, err := s.GetPublicData(ctx, &signer.PublicDataRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, expectedPubData, resp)
+	})
+}
+
 func TestVerifySignature(t *testing.T) {
 	s := &server{}
 	ctx := context.Background()
@@ -138,7 +164,7 @@ func TestVerifySignature(t *testing.T) {
 	// Perhaps by exposing a method in multi-party-sig/protocol/frost package
 	// consider exposing ecdsa basic signature generation as well while at it (and remove NewEcdsaSignature here).
 	t.Run("FROST signature", func(t *testing.T) {
-		// These values where generated using a real FROST signing session with multiple parties.
+		// These values were generated using a real FROST signing session with multiple parties.
 		sBytes := mustHexDecode("7543bc351af14435c68d9dda741fecd0ee5f493721dd1b5c46587a7409272f3e")
 		z, err := grp.UnmarshalScalar(sBytes)
 		require.NoError(t, err)
