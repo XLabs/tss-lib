@@ -189,18 +189,27 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
 
-	info, err := t.fp.GetSigningInfo(sigtask)
+	info, err := t.fp.AsyncRequestNewSignature(sigtask)
 	if err != nil {
-		return fmt.Errorf("couldnt generate signing task: %w", err)
+		return err
 	}
 
 	if err := validateTrackingID(info.TrackingID); err != nil {
 		return err
 	}
 
-	info, err = t.fp.AsyncRequestNewSignature(sigtask)
-	if err != nil {
-		return err
+	if !info.IsSigner {
+		// attempting to report to the user that this guardian is not part of the signing committee.
+		t.sendResp(info.TrackingID, &signer.SignResponse{
+			Response: &signer.SignResponse_Status{
+				Status: &signer.SignStatus{
+					Code:     int32(codes.FailedPrecondition),
+					Message:  "signer is not part of the signing committee",
+					Digest:   info.TrackingID.Digest[:],
+					Protocol: protocolType.ToString(),
+				},
+			},
+		})
 	}
 
 	t.logger.Info(
@@ -466,10 +475,10 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 	t.sigCounter.remove(sig.TrackingId)
 
 	t.sendResp(
+		sig.TrackingId,
 		&signer.SignResponse{
 			Response: &signer.SignResponse_Signature{Signature: sig},
 		},
-		sig.TrackingId.ToString(),
 	)
 }
 
@@ -537,7 +546,7 @@ func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID
 		code = codes.DeadlineExceeded
 	}
 
-	resp := &signer.SignResponse{
+	t.sendResp(trackid, &signer.SignResponse{
 		Response: &signer.SignResponse_Status{
 			Status: &signer.SignStatus{
 				Code:     int32(code),
@@ -547,20 +556,18 @@ func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID
 				Details:  dt,
 			},
 		},
-	}
-
-	t.sendResp(resp, tidStr)
+	})
 
 	return trackid
 }
 
-func (t *Engine) sendResp(resp *signer.SignResponse, tidStr string) {
+func (t *Engine) sendResp(tid *common.TrackingID, resp *signer.SignResponse) {
 	select {
 	case t.signResponseChan <- resp:
 	default:
 		flds := []zap.Field{}
-		if tidStr != "" {
-			flds = append(flds, zap.String("trackingId", tidStr))
+		if tid != nil {
+			flds = append(flds, zap.String("trackingId", tid.ToString()))
 		}
 
 		flds = append(flds, zap.String("responseType", fmt.Sprintf("%T", resp.Response)))
