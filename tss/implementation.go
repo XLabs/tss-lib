@@ -432,55 +432,6 @@ func (t *Engine) handleFPWarning(warn *party.Warning) {
 		return
 	}
 
-	t.logReceivedWarning(warn)
-
-	if warn.TrackingID == nil {
-		return
-	}
-
-	tid := warn.TrackingID
-	tidStr := tid.ToString()
-
-	prot, err := tid.GetProtocolType()
-	if err != nil {
-		t.logger.Error("failed to get protocol type from trackingID while reporting warning", zap.String("trackingId", tidStr), zap.Error(err))
-		return
-	}
-
-	clprt := []*common.PartyID{}
-	if warn.PossibleCulprit != nil {
-		clprt = append(clprt, warn.PossibleCulprit)
-	}
-	// report warning to output channel:
-	w := signer.WarningDetails{
-		Culprits: clprt, // TODO: consider translate into eth address.
-		Round:    int32(warn.SessionRound),
-	}
-
-	dt, err := anypb.New(&w)
-	if err != nil {
-		t.logger.Error("failed to create Any proto for warning details", zap.Error(err))
-		return
-	}
-
-	resp := &signer.SignResponse{
-		Response: &signer.SignResponse_Status{
-			Status: &signer.SignStatus{
-				// TODO: improve code mapping. currently using PermissionDenied since we warn when peers send
-				// messages when not in committee or when they send more than one message.
-				Code:     int32(codes.PermissionDenied),
-				Message:  warn.Message,
-				Details:  dt,
-				Digest:   tid.GetDigest(),
-				Protocol: prot.ToString(),
-			},
-		},
-	}
-
-	t.sendResp(resp, tidStr)
-}
-
-func (t *Engine) logReceivedWarning(warn *party.Warning) {
 	flds := []zap.Field{}
 
 	if warn.TrackingID != nil {
