@@ -529,11 +529,19 @@ func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID
 		)
 	}
 
+	// most errors the fp outputs (other than timeout errors) are related to other signers, or internal issues.
+	// e.g., badMessages, internal state compromise (errNilSigner), message from non-committee member, etc.
+	// thus, we tell the user it's an internal error unless it's a timeout.
+	code := codes.Internal
+	if errors.Is(detailedErr.Cause(), party.ErrTimeout) {
+		code = codes.DeadlineExceeded
+	}
+
 	resp := &signer.SignResponse{
 		Response: &signer.SignResponse_Status{
 			Status: &signer.SignStatus{
-				Code:     int32(codes.Internal), // TODO: Improve error code mapping.
-				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Cause().Error()),
+				Code:     int32(code),
+				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Error()),
 				Digest:   trackid.GetDigest(),
 				Protocol: pp.ToString(),
 				Details:  dt,
