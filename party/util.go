@@ -94,11 +94,11 @@ type sessionMap struct {
 	sync.Map
 }
 
-func (s *sessionMap) cleanup(maxTTL time.Duration) {
+func (s *sessionMap) cleanup(maxTTL time.Duration) []*common.TrackingID {
 	currentTime := time.Now()
 
 	keysToDelete := make([]any, 0)
-
+	ttlSigs := make([]*common.TrackingID, 0)
 	s.Range(func(key, value any) bool {
 		signer, ok := value.(*singleSession)
 		if !ok {
@@ -110,6 +110,13 @@ func (s *sessionMap) cleanup(maxTTL time.Duration) {
 
 		if currentTime.Sub(signer.getInitTime()) >= maxTTL {
 			keysToDelete = append(keysToDelete, key)
+
+			// activated signer means a request was made by the party's user,
+			// and that this signer is also in the committee, but failed to produce a signature in time.
+			// thus we output its tracking ID for reporting purposes.
+			if signer.getState() == activated {
+				ttlSigs = append(ttlSigs, signer.trackingId)
+			}
 		}
 
 		return true // true to continue the iteration
@@ -118,6 +125,8 @@ func (s *sessionMap) cleanup(maxTTL time.Duration) {
 	for _, key := range keysToDelete {
 		s.Delete(key)
 	}
+
+	return ttlSigs
 }
 
 func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSession, bool) {

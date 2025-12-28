@@ -61,6 +61,8 @@ func hash(msg []byte) Digest {
 	return sha3.Sum256(msg)
 }
 
+var ErrTimeout = errors.New("timed out")
+
 func (p *Impl) cleanupWorker() {
 	defer p.workersWg.Done()
 
@@ -70,8 +72,12 @@ func (p *Impl) cleanupWorker() {
 			return
 
 		case <-time.After(p.maxTTl):
-			p.sessionMap.cleanup(p.maxTTl)
+			ttlSigs := p.sessionMap.cleanup(p.maxTTl)
 			p.rateLimiter.cleanSelf(p.maxTTl)
+
+			for _, tid := range ttlSigs {
+				p.outputErr(common.NewTrackableError(ErrTimeout, "signature timed out", -1, nil, tid))
+			}
 		}
 	}
 }

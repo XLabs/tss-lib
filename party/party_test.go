@@ -322,6 +322,13 @@ func TestCleanup(t *testing.T) {
 
 	<-time.After(maxTTL * 3)
 
+	select {
+	case err := <-n.chans.ErrChannel:
+		a.ErrorIs(err, ErrTimeout)
+	default:
+		a.Fail("expected timeout error to be reported")
+	}
+
 	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
 	a.Equal(0, p1.rateLimiter.lenDigestMap(), "expected 0 digest in rate limiter")
 
