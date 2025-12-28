@@ -516,7 +516,7 @@ func TestChangingCommittee(t *testing.T) {
 	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold) // threshold =2 means we need 3 in comittee to sign
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold) // threshold =2 means we need 3 in committee to sign
 
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
@@ -556,7 +556,7 @@ func TestChangingCommittee(t *testing.T) {
 
 		<-barrier
 		for nremoved := 1; nremoved < 5; nremoved++ {
-			fmt.Println("changing comittee, starting signing process again.")
+			fmt.Println("changing committee, starting signing process again.")
 
 			faulties := make([]*common.PartyID, nremoved)
 			for i := 0; i < nremoved; i++ {
@@ -582,7 +582,7 @@ func TestChangingCommittee(t *testing.T) {
 				})
 				p.sessionMap.Map.Delete(trackid.ToString()) // ensures signature is not created.
 
-				// shuffle the order of the parties when telling them to replace the comittee.
+				// shuffle the order of the parties when telling them to replace the committee.
 				// (Ensures different ordered faulties array does not affect the signprotocol)
 				seedPerParty := pidToDigest(p.self)
 
@@ -913,17 +913,16 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 	case <-signer.outputChannels.WarningChannel:
 		return
 	case <-time.After(5 * time.Second):
-		// panic("timeout waiting for warning to be sent")
-		// a.FailNow("timeout waiting for warning to be sent")
+		a.FailNow("timeout waiting for warning to be sent")
 	}
 }
 
 func grabNotInCommittee(parties []FullParty, info *SigningInfo) *Impl {
-	comittee := common.UnSortedPartyIDs(info.SigningCommittee)
+	committee := common.UnSortedPartyIDs(info.SigningCommittee)
 	// grab someone not in committee:
 	for i := range parties {
 		id := parties[i].(*Impl).self
-		if comittee.IsInCommittee(id) {
+		if committee.IsInCommittee(id) {
 			continue
 		}
 		return parties[i].(*Impl)
