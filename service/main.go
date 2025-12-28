@@ -97,7 +97,7 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to start TSS signer", zap.Error(err))
 	}
 
-	genPubData, err := genPubData(engine)
+	pubData, err := genPubData(engine)
 	if err != nil {
 		p.logger.Fatal("failed to generate public data", zap.Error(err))
 	}
@@ -150,7 +150,7 @@ func runMain(p runParams) {
 		Signer:   engine,
 		listener: l,
 		Server:   grpcServer,
-		pubData:  genPubData,
+		pubData:  pubData,
 
 		mtx:           sync.Mutex{},
 		hasSubscriber: false,

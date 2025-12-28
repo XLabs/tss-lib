@@ -266,9 +266,9 @@ func NewEcdsaSignature(x curve.Scalar, hash []byte) *ecdsa.Signature {
 }
 
 func mustHexDecode(s string) []byte {
-	// if len(s) > 1 && s[0:2] == "0x" {
-	// 	s = s[2:]
-	// }
+	if len(s) > 1 && s[0:2] == "0x" {
+		s = s[2:]
+	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
 		panic(err)

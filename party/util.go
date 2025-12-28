@@ -162,10 +162,16 @@ func rsToCommonSig(R curve.Point, S curve.Scalar, self *common.PartyID, tid *com
 	}, nil
 }
 
+// FrostSigToCommonSig converts a FROST signature into the common SignatureData format
+// using the provided PartyID and TrackingID to both grab the digest and be able to create a common.Error.
+// exported to be used in unit test in service/server_test.go
 func FrostSigToCommonSig(sig *frost.Signature, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
 	return rsToCommonSig(sig.R, sig.Z, self, tid)
 }
 
+// EcdsaSigToCommonSig converts an ECDSA signature into the common SignatureData format
+// using the provided PartyID and TrackingID to both grab the digest and be able to create a common.Error.
+// exported to be used in unit test in service/server_test.go
 func EcdsaSigToCommonSig(res *ecdsa.Signature, partyID *common.PartyID, trackingID *common.TrackingID) (*common.SignatureData, *common.Error) {
 	return rsToCommonSig(res.R, res.S, partyID, trackingID)
 }

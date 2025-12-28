@@ -144,6 +144,8 @@ func (s *server) responseSender(stream signer.Signer_SignMessageServer, ch <-cha
 	}
 }
 
+// GetPublicData implements signer.SignerServer. It returns the public data
+// (public keys) for the supported protocols by this signer.
 func (s *server) GetPublicData(ctx context.Context, _ *signer.PublicDataRequest) (*signer.PublicData, error) {
 	if s.pubData == nil {
 		return nil, status.Error(codes.Internal, "public data not initialized")
@@ -178,12 +180,13 @@ func getPubkey(s tss.Signer, prot common.ProtocolType) ([]byte, error) {
 	return key.Curve().MarshalPoint(key)
 }
 
+// VerifySignature implements signer.SignerServer. It verifies the provided signature
+// against the provided public data and returns whether the signature is valid.
 func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatureRequest) (*signer.VerifySignatureResponse, error) {
-	if req == nil || req.Signature == nil || req.Signature.TrackingId == nil || req.PublicData == nil {
+	if req == nil || req.GetSignature() == nil || req.GetSignature().GetTrackingId() == nil || req.GetPublicData() == nil {
 		return nil, status.Error(codes.InvalidArgument, "request, signature, public data, or tracking ID is missing")
 	}
 
-	// inspect that req has the same public key as ours for the given protocol
 	protocol, err := req.GetSignature().GetTrackingId().GetProtocolType()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid protocol type in tracking ID")
