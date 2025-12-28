@@ -49,6 +49,8 @@ github.com/xlabs/multi-party-sig v0.0.2-0.20251106111445-bf7821c135f2 h1:Myo7YtD
 github.com/xlabs/multi-party-sig v0.0.2-0.20251106111445-bf7821c135f2/go.mod h1:SBODTeykpKscQ1b0i0OPwjYbPpyvZzsKuT3efdTKidc=
 github.com/xlabs/tss-common v0.0.0-20251105153320-7da4a3182636 h1:0jDa2rP6/JKx93Cj+FqwO9kDKhqLAFPodQofMhsd24A=
 github.com/xlabs/tss-common v0.0.0-20251105153320-7da4a3182636/go.mod h1:fZmQ4NRkV/rXf68cDLgZoi/4LF89Nn8Rh2KGdxDB+ZM=
+github.com/xlabs/tss-common v0.0.0-20251221102900-176518c9e1c6 h1:nlFRujNBoGUoNb1pzGsY3gt0+J2SyT0G0pnBGC5uuG0=
+github.com/xlabs/tss-common v0.0.0-20251221102900-176518c9e1c6/go.mod h1:fZmQ4NRkV/rXf68cDLgZoi/4LF89Nn8Rh2KGdxDB+ZM=
 github.com/zeebo/assert v1.1.0 h1:hU1L1vLTHsnO8x8c9KAR5GmM5QscxHg5RNU5z5qbUWY=
 github.com/zeebo/assert v1.1.0/go.mod h1:Pq9JiuJQpG8JLJdtkwrJESF0Foym2/D9XMU5ciN/wJ0=
 github.com/zeebo/blake3 v0.2.4 h1:KYQPkhpRtcqh0ssGYcKLG1JYvddkEA8QwCM/yBqhaZI=
@@ -92,6 +94,8 @@ google.golang.org/grpc v1.76.0 h1:UnVkv1+uMLYXoIz6o7chp59WfQUYA2ex/BXQ9rHZu7A=
 google.golang.org/grpc v1.76.0/go.mod h1:Ju12QI8M6iQJtbcsV+awF5a4hfJMLi4X0JLo94ULZ6c=
 google.golang.org/protobuf v1.36.10 h1:AYd7cD/uASjIL6Q9LiTjz8JLcrh/88q5UObnmY3aOOE=
 google.golang.org/protobuf v1.36.10/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
+google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=

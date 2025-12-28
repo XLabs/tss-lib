@@ -97,6 +97,11 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to start TSS signer", zap.Error(err))
 	}
 
+	pubData, err := genPubData(engine)
+	if err != nil {
+		p.logger.Fatal("failed to generate public data", zap.Error(err))
+	}
+
 	p.logger.Info("Starting peer-to-peer communication layer...")
 	comms, err := comm.NewServer(p.logger, engine)
 	if err != nil {
@@ -139,12 +144,14 @@ func runMain(p runParams) {
 	srvr := &server{
 		UnimplementedSignerServer: signer.UnimplementedSignerServer{}, // grpc requirement
 
-		ctx:           ctx,
-		cancel:        cancel,
-		logger:        p.logger,
-		Signer:        engine,
-		listener:      l,
-		Server:        grpcServer,
+		ctx:      ctx,
+		cancel:   cancel,
+		logger:   p.logger,
+		Signer:   engine,
+		listener: l,
+		Server:   grpcServer,
+		pubData:  pubData,
+
 		mtx:           sync.Mutex{},
 		hasSubscriber: false,
 	}
