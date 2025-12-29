@@ -1,6 +1,7 @@
 package party
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -549,4 +550,27 @@ func (signer *singleSession) advanceOnce() (finalizeReport, *common.Error) {
 	}
 
 	return report, err
+}
+
+// unsafeIsInitialized returns true if all required fields are set.
+// should be called under lock (thus unsafe in the name).
+func (s *singleSession) unsafeIsInitialized() bool {
+	basicFieldInitialized := s.trackingId != nil &&
+		len(s.committee) > 0 &&
+		s.protocol != "" &&
+		s.self != nil &&
+		!s.startTime.IsZero() &&
+		s.outputChannels != nil &&
+		s.messages != nil
+
+	if !basicFieldInitialized {
+		return false // missing field initialization. means an error during setup.
+	}
+
+	if s.isKeygenSession {
+		return true // keygen sessions don't have digest requirement.
+	}
+
+	// ensure digest is set for signing sessions.
+	return bytes.Equal(s.trackingId.GetDigest(), s.digest[:])
 }

@@ -879,7 +879,7 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 			Digest:       hash,
 			ProtocolType: common.ProtocolFROSTSign,
 		})
-		if info.IsSigner {
+		if info.IsParticipating {
 			inCommitteeIndex = i
 			signingInfo = info
 			break

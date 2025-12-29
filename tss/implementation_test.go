@@ -869,7 +869,7 @@ func TestNoFaultsFlow(t *testing.T) {
 
 		fmt.Println("engines started, requesting sigs")
 
-		// all engines are started, now we can begin the protocol.
+		// all engines have started, now we can begin the protocol.
 		for _, d := range digests {
 
 			for _, engine := range engines {
@@ -1220,7 +1220,16 @@ func msgHandler(ctx context.Context, engines []*Engine, numDiffSigsExpected int)
 					case s := <-engine.Responses():
 						tmp, ok := s.Response.(*signer.SignResponse_Signature)
 						if !ok {
-							fmt.Printf("received non-signature response from engine (%T), ignoring.\n", s.Response)
+							status, ok := s.Response.(*signer.SignResponse_Status)
+							if !ok {
+								panic("unknown response type")
+							}
+
+							if status.Status.Code == int32(codes.FailedPrecondition) && status.Status.Message == party.ErrNotInCommittee.Error() {
+								continue // no need to inform about not being in committee. it is common case.
+							}
+
+							fmt.Printf("received status reportfrom engine: %v\n", status)
 							continue
 						}
 
@@ -1233,7 +1242,7 @@ func msgHandler(ctx context.Context, engines []*Engine, numDiffSigsExpected int)
 						ln := len(nmsigs)
 						lck.Unlock()
 
-						fmt.Println("received signature", ln)
+						fmt.Println("received signature", ln, sig.TrackingId.Digest[0])
 						if ln < numDiffSigsExpected {
 							continue
 						}
@@ -1585,7 +1594,7 @@ mainloop:
 			info1, err := e.fp.GetSigningInfo(tsk)
 			a.NoError(err)
 
-			if !info1.IsSigner {
+			if !info1.IsParticipating {
 				continue mainloop
 			}
 		}

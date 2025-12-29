@@ -198,13 +198,13 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 		return err
 	}
 
-	if !info.IsSigner {
+	if !info.IsParticipating {
 		// attempting to report to the user that this guardian is not part of the signing committee.
 		t.sendResp(info.TrackingID, &signer.SignResponse{
 			Response: &signer.SignResponse_Status{
 				Status: &signer.SignStatus{
 					Code:     int32(codes.FailedPrecondition),
-					Message:  "signer is not part of the signing committee",
+					Message:  party.ErrNotInCommittee.Error(),
 					Digest:   info.TrackingID.Digest[:],
 					Protocol: protocolType.ToString(),
 				},

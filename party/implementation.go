@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -174,14 +173,17 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 
 	trackid := p.createTrackingID(s)
 
-	// fast lock.
-	signer, err := p.getOrCreateSingleSession(trackid)
+	info, err := p.GetSigningInfo(s)
 	if err != nil {
 		return nil, err
 	}
 
-	info, err := p.GetSigningInfo(s)
+	// fast lock.
+	signer, err := p.getOrCreateSingleSession(trackid)
 	if err != nil {
+		if errors.Is(err, ErrNotInCommittee) {
+			return info, nil // not an error for the client.
+		}
 		return nil, err
 	}
 
@@ -318,30 +320,12 @@ func (p *Impl) setSigningSession(signer *singleSession) error {
 	signer.mtx.Lock()
 	defer signer.mtx.Unlock()
 
-	// this function sets the state. once set, it cannot be changed.
+	// once state changes from awaitingActivation, the signer is fully initialized.
 	if signer.getState() != awaitingActivation {
 		return nil
 	}
 
-	// compute committee, then check if the signer is in the committee.
-	committee, err := p.computeCommittee(signer.trackingId)
-	if err != nil {
-		return err
-	}
-
-	signer.committee = committee
-
-	if !common.UnSortedPartyIDs(signer.committee).IsInCommittee(p.self) {
-		signer.state.Store(int64(notInCommittee))
-
-		// not in committee, so we can remove it from the rate limiter.
-		// we will not store any messages for this session anymore.
-		p.rateLimiter.remove(signer.trackingId)
-
-		return nil
-	}
-
-	// set the state to "set" (in committee).
+	// set the state to "activated" (in committee).
 	signer.state.Store(int64(activated))
 
 	var sessionCreator protocol.StartFunc
@@ -364,55 +348,69 @@ func (p *Impl) setSigningSession(signer *singleSession) error {
 	return nil
 }
 
+var ErrNotInCommittee = errors.New("party not in committee")
+
 // getOrCreateSingleSession returns the signer for the given digest, or creates a new one if it doesn't exist.
 func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleSession, error) {
-	s := p.sessionMap
+	if err := BasicTrackingIDValidation(trackingId); err != nil {
+		return nil, err
+	}
 
-	dgst := Digest{}
-	copy(dgst[:], trackingId.Digest)
+	committee, err := p.computeCommittee(trackingId)
+	if err != nil {
+		return nil, err
+	}
+
+	if !common.UnSortedPartyIDs(committee).IsInCommittee(p.self) {
+		p.rateLimiter.remove(trackingId) // we don't store the session, so we remove any rate limiting state.
+
+		return nil, ErrNotInCommittee
+	}
+
+	session, load := p.sessionMap.LoadOrStore(trackingId.ToString(), &singleSession{})
+
+	// locking the session for initialization, which should be done once.
+	session.mtx.Lock()
+	defer session.mtx.Unlock()
+
+	if load && session.unsafeIsInitialized() {
+		// fast path: session already exists and is initialized with all required fields.
+		return session, nil
+	}
 
 	protocol, err := trackingId.GetProtocolType()
 	if err != nil {
 		return nil, err
 	}
 
-	signer, _ := s.LoadOrStore(trackingId.ToString(), &singleSession{
-		startTime: time.Now(),
-		state:     atomic.Int64{},
+	session.isKeygenSession = isDkg(protocol)
+	session.trackingId = trackingId
+	// default state is awaitingActivation, can change later to activated.
+	session.state.Store(int64(awaitingActivation))
+	session.self = p.self
+	copy(session.digest[:], trackingId.Digest)
+	session.protocol = protocol
+	session.committee = committee
+	session.session = nil // will be set when a client activates the signer.
+	session.messages = make(map[round.Number]map[strPartyID]*messageKeep)
+	session.outputChannels = &p.outputChannels
+	session.startTime = time.Now()
 
-		self:       p.self,
-		digest:     dgst,
-		trackingId: trackingId,
-		mtx:        sync.Mutex{},
-
-		protocol: protocol,
-		// A SingleSession may be created in response to a message from a peer whose honesty
-		// cannot be assumed. Therefore, any data provided alongside the trackingID
-		// (the identifier for this new session) must be considered untrusted.
-		// In particular, we cannot rely on it to determine the session type or committee.
-		// To establish these safely, we wait for the operator/user to explicitly request
-		// a new signing or DKG via AsyncRequestNewSignature/StartDKG, which updates both
-		// the session type and the committee.
-		committee: nil,
-		session:   nil,
-		// first round doesn't receive messages (only round number 2,3)
-		messages: make(map[round.Number]map[strPartyID]*messageKeep, frost.NumRounds-1),
-
-		outputChannels: &p.outputChannels,
-	})
-
-	// TODO: add committee computation here, to reduce storing messages for sessions
-	//       that won't be part of the committee.
-	return signer, nil
+	return session, nil
 }
 
 func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyIDs, error) {
-	validParties, err := p.getValidCommitteeMembers(trackid)
+	prot, err := trackid.GetProtocolType()
 	if err != nil {
 		return nil, err
 	}
 
-	prot, err := trackid.GetProtocolType()
+	if prot == common.ProtocolFROSTDKG || prot == common.ProtocolECDSADKG {
+		// everyone is in the committee (DKG case).
+		return common.SortPartyIDs(p.peers), nil
+	}
+
+	validParties, err := p.getValidCommitteeMembers(trackid)
 	if err != nil {
 		return nil, err
 	}
@@ -527,8 +525,12 @@ func (p *Impl) handleMessage(task feedMessageTask) {
 	// assumes the message has a tracking ID.
 	message := task.message
 
-	signer, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
+	session, err := p.getOrCreateSingleSession(message.WireMsg().GetTrackingID())
 	if err != nil {
+		if errors.Is(err, ErrNotInCommittee) {
+			return // no need to report to the client.
+		}
+
 		p.outputErr(common.NewTrackableError(
 			err,
 			"handleMessage",
@@ -540,28 +542,19 @@ func (p *Impl) handleMessage(task feedMessageTask) {
 		return
 	}
 
-	state := signer.getState()
-	if state == notInCommittee {
-		// no need to store the message since the signer is not in the committee.
-
-		// ensuring we remove this trackid from the rate limiter.
-		p.rateLimiter.remove(signer.trackingId)
-
-		return
-	}
-
-	if err := signer.storeMessage(message); err != nil {
+	// storing the message in case the session will be actived later.
+	if err := session.storeMessage(message); err != nil {
 		p.outputErr(err)
 
 		return
 	}
 
-	if state != activated {
+	if session.getState() != activated {
 		// not allowed to consume/ finalize messages.
 		return
 	}
 
-	if err := p.advanceSession(signer); err != nil {
+	if err := p.advanceSession(session); err != nil {
 		p.outputErr(err)
 
 		return
@@ -625,7 +618,7 @@ func (p *Impl) GetSigningInfo(s SigningTask) (*SigningInfo, error) {
 	return &SigningInfo{
 		SigningCommittee: sortedCommittee,
 		TrackingID:       trackingId,
-		IsSigner:         common.UnSortedPartyIDs(sortedCommittee).IsInCommittee(p.self),
+		IsParticipating:  common.UnSortedPartyIDs(sortedCommittee).IsInCommittee(p.self),
 	}, nil
 }
 
@@ -652,6 +645,7 @@ func (p *Impl) StartDKG(task DkgTask) error {
 
 	s, err := p.getOrCreateSingleSession(tid)
 	if err != nil {
+		// since DKG involves all parties, not being in committee is an error.
 		return common.NewError(
 			err,
 			"StartDKG",
