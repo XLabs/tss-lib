@@ -75,7 +75,7 @@ func (p *Impl) cleanupWorker() {
 			p.rateLimiter.cleanSelf(p.maxTTl)
 
 			for _, tid := range ttlSigs {
-				p.outputErr(common.NewTrackableError(ErrTimeout, "signature timed out", -1, nil, tid))
+				p.outputErr(common.NewTrackableError(ErrTimeout, "signature timed out", -1, p.self, tid))
 			}
 		}
 	}
@@ -542,7 +542,7 @@ func (p *Impl) handleMessage(task feedMessageTask) {
 		return
 	}
 
-	// storing the message in case the session will be actived later.
+	// storing the message in case the session will be activated later.
 	if err := session.storeMessage(message); err != nil {
 		p.outputErr(err)
 
