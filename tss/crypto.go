@@ -2,6 +2,7 @@ package tss
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
@@ -17,7 +18,7 @@ func hash(msg []byte) digest {
 }
 
 func (d digest) ToString() string {
-	return string(d[:])
+	return base64.StdEncoding.EncodeToString(d[:]) // using stdEncoding to ensure it can be read when debugging.
 }
 
 // using this function since proto.Marshal is either non-deterministic,

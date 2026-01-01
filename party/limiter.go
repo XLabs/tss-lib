@@ -9,7 +9,9 @@ type set[T comparable] map[T]struct{}
 
 type trackidString string
 
-// RateLimiter is a helper struct to track and limit the number of something a peer gives.
+// RateLimiter is a helper struct to track and limit the number of trackables a peer can be involved in.
+// trackable can be any type that implements the trackable interface.
+//
 // For instance, in our case, we want to limit the number of active sessions a peer can be involved in.
 // Each session has a digest, and each peer is allowed to be active
 // for a certain number of sessions.
@@ -40,8 +42,8 @@ type trackable interface {
 	ToString() string
 }
 
-// Add adds a peer to the counter for a given digest.
-// returns false if this peer is active for too many signatures ( > r.maxActiveSessions).
+// Add adds a peer to the counter for a given trackable.
+// returns false if this peer is active for too many trackables ( > r.maxActiveSessions).
 func (r *RateLimiter) Add(toTrack, peer trackable) bool {
 	if toTrack == nil || peer == nil {
 		return false
@@ -61,12 +63,12 @@ func (r *RateLimiter) Add(toTrack, peer trackable) bool {
 		r.peerToTracked[strPartyId] = make(set[trackidString])
 	}
 
-	// if already an active signature for this participant, then it doesn't count as an additional signature
+	// if already an active trackable for this participant, then it doesn't count as an additional trackable
 	if _, ok := r.peerToTracked[strPartyId][trackedKey]; ok {
 		return true
 	}
 
-	// the participant hasn't yet participated in this signing for the digest, we must ensure an additional signature is allowed
+	// the participant hasn't yet participated for the trackable, we must ensure an additional trackable is allowed
 	if len(r.peerToTracked[strPartyId])+1 > r.maxActiveSessions {
 		return false
 	}

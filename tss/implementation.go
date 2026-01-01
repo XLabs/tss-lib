@@ -60,13 +60,10 @@ type PEM []byte
 
 // Contains the TSS related configurations.
 type Configurations struct {
-	// Used to limit the number of messages a peer can send. This includes both broadcasts, echos and unicasts.
-	// at this time, messages are limited per peer, regardless of the protocol.
-	// Furthermore, the limit is cleaned every 2*MaxSignerTTL duration (i.e., when we clean the internal mappings).
-	// The limit should be set considering the number rounds per signature, number of peers, and expected number
-	//  of simultaneous signatures.
-	MaxMessagesPerPeer int
-
+	// MaxSimultaneousSignatures is the maximum number of signature sessions
+	// a peer can participate in Simultaneously.
+	// It is also used to limit the number of messages a peer can
+	// send (i.e., limit per peer is: MaxSimultaneousSignatures*(numberOfBroadcast+numberOfUnicasts)).
 	MaxSimultaneousSignatures int
 	// MaxSignerTTL is the maximum time a signature is allowed to be active.
 	// used to release resources.
@@ -258,10 +255,6 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		return nil, fmt.Errorf("the guardian's tss storage is nil")
 	}
 
-	if storage.MaxMessagesPerPeer <= 0 {
-		storage.MaxMessagesPerPeer = defaultMaxMessagesPerPeer
-	}
-
 	if storage.MaxSimultaneousSignatures <= 0 {
 		storage.MaxSimultaneousSignatures = defaultMaxLiveSignatures
 	}
@@ -293,7 +286,7 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 	expectedMsgs := storage.MaxSimultaneousSignatures *
 		(numBroadcastsPerSignature + numUnicastsRounds*storage.NumGuardians()) * 2 // times 2 to stay on the safe side.
 
-	rateLimiter := party.NewRateLimiter(storage.MaxMessagesPerPeer)
+	rateLimiter := party.NewRateLimiter(expectedMsgs)
 	t := &Engine{
 		ctx: nil,
 
