@@ -1,6 +1,8 @@
 package tss
 
 import (
+	"fmt"
+
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -139,4 +141,18 @@ func (u *Unicast) cloneSelf() Sendable {
 		Unicast:     proto.Clone(u.Unicast).(*tsscommv1.Unicast),
 		Receipients: clns,
 	}
+}
+
+// hashContent returns the hash of the content of the incoming message.
+func (i *IncomingMessage) hashContent() (digest, error) {
+	if i == nil || i.Content == nil {
+		return digest{}, errNilIncoming
+	}
+
+	bytes, err := proto.Marshal(i.Content)
+	if err != nil {
+		return digest{}, fmt.Errorf("failed to marshal content: %w", err)
+	}
+
+	return hash(bytes), nil
 }

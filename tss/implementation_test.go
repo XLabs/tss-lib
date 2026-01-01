@@ -490,7 +490,7 @@ func TestBadInputs(t *testing.T) {
 		err = e1.handleIncomingTssMessage(&IncomingMessage{})
 		a.ErrorIs(err, errNilSource)
 
-		err = e1.handleIncomingTssMessage(&IncomingMessage{Source: e2.Self})
+		err = e1.handleIncomingTssMessage(&IncomingMessage{Source: e2.Self, Content: &tsscommv1.PropagatedMessage{}})
 		a.ErrorIs(err, errNeitherBroadcastNorUnicast)
 
 		err = e1.handleIncomingTssMessage(&IncomingMessage{
@@ -2170,4 +2170,28 @@ func TestGetEthAddress(t *testing.T) {
 
 	_, err = e.GetEthAddress("invalid_protocol")
 	a.Error(err)
+}
+
+func TestFullChan(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	e := engines[0]
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	e.logger = zap.New(core)
+
+	e.messageOutChan = make(chan Sendable, 1) // small buffer to test full chan
+
+	fake := generateFakeMessageWithRandomContent(e.Self.Pid, nil, round2Message, party.Digest{1})
+	msg := parsedIntoEcho(a, e, fake)
+
+	broadcast := &deliverableMessage{&parsedTssContent{fake, ""}}
+	// Fill the channel
+	e.sendEchoOut(broadcast, msg)
+	e.sendEchoOut(broadcast, msg)
+
+	a.Equal(1, logs.Len())
+	if logs.Len() > 0 {
+		a.Equal("couldn't echo the message, network output channel buffer is full", logs.All()[0].Message)
+	}
 }

@@ -51,18 +51,6 @@ type deliverableMessage struct {
 	deliverable
 }
 
-// trackableBroadcast is a helper struct that implements the party.trackable interface for broadcast messages.
-// allow messages that can create a uuid to be tracked by the rate limiter.
-type trackableMessage struct {
-	b broadcastMessage // any message that can create a uuid/ be broadcasted.
-}
-
-// ToString converts the trackableBroadcast into a string representation.
-func (tb trackableMessage) ToString() string {
-	tmp := tb.b.getUUID([]byte(trackingDomain))
-	return string(tmp[:])
-}
-
 // serializeableMessage is a helper struct that converts a serializable message into a broadcastMessage.
 type serializeableMessage struct {
 	serialzeable

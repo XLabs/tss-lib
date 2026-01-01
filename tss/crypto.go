@@ -16,6 +16,10 @@ func hash(msg []byte) digest {
 	return d
 }
 
+func (d digest) ToString() string {
+	return string(d[:])
+}
+
 // using this function since proto.Marshal is either non-deterministic,
 // or it isn't canonical - as stated in proto.MarshalOptions docs.
 

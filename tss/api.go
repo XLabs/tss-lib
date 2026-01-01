@@ -31,9 +31,10 @@ type Incoming interface {
 	message
 	IsUnicast() bool
 	GetSource() *Identity
-
 	toUnicast() *tsscommv1.Unicast
 	toBroadcastMsg() *tsscommv1.Echo
+
+	hashContent() (digest, error)
 }
 
 // ReliableMessenger is a component of tss, where it knows how to handle incoming tsscommv1.PropagatedMessage,

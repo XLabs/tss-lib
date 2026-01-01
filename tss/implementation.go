@@ -614,15 +614,15 @@ func (t *Engine) handleFpOutput(m common.Message) {
 		return
 	}
 
-	t.reportDetailedErr(
-		common.NewTrackableError(
-			fmt.Errorf("received err %w while trying to send %T", err, m.Type()),
-			"handleFpOutput:intoSendable",
-			-1,
-			nil,
-			m.WireMsg().TrackingID,
-		),
+	newDetailedErr := common.NewTrackableError(
+		fmt.Errorf("received err %w while trying to send %T", err, m.Type()),
+		"handleFpOutput:intoSendable",
+		-1,
+		nil,
+		m.WireMsg().TrackingID,
 	)
+
+	t.reportDetailedErr(newDetailedErr)
 }
 
 func (t *Engine) cleanup(maxTTL time.Duration) {
@@ -719,17 +719,24 @@ func (t *Engine) handleIncomingTssMessage(msg Incoming) error {
 		return errNilSource
 	}
 
-	if msg.IsUnicast() {
-		return t.handleUnicast(msg)
-	} else if !msg.IsBroadcast() {
-		return errNeitherBroadcastNorUnicast
-	}
-
-	if err := t.handleBroadcast(msg); err != nil {
+	trackable, err := msg.hashContent()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	// rate limit the incoming message.
+	if !t.rateLimiter.Add(trackable, msg.GetSource().Pid) {
+		return fmt.Errorf("rate limit exceeded for guardian %v", msg.GetSource().Hostname)
+	}
+
+	switch {
+	case msg.IsBroadcast():
+		return t.handleBroadcast(msg)
+	case msg.IsUnicast():
+		return t.handleUnicast(msg)
+	default:
+		return errNeitherBroadcastNorUnicast
+	}
 }
 
 func (t *Engine) sendEchoOut(parsed broadcastMessage, m Incoming) {
@@ -764,10 +771,6 @@ func (t *Engine) handleBroadcast(m Incoming) error {
 	parsed, err := t.parseBroadcast(m)
 	if err != nil {
 		return err
-	}
-
-	if !t.rateLimiter.Add(trackableMessage{parsed}, m.GetSource().Pid) {
-		return fmt.Errorf("rate limit exceeded for guardian %v", m.GetSource().Hostname)
 	}
 
 	shouldEcho, deliverable, err := t.broadcastInspection(parsed, m)
@@ -836,10 +839,6 @@ func (t *Engine) handleUnicastTSS(v *tsscommv1.Unicast_Tss, src *Identity) error
 		}
 
 		return err
-	}
-
-	if !t.rateLimiter.Add(trackableMessage{&serializeableMessage{fpmsg}}, src.Pid) {
-		return fmt.Errorf("rate limit exceeded for guardian %v", src.Hostname)
 	}
 
 	if !isUnicastType(fpmsg) {
