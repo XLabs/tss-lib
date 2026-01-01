@@ -8,6 +8,7 @@ import (
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
 	frostdkg "github.com/xlabs/multi-party-sig/protocols/frost/keygen"
 	frostsign "github.com/xlabs/multi-party-sig/protocols/frost/sign"
+	"github.com/xlabs/tss-lib/v2/party"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -42,7 +43,7 @@ const (
 	maxConfigFileSize = 10 * 1024 * 1024 // 10 MB
 	DefaultPort       = "8998"
 
-	digestSize           = 32
+	digestSize           = party.DigestSize
 	maxAuxiliaryDataSize = 32
 
 	notStarted uint32 = 0 // using 0 since it's the default value

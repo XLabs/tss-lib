@@ -55,7 +55,7 @@ type DkgTask struct {
 type SigningInfo struct {
 	SigningCommittee common.SortedPartyIDs
 	TrackingID       *common.TrackingID
-	IsSigner         bool
+	IsParticipating  bool
 }
 
 // the output of running the DKG protocol.

@@ -35,9 +35,9 @@ func newOutChannels() OutputChannels {
 	return OutputChannels{
 		OutChannel:             make(chan common.ParsedMessage, 1000*1000),
 		SignatureOutputChannel: make(chan *common.SignatureData, 1000*1000),
-		KeygenOutputChannel:    make(chan *TSSSecrets, 1),
-		ErrChannel:             make(chan *common.Error, 1),
-		WarningChannel:         make(chan *Warning, 1),
+		KeygenOutputChannel:    make(chan *TSSSecrets, 10),
+		ErrChannel:             make(chan *common.Error, 10),
+		WarningChannel:         make(chan *Warning, 10),
 	}
 
 }
@@ -191,10 +191,7 @@ func TestPartyDoesntFollowRouge(t *testing.T) {
 	singleSigner.mtx.Unlock()
 	// a.GreaterOrEqual(len(singleSigner.messageBuffer), 1) // ensures this party received at least one message from others
 
-	for _, party := range parties {
-		party.Stop()
-	}
-
+	stopParties(parties)
 }
 
 func TestMultipleRequestToSignSameThing(t *testing.T) {
@@ -239,9 +236,7 @@ func TestMultipleRequestToSignSameThing(t *testing.T) {
 	<-donechan
 	a.True(n.verifiedAllSignatures())
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	stopParties(parties)
 }
 
 func TestLateParties(t *testing.T) {
@@ -297,9 +292,7 @@ func testLateParties(t *testing.T, numLate int) {
 	<-donechan2
 	a.True(n.verifiedAllSignatures())
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	stopParties(parties)
 }
 
 func TestCleanup(t *testing.T) {
@@ -329,12 +322,17 @@ func TestCleanup(t *testing.T) {
 
 	<-time.After(maxTTL * 3)
 
+	select {
+	case err := <-n.chans.ErrChannel:
+		a.ErrorIs(err, ErrTimeout)
+	default:
+		a.Fail("expected timeout error to be reported")
+	}
+
 	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
 	a.Equal(0, p1.rateLimiter.lenDigestMap(), "expected 0 digest in rate limiter")
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	stopParties(parties)
 }
 
 func idToParty(parties []FullParty) map[string]FullParty {
@@ -456,9 +454,7 @@ func TestClosingThreadpoolMidRun(t *testing.T) {
 
 	<-donechan
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	stopParties(parties)
 
 	for _, fp := range parties {
 		p := fp.(*Impl)
@@ -513,16 +509,14 @@ func TestTrailingZerosInDigests(t *testing.T) {
 	<-donechan
 	a.True(n.verifiedAllSignatures())
 
-	for _, party := range parties {
-		party.Stop()
-	}
+	stopParties(parties)
 }
 
 func TestChangingCommittee(t *testing.T) {
 	// NOTICE: This test is extremly slow due to the amount of processing done on a single machine.
 	a := assert.New(t)
 
-	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold) // threshold =2 means we need 3 in comittee to sign
+	parties, _ := createFullParties(a, test.TestParticipants, test.TestThreshold) // threshold =2 means we need 3 in committee to sign
 
 	digestSet, hash := createSingleDigest()
 	fmt.Println("old digest:", hash)
@@ -562,7 +556,7 @@ func TestChangingCommittee(t *testing.T) {
 
 		<-barrier
 		for nremoved := 1; nremoved < 5; nremoved++ {
-			fmt.Println("changing comittee, starting signing process again.")
+			fmt.Println("changing committee, starting signing process again.")
 
 			faulties := make([]*common.PartyID, nremoved)
 			for i := 0; i < nremoved; i++ {
@@ -588,7 +582,7 @@ func TestChangingCommittee(t *testing.T) {
 				})
 				p.sessionMap.Map.Delete(trackid.ToString()) // ensures signature is not created.
 
-				// shuffle the order of the parties when telling them to replace the comittee.
+				// shuffle the order of the parties when telling them to replace the committee.
 				// (Ensures different ordered faulties array does not affect the signprotocol)
 				seedPerParty := pidToDigest(p.self)
 
@@ -627,9 +621,8 @@ func TestChangingCommittee(t *testing.T) {
 
 	<-donechan
 	a.True(n.verifiedAllSignatures())
-	for _, party := range parties {
-		party.Stop()
-	}
+
+	stopParties(parties)
 
 	threadsWait.Wait()
 }
@@ -762,9 +755,7 @@ func testKeygen(t *testing.T) {
 		close(donechn)
 		wg.Wait()
 
-		for _, p := range parties {
-			p.Stop()
-		}
+		stopParties(parties)
 	}
 
 }
@@ -808,9 +799,7 @@ func testNilConfigKeyGen(t *testing.T) {
 		close(donechn)
 		wg.Wait()
 
-		for _, p := range parties {
-			p.Stop()
-		}
+		stopParties(parties)
 	}
 }
 
@@ -867,9 +856,7 @@ func testKeygenWithOneLateParty(t *testing.T) {
 		close(donechn)
 		wg.Wait()
 
-		for _, p := range parties {
-			p.Stop()
-		}
+		stopParties(parties)
 	}
 }
 
@@ -883,35 +870,64 @@ func TestMessageFromNonCommitteeIsReported(t *testing.T) {
 	for _, p := range parties {
 		a.NoError(p.Start(newOutChannels()))
 	}
+	defer stopParties(parties)
 
-	info := fpSign(a, parties[0], SigningTask{
-		Digest:       hash,
-		Faulties:     []*common.PartyID{parties[1].(*Impl).self},
-		ProtocolType: common.ProtocolFROSTSign,
-	})
+	inCommitteeIndex := -1
+	var signingInfo *SigningInfo = nil
+	for i := range parties {
+		info := fpSign(a, parties[i], SigningTask{
+			Digest:       hash,
+			ProtocolType: common.ProtocolFROSTSign,
+		})
+		if info.IsParticipating {
+			inCommitteeIndex = i
+			signingInfo = info
+			break
+		}
+	}
+
+	a.NotNil(signingInfo)
+
+	signer := parties[inCommitteeIndex].(*Impl)
+
+	notInCommittee := grabNotInCommittee(parties, signingInfo)
+	a.NotNil(notInCommittee, "couldn't find peer that isn't in the committee")
 
 	p := (&round.Message{
-		From:      party.ID(parties[1].(*Impl).self.ID),
-		To:        party.ID(parties[0].(*Impl).self.ID),
+		From:      party.ID(notInCommittee.self.ID),
+		To:        party.ID(signer.self.ID),
 		Broadcast: true,
 		Content: &sign.Broadcast2{
 			Di: make([]byte, 32),
 			Ei: make([]byte, 32),
 		},
-		TrackingID: info.TrackingID,
+		TrackingID: signingInfo.TrackingID,
 	}).ToParsed()
 
 	// Trigger the code path that should warn
-	go parties[0].Update(p)
+	a.NoError(signer.Update(p))
 
 	//  Assert the warning appears
 
 	select {
-	case <-parties[0].(*Impl).outputChannels.WarningChannel:
+	case <-signer.outputChannels.WarningChannel:
 		return
 	case <-time.After(5 * time.Second):
 		a.FailNow("timeout waiting for warning to be sent")
 	}
+}
+
+func grabNotInCommittee(parties []FullParty, info *SigningInfo) *Impl {
+	committee := common.UnSortedPartyIDs(info.SigningCommittee)
+	// grab someone not in committee:
+	for i := range parties {
+		id := parties[i].(*Impl).self
+		if committee.IsInCommittee(id) {
+			continue
+		}
+		return parties[i].(*Impl)
+	}
+	return nil
 }
 
 func TestSessionRejectsMessageSentTwice(t *testing.T) {

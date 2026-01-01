@@ -296,26 +296,12 @@ func (s SenderIndex) toProto() uint32 {
 var discardLogger = zap.NewNop()
 
 func validateTrackingID(tid *common.TrackingID) error {
-	if tid == nil {
-		return fmt.Errorf("trackingID is nil or empty")
-	}
-
-	if _, err := tid.GetProtocolType(); err != nil {
-		return fmt.Errorf("trackingID has invalid protocol type: %w", err)
-	}
-
-	if len(tid.GetDigest()) != digestSize {
-		return fmt.Errorf("trackingID has invalid digest size: expected %d bytes, got %d bytes", digestSize, len(tid.GetDigest()))
+	if err := party.BasicTrackingIDValidation(tid); err != nil {
+		return err
 	}
 
 	if len(tid.GetAuxiliaryData()) > maxAuxiliaryDataSize {
 		return fmt.Errorf("trackingID has invalid auxiliary data size")
-	}
-
-	// since GetPartiesState is a bit array, we need to convert it to bools.
-	if len(tid.GetPartiesState()) == 0 {
-		return nil
-
 	}
 
 	if len(tid.GetPartiesState()) > maxParties/8 {

@@ -189,18 +189,27 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
 
-	info, err := t.fp.GetSigningInfo(sigtask)
+	info, err := t.fp.AsyncRequestNewSignature(sigtask)
 	if err != nil {
-		return fmt.Errorf("couldnt generate signing task: %w", err)
+		return err
 	}
 
 	if err := validateTrackingID(info.TrackingID); err != nil {
 		return err
 	}
 
-	info, err = t.fp.AsyncRequestNewSignature(sigtask)
-	if err != nil {
-		return err
+	if !info.IsParticipating {
+		// attempting to report to the user that this guardian is not part of the signing committee.
+		t.sendResp(info.TrackingID, &signer.SignResponse{
+			Response: &signer.SignResponse_Status{
+				Status: &signer.SignStatus{
+					Code:     int32(codes.FailedPrecondition),
+					Message:  party.ErrNotInCommittee.Error(),
+					Digest:   info.TrackingID.Digest[:],
+					Protocol: protocolType.ToString(),
+				},
+			},
+		})
 	}
 
 	t.logger.Info(
@@ -432,55 +441,6 @@ func (t *Engine) handleFPWarning(warn *party.Warning) {
 		return
 	}
 
-	t.logReceivedWarning(warn)
-
-	if warn.TrackingID == nil {
-		return
-	}
-
-	tid := warn.TrackingID
-	tidStr := tid.ToString()
-
-	prot, err := tid.GetProtocolType()
-	if err != nil {
-		t.logger.Error("failed to get protocol type from trackingID while reporting warning", zap.String("trackingId", tidStr), zap.Error(err))
-		return
-	}
-
-	clprt := []*common.PartyID{}
-	if warn.PossibleCulprit != nil {
-		clprt = append(clprt, warn.PossibleCulprit)
-	}
-	// report warning to output channel:
-	w := signer.WarningDetails{
-		Culprits: clprt, // TODO: consider translate into eth address.
-		Round:    int32(warn.SessionRound),
-	}
-
-	dt, err := anypb.New(&w)
-	if err != nil {
-		t.logger.Error("failed to create Any proto for warning details", zap.Error(err))
-		return
-	}
-
-	resp := &signer.SignResponse{
-		Response: &signer.SignResponse_Status{
-			Status: &signer.SignStatus{
-				// TODO: improve code mapping. currently using PermissionDenied since we warn when peers send
-				// messages when not in committee or when they send more than one message.
-				Code:     int32(codes.PermissionDenied),
-				Message:  warn.Message,
-				Details:  dt,
-				Digest:   tid.GetDigest(),
-				Protocol: prot.ToString(),
-			},
-		},
-	}
-
-	t.sendResp(resp, tidStr)
-}
-
-func (t *Engine) logReceivedWarning(warn *party.Warning) {
 	flds := []zap.Field{}
 
 	if warn.TrackingID != nil {
@@ -515,10 +475,10 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 	t.sigCounter.remove(sig.TrackingId)
 
 	t.sendResp(
+		sig.TrackingId,
 		&signer.SignResponse{
 			Response: &signer.SignResponse_Signature{Signature: sig},
 		},
-		sig.TrackingId.ToString(),
 	)
 }
 
@@ -578,30 +538,36 @@ func (t *Engine) reportDetailedErr(detailedErr *common.Error) *common.TrackingID
 		)
 	}
 
-	resp := &signer.SignResponse{
+	// most errors the fp outputs (other than timeout errors) are related to other signers, or internal issues.
+	// e.g., badMessages, internal state compromise (errNilSigner), message from non-committee member, etc.
+	// thus, we tell the user it's an internal error unless it's a timeout.
+	code := codes.Internal
+	if errors.Is(detailedErr.Cause(), party.ErrTimeout) {
+		code = codes.DeadlineExceeded
+	}
+
+	t.sendResp(trackid, &signer.SignResponse{
 		Response: &signer.SignResponse_Status{
 			Status: &signer.SignStatus{
-				Code:     int32(codes.Internal), // TODO: Improve error code mapping.
-				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Cause().Error()),
+				Code:     int32(code),
+				Message:  fmt.Sprintf("error in signing protocol: %s", detailedErr.Error()),
 				Digest:   trackid.GetDigest(),
 				Protocol: pp.ToString(),
 				Details:  dt,
 			},
 		},
-	}
-
-	t.sendResp(resp, tidStr)
+	})
 
 	return trackid
 }
 
-func (t *Engine) sendResp(resp *signer.SignResponse, tidStr string) {
+func (t *Engine) sendResp(tid *common.TrackingID, resp *signer.SignResponse) {
 	select {
 	case t.signResponseChan <- resp:
 	default:
 		flds := []zap.Field{}
-		if tidStr != "" {
-			flds = append(flds, zap.String("trackingId", tidStr))
+		if tid != nil {
+			flds = append(flds, zap.String("trackingId", tid.ToString()))
 		}
 
 		flds = append(flds, zap.String("responseType", fmt.Sprintf("%T", resp.Response)))

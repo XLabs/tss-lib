@@ -153,7 +153,7 @@ var (
 	errRoundTooSmall = errors.New("message round is smaller than smallest round that receives messages")
 
 	errNilSigner              = errors.New("nil signer")
-	errShouldBeBroadcastRound = errors.New("frost sessions should be of type BroadcastRound")
+	errShouldBeBroadcastRound = errors.New("session should be of type BroadcastRound")
 	errSignerNotactivated     = errors.New("signer is not activated")
 	errInvalidMessage         = errors.New("invalid message received, can't store it, or process it further")
 )

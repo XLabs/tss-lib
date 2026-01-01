@@ -2,6 +2,7 @@ package party
 
 import (
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"time"
 
@@ -94,11 +95,11 @@ type sessionMap struct {
 	sync.Map
 }
 
-func (s *sessionMap) cleanup(maxTTL time.Duration) {
+func (s *sessionMap) cleanup(maxTTL time.Duration) []*common.TrackingID {
 	currentTime := time.Now()
 
 	keysToDelete := make([]any, 0)
-
+	ttlSigs := make([]*common.TrackingID, 0)
 	s.Range(func(key, value any) bool {
 		signer, ok := value.(*singleSession)
 		if !ok {
@@ -110,6 +111,13 @@ func (s *sessionMap) cleanup(maxTTL time.Duration) {
 
 		if currentTime.Sub(signer.getInitTime()) >= maxTTL {
 			keysToDelete = append(keysToDelete, key)
+
+			// activated signer means a request was made by the party's user,
+			// and that this signer is also in the committee, but failed to produce a signature in time.
+			// thus we output its tracking ID for reporting purposes.
+			if signer.getState() == activated {
+				ttlSigs = append(ttlSigs, signer.trackingId)
+			}
 		}
 
 		return true // true to continue the iteration
@@ -118,6 +126,8 @@ func (s *sessionMap) cleanup(maxTTL time.Duration) {
 	for _, key := range keysToDelete {
 		s.Delete(key)
 	}
+
+	return ttlSigs
 }
 
 func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSession, bool) {
@@ -126,8 +136,13 @@ func (s *sessionMap) LoadOrStore(key string, toload *singleSession) (*singleSess
 }
 
 func (s *sessionMap) deleteSession(session *singleSession) {
-	s.Map.Delete(session.trackingId.ToString())
+	s.delete(session.trackingId)
 }
+
+func (s *sessionMap) delete(tid *common.TrackingID) {
+	s.Map.Delete(tid.ToString())
+}
+
 func rsToCommonSig(R curve.Point, S curve.Scalar, self *common.PartyID, tid *common.TrackingID) (*common.SignatureData, *common.Error) {
 	rbits, err := R.Curve().MarshalPoint(R)
 	if err != nil {
@@ -174,4 +189,25 @@ func FrostSigToCommonSig(sig *frost.Signature, self *common.PartyID, tid *common
 // exported to be used in unit test in service/server_test.go
 func EcdsaSigToCommonSig(res *ecdsa.Signature, partyID *common.PartyID, trackingID *common.TrackingID) (*common.SignatureData, *common.Error) {
 	return rsToCommonSig(res.R, res.S, partyID, trackingID)
+}
+
+func isDkg(protocol common.ProtocolType) bool {
+	return protocol == common.ProtocolFROSTDKG || protocol == common.ProtocolECDSADKG
+}
+
+func BasicTrackingIDValidation(tid *common.TrackingID) error {
+	if tid == nil {
+		return errInvalidTrackingID
+	}
+
+	prot, err := tid.GetProtocolType()
+	if err != nil {
+		return fmt.Errorf("trackingID has invalid protocol type: %w", err)
+	}
+
+	if !isDkg(prot) && len(tid.GetDigest()) != DigestSize {
+		return fmt.Errorf("trackingID has invalid digest size: expected %d bytes, got %d bytes", DigestSize, len(tid.GetDigest()))
+	}
+
+	return nil
 }

@@ -372,3 +372,9 @@ func validateSignature(pk curve.Point, m *common.SignatureData) bool {
 		panic("unknown protocol for signature verification")
 	}
 }
+
+func stopParties(parties []FullParty) {
+	for _, p := range parties {
+		p.Stop()
+	}
+}
