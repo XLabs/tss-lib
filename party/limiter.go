@@ -3,81 +3,85 @@ package party
 import (
 	"sync"
 	"time"
-
-	common "github.com/xlabs/tss-common"
 )
 
 type set[T comparable] map[T]struct{}
 
 type trackidString string
 
-// rateLimiter is a helper struct to keep track of active sessions.
+// RateLimiter is a helper struct to track and limit the number of something a peer gives.
+// For instance, in our case, we want to limit the number of active sessions a peer can be involved in.
 // Each session has a digest, and each peer is allowed to be active
 // for a certain number of sessions.
 // a peer is allowed to send how many messages it wants per session, but not allowed to
 // participate in more than maxActiveSessions sessions at a time.
-type rateLimiter struct {
+type RateLimiter struct {
 	maxActiveSessions int
 	mtx               sync.Mutex
 
-	digestToPeer map[trackidString]set[strPartyID]
-	peerToDigest map[strPartyID]set[trackidString]
-	firstSeen    map[trackidString]time.Time
+	trackedToPeer map[trackidString]set[strPartyID]
+	peerToTracked map[strPartyID]set[trackidString]
+	firstSeen     map[trackidString]time.Time
 }
 
-func newRateLimiter(maxActiveSessions int) rateLimiter {
-	return rateLimiter{
+func NewRateLimiter(maxActiveSessions int) RateLimiter {
+	return RateLimiter{
 		maxActiveSessions: maxActiveSessions,
 
-		mtx:          sync.Mutex{},
-		digestToPeer: map[trackidString]set[strPartyID]{},
-		peerToDigest: map[strPartyID]set[trackidString]{},
-		firstSeen:    map[trackidString]time.Time{},
+		mtx:           sync.Mutex{},
+		trackedToPeer: map[trackidString]set[strPartyID]{},
+		peerToTracked: map[strPartyID]set[trackidString]{},
+		firstSeen:     map[trackidString]time.Time{},
 	}
+}
+
+// trackable is an interface for types that can be tracked by the RateLimiter.
+type trackable interface {
+	ToString() string
 }
 
 // Add adds a peer to the counter for a given digest.
 // returns false if this peer is active for too many signatures ( > r.maxActiveSessions).
-func (r *rateLimiter) add(trackId *common.TrackingID, peer *common.PartyID) bool {
-	if trackId == nil || peer == nil {
+func (r *RateLimiter) Add(toTrack, peer trackable) bool {
+	if toTrack == nil || peer == nil {
 		return false
 	}
 
-	sgkey := trackidString(trackId.ToString())
+	trackedKey := trackidString(toTrack.ToString())
 	strPartyId := strPartyID(peer.ToString())
 
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	if _, ok := r.digestToPeer[sgkey]; !ok {
-		r.digestToPeer[sgkey] = make(set[strPartyID])
+	if _, ok := r.trackedToPeer[trackedKey]; !ok {
+		r.trackedToPeer[trackedKey] = make(set[strPartyID])
 	}
 
-	if _, ok := r.peerToDigest[strPartyId]; !ok {
-		r.peerToDigest[strPartyId] = make(set[trackidString])
+	if _, ok := r.peerToTracked[strPartyId]; !ok {
+		r.peerToTracked[strPartyId] = make(set[trackidString])
 	}
 
 	// if already an active signature for this participant, then it doesn't count as an additional signature
-	if _, ok := r.peerToDigest[strPartyId][sgkey]; ok {
+	if _, ok := r.peerToTracked[strPartyId][trackedKey]; ok {
 		return true
 	}
 
 	// the participant hasn't yet participated in this signing for the digest, we must ensure an additional signature is allowed
-	if len(r.peerToDigest[strPartyId])+1 > r.maxActiveSessions {
+	if len(r.peerToTracked[strPartyId])+1 > r.maxActiveSessions {
 		return false
 	}
 
-	r.digestToPeer[sgkey][strPartyId] = struct{}{}
-	r.peerToDigest[strPartyId][sgkey] = struct{}{}
+	r.trackedToPeer[trackedKey][strPartyId] = struct{}{}
+	r.peerToTracked[strPartyId][trackedKey] = struct{}{}
 
-	if _, ok := r.firstSeen[sgkey]; !ok {
-		r.firstSeen[sgkey] = time.Now()
+	if _, ok := r.firstSeen[trackedKey]; !ok {
+		r.firstSeen[trackedKey] = time.Now()
 	}
 
 	return true
 }
 
-func (r *rateLimiter) remove(trackid *common.TrackingID) {
+func (r *RateLimiter) Remove(trackid trackable) {
 	if trackid == nil {
 		return
 	}
@@ -91,18 +95,18 @@ func (r *rateLimiter) remove(trackid *common.TrackingID) {
 
 }
 
-func (r *rateLimiter) unsafeRemove(key trackidString) {
-	peers := r.digestToPeer[key]
-	delete(r.digestToPeer, key)
+func (r *RateLimiter) unsafeRemove(key trackidString) {
+	peers := r.trackedToPeer[key]
+	delete(r.trackedToPeer, key)
 
 	for g := range peers {
-		delete(r.peerToDigest[g], key)
+		delete(r.peerToTracked[g], key)
 	}
 
 	delete(r.firstSeen, key)
 }
 
-func (r *rateLimiter) cleanSelf(maxDuration time.Duration) {
+func (r *RateLimiter) CleanSelf(maxDuration time.Duration) {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 

@@ -169,11 +169,11 @@ func getLen(m *sync.Map) int {
 	return l
 }
 
-func (r *rateLimiter) lenDigestMap() int {
+func (r *RateLimiter) lenTrackedMap() int {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	return len(r.digestToPeer)
+	return len(r.trackedToPeer)
 }
 
 func fpSign(a *assert.Assertions, p FullParty, st SigningTask) *SigningInfo {

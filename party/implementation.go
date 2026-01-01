@@ -47,7 +47,7 @@ type Impl struct {
 
 	workersWg sync.WaitGroup
 
-	rateLimiter rateLimiter
+	rateLimiter RateLimiter
 
 	pool *pool.Pool
 }
@@ -73,7 +73,7 @@ func (p *Impl) cleanupWorker() {
 
 		case <-time.After(p.maxTTl):
 			ttlSigs := p.sessionMap.cleanup(p.maxTTl)
-			p.rateLimiter.cleanSelf(p.maxTTl)
+			p.rateLimiter.CleanSelf(p.maxTTl)
 
 			for _, tid := range ttlSigs {
 				p.outputErr(common.NewTrackableError(ErrTimeout, "signature timed out", -1, p.self, tid))
@@ -289,7 +289,7 @@ func (p *Impl) advanceSession(session *singleSession) *common.Error {
 	p.sessionMap.deleteSession(session)
 
 	// also remove it from the rate limiter.
-	p.rateLimiter.remove(session.trackingId)
+	p.rateLimiter.Remove(session.trackingId)
 
 	// Finalizing the session.
 	conf, sig, err := session.extractOutput()
@@ -363,7 +363,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	}
 
 	if !common.UnSortedPartyIDs(committee).IsInCommittee(p.self) {
-		p.rateLimiter.remove(trackingId) // we don't store the session, so we remove any rate limiting state.
+		p.rateLimiter.Remove(trackingId) // we don't store the session, so we remove any rate limiting state.
 
 		return nil, ErrNotInCommittee
 	}
@@ -506,7 +506,7 @@ func (p *Impl) Update(message common.ParsedMessage) error {
 	}
 
 	// we check rate limiting last so we don't have to cancel it if the message is invalid.
-	canFeed := p.rateLimiter.add(message.WireMsg().GetTrackingID(), peer)
+	canFeed := p.rateLimiter.Add(message.WireMsg().GetTrackingID(), peer)
 	if !canFeed {
 		return fmt.Errorf("peer %v has reached the maximum number of simultaneous sessions", peerID)
 	}
