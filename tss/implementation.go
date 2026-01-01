@@ -54,8 +54,6 @@ type Engine struct {
 	// used to perform  hash-broadcast:
 	mtx      *sync.Mutex
 	received map[uuid]*broadcaststate
-
-	sigCounter activeSigCounter
 }
 
 type PEM []byte
@@ -321,7 +319,6 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 
 		started: atomic.Uint32{}, // default value is 0
 
-		sigCounter:  newSigCounter(), // TODO: Consider removing entirely, since RateLimiter already provides similar functionality inside the party package.
 		rateLimiter: &rateLimiter,
 	}
 
@@ -484,8 +481,6 @@ func (t *Engine) handleFpSignature(sig *common.SignatureData) {
 
 	t.logger.Debug("signature complete. updating inner state and forwarding it", zap.String("trackingId", sig.TrackingId.ToString()))
 
-	t.sigCounter.remove(sig.TrackingId)
-
 	t.sendResp(
 		sig.TrackingId,
 		&signer.SignResponse{
@@ -500,10 +495,6 @@ func (t *Engine) handleFpError(detailedErr *common.Error) {
 	if trackid == nil {
 		return
 	}
-
-	// if someone sent a message that caused an error -> we don't
-	// accept an override to that message, therefore, we can remove it, since it won't change.
-	t.sigCounter.remove(trackid)
 
 	t.logger.Error(
 		"received detailed error from tss-lib.FullParty",
@@ -627,8 +618,6 @@ func (t *Engine) handleFpOutput(m common.Message) {
 
 func (t *Engine) cleanup(maxTTL time.Duration) {
 	now := time.Now()
-
-	t.sigCounter.cleanSelf(maxTTL)
 
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
@@ -790,21 +779,6 @@ func (t *Engine) handleBroadcast(m Incoming) error {
 }
 
 func (t *Engine) feedIncomingToFp(parsed common.ParsedMessage) error {
-	trackId := parsed.WireMsg().TrackingID
-	from := parsed.GetFrom()
-
-	id, err := t.GuardianStorage.fetchIdentityFromPartyID(from)
-	if err != nil {
-		return fmt.Errorf("error feeding fullParty: %w", err) // shouldn't happen.
-	}
-
-	maxLiveSignatures := t.GuardianStorage.MaxSimultaneousSignatures
-
-	// TODO: consider removing sigCounter entirely, since RateLimiter already provides similar functionality inside the party package.
-	if ok := t.sigCounter.add(trackId, from, maxLiveSignatures); !ok {
-		return fmt.Errorf("guardian %v has reached the maximum number of simultaneous signatures", id.Hostname)
-	}
-
 	if err := t.fp.Update(parsed); err != nil {
 		return fmt.Errorf("failed to update full party with incoming message: %w", err)
 	}
