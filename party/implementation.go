@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -367,34 +368,31 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 		return nil, ErrNotInCommittee
 	}
 
-	session, load := p.sessionMap.LoadOrStore(trackingId.ToString(), &singleSession{})
-
-	// locking the session for initialization, which should be done once.
-	session.mtx.Lock()
-	defer session.mtx.Unlock()
-
-	if load && session.unsafeIsInitialized() {
-		// fast path: session already exists and is initialized with all required fields.
-		return session, nil
-	}
-
 	protocol, err := trackingId.GetProtocolType()
 	if err != nil {
 		return nil, err
 	}
 
-	session.isKeygenSession = isDkg(protocol)
-	session.trackingId = trackingId
-	// default state is awaitingActivation, can change later to activated.
-	session.state.Store(int64(awaitingActivation))
-	session.self = p.self
-	copy(session.digest[:], trackingId.Digest)
-	session.protocol = protocol
-	session.committee = committee
-	session.session = nil // will be set when a client activates the signer.
-	session.messages = make(map[round.Number]map[strPartyID]*messageKeep)
-	session.outputChannels = &p.outputChannels
-	session.startTime = time.Now()
+	dgst := Digest{}
+	copy(dgst[:], trackingId.Digest)
+
+	session, _ := p.sessionMap.LoadOrStore(trackingId.ToString(), &singleSession{
+		// read-only fields
+		startTime:       time.Now(),
+		isKeygenSession: isDkg(protocol),
+		digest:          dgst,
+		protocol:        protocol,
+		trackingId:      trackingId,
+		committee:       committee,
+		self:            p.self,
+		outputChannels:  &p.outputChannels,
+
+		mtx: sync.Mutex{},
+		// mutable fields
+		state:    atomic.Int64{}, // default is 0 == awaitingActivation
+		messages: map[round.Number]map[strPartyID]*messageKeep{},
+		session:  nil,
+	})
 
 	return session, nil
 }
@@ -405,7 +403,7 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 		return nil, err
 	}
 
-	if prot == common.ProtocolFROSTDKG || prot == common.ProtocolECDSADKG {
+	if isDkg(prot) {
 		// everyone is in the committee (DKG case).
 		return common.SortPartyIDs(p.peers), nil
 	}
