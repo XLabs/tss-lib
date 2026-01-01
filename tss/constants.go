@@ -70,7 +70,8 @@ const (
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
 	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 
-	defaultMaxLiveSignatures = 20000
+	defaultMaxLiveSignatures  = 20000
+	defaultMaxMessagesPerPeer = defaultMaxLiveSignatures * (numBroadcastsPerSignature + numUnicastsRounds)
 
 	// Since each sigState is created via almost any of the ftCommands, I decided on setting it as 1000 sigs a minute
 	// and multiplied it by number of minutes we have
@@ -93,6 +94,7 @@ const (
 	parsedProblemDomain  = "problem"
 	tssContentDomain     = "content"
 	newAnouncementDomain = "anncmnt"
+	trackingDomain       = "trackables"
 
 	defaultMaxDownTimeJitter = time.Minute
 	maxHeartbeatInterval     = defaultGuardianDownTime

@@ -1412,7 +1412,7 @@ func TestSigCounter(t *testing.T) {
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
 
-		e1.maxSimultaneousSignatures = 1
+		e1.MaxSimultaneousSignatures = 1
 		feeder := &echoFeed{
 			eng:   e1,
 			peers: engines,
@@ -1460,7 +1460,7 @@ func TestSigCounter(t *testing.T) {
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
-		e1.maxSimultaneousSignatures = 1
+		e1.MaxSimultaneousSignatures = 1
 
 		e1.Start(ctx, logger)
 
@@ -1506,7 +1506,7 @@ func TestSigCounter(t *testing.T) {
 		}
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
-		e1.maxSimultaneousSignatures = 1
+		e1.MaxSimultaneousSignatures = 1
 
 		e1.Start(ctx, logger)
 
@@ -1557,7 +1557,7 @@ func TestSigCounter(t *testing.T) {
 		engines := load5GuardiansSetupForBroadcastChecks(a)
 		e1 := getSigningGuardian(a, engines, tsks...)
 
-		e1.maxSimultaneousSignatures = 2
+		e1.MaxSimultaneousSignatures = 2
 		feeder := &echoFeed{
 			eng:   e1,
 			peers: engines,
@@ -1985,11 +1985,11 @@ func TestNewEngine(t *testing.T) {
 	})
 
 	t.Run("Default values", func(t *testing.T) {
-		storage.maxSimultaneousSignatures = 0
+		storage.MaxSimultaneousSignatures = 0
 		storage.MaxSignerTTL = 0
 		engine, err := newEngine(storage)
 		a.NoError(err)
-		a.Equal(defaultMaxLiveSignatures, engine.GuardianStorage.maxSimultaneousSignatures)
+		a.Equal(defaultMaxLiveSignatures, engine.GuardianStorage.MaxSimultaneousSignatures)
 		a.Equal(defaultMaxSignerTTL, engine.GuardianStorage.MaxSignerTTL)
 	})
 }

@@ -40,8 +40,9 @@ type Engine struct {
 	logger *zap.Logger
 	GuardianStorage
 
-	fpParams *party.Parameters
-	fp       party.FullParty
+	rateLimiter *party.RateLimiter
+	fpParams    *party.Parameters
+	fp          party.FullParty
 
 	fpCommChans      fpCommunicationChannels
 	signResponseChan chan *signer.SignResponse // actual sig output.
@@ -61,7 +62,14 @@ type PEM []byte
 
 // Contains the TSS related configurations.
 type Configurations struct {
-	maxSimultaneousSignatures int
+	// Used to limit the number of messages a peer can send. This includes both broadcasts, echos and unicasts.
+	// at this time, messages are limited per peer, regardless of the protocol.
+	// Furthermore, the limit is cleaned every 2*MaxSignerTTL duration (i.e., when we clean the internal mappings).
+	// The limit should be set considering the number rounds per signature, number of peers, and expected number
+	//  of simultaneous signatures.
+	MaxMessagesPerPeer int
+
+	MaxSimultaneousSignatures int
 	// MaxSignerTTL is the maximum time a signature is allowed to be active.
 	// used to release resources.
 	MaxSignerTTL time.Duration
@@ -252,16 +260,16 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		return nil, fmt.Errorf("the guardian's tss storage is nil")
 	}
 
-	if storage.maxSimultaneousSignatures < 0 {
-		storage.maxSimultaneousSignatures = defaultMaxLiveSignatures
+	if storage.MaxMessagesPerPeer <= 0 {
+		storage.MaxMessagesPerPeer = defaultMaxMessagesPerPeer
+	}
+
+	if storage.MaxSimultaneousSignatures <= 0 {
+		storage.MaxSimultaneousSignatures = defaultMaxLiveSignatures
 	}
 
 	if storage.MaxSignerTTL == 0 {
 		storage.MaxSignerTTL = defaultMaxSignerTTL
-	}
-
-	if storage.maxSimultaneousSignatures == 0 {
-		storage.maxSimultaneousSignatures = defaultMaxLiveSignatures
 	}
 
 	if bytes.Equal(storage.Self.CertPem, storage.LeaderIdentity) {
@@ -276,6 +284,7 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 
 		MaxSignerTTL:         storage.MaxSignerTTL,
 		LoadDistributionSeed: storage.LoadDistributionKey,
+		MaxActiveSessions:    storage.MaxSimultaneousSignatures,
 	}
 
 	fp, err := party.NewFullParty(fpParams)
@@ -283,8 +292,10 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		return nil, err
 	}
 
-	expectedMsgs := storage.maxSimultaneousSignatures *
+	expectedMsgs := storage.MaxSimultaneousSignatures *
 		(numBroadcastsPerSignature + numUnicastsRounds*storage.NumGuardians()) * 2 // times 2 to stay on the safe side.
+
+	rateLimiter := party.NewRateLimiter(storage.MaxMessagesPerPeer)
 	t := &Engine{
 		ctx: nil,
 
@@ -295,13 +306,13 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		fp:       fp,
 		fpCommChans: fpCommunicationChannels{
 			OutChannel:             make(chan common.ParsedMessage, expectedMsgs),
-			SignatureOutputChannel: make(chan *common.SignatureData, storage.maxSimultaneousSignatures),
-			ErrChannel:             make(chan *common.Error, storage.maxSimultaneousSignatures),
-			WarningChannel:         make(chan *party.Warning, storage.maxSimultaneousSignatures),
+			SignatureOutputChannel: make(chan *common.SignatureData, storage.MaxSimultaneousSignatures),
+			ErrChannel:             make(chan *common.Error, storage.MaxSimultaneousSignatures),
+			WarningChannel:         make(chan *party.Warning, storage.MaxSimultaneousSignatures),
 			KeygenOutputChannel:    make(chan *party.TSSSecrets, 1), // shouldn't output often.
 		},
 
-		signResponseChan: make(chan *signer.SignResponse, storage.maxSimultaneousSignatures),
+		signResponseChan: make(chan *signer.SignResponse, storage.MaxSimultaneousSignatures),
 		messageOutChan:   make(chan Sendable, expectedMsgs),
 
 		msgSerialNumber: 0,
@@ -310,7 +321,8 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 
 		started: atomic.Uint32{}, // default value is 0
 
-		sigCounter: newSigCounter(),
+		sigCounter:  newSigCounter(), // TODO: Consider removing entirely, since RateLimiter already provides similar functionality inside the party package.
+		rateLimiter: &rateLimiter,
 	}
 
 	return t, nil
@@ -626,6 +638,8 @@ func (t *Engine) cleanup(maxTTL time.Duration) {
 			delete(t.received, k)
 		}
 	}
+
+	t.rateLimiter.CleanSelf(maxTTL)
 }
 
 func (t *Engine) intoSendable(m common.Message) (Sendable, error) {
@@ -752,6 +766,10 @@ func (t *Engine) handleBroadcast(m Incoming) error {
 		return err
 	}
 
+	if !t.rateLimiter.Add(trackableMessage{parsed}, m.GetSource().Pid) {
+		return fmt.Errorf("rate limit exceeded for guardian %v", m.GetSource().Hostname)
+	}
+
 	shouldEcho, deliverable, err := t.broadcastInspection(parsed, m)
 	if err != nil {
 		return err
@@ -777,8 +795,9 @@ func (t *Engine) feedIncomingToFp(parsed common.ParsedMessage) error {
 		return fmt.Errorf("error feeding fullParty: %w", err) // shouldn't happen.
 	}
 
-	maxLiveSignatures := t.GuardianStorage.maxSimultaneousSignatures
+	maxLiveSignatures := t.GuardianStorage.MaxSimultaneousSignatures
 
+	// TODO: consider removing sigCounter entirely, since RateLimiter already provides similar functionality inside the party package.
 	if ok := t.sigCounter.add(trackId, from, maxLiveSignatures); !ok {
 		return fmt.Errorf("guardian %v has reached the maximum number of simultaneous signatures", id.Hostname)
 	}
@@ -797,16 +816,14 @@ func (t *Engine) handleUnicast(m Incoming) error {
 		return err
 	}
 
-	switch v := unicast.Content.(type) {
-	case *tsscommv1.Unicast_Tss:
-		if err := t.handleUnicastTSS(v, m.GetSource()); err != nil {
-			return fmt.Errorf("failed to handle unicast tss message: %w", err)
-		}
-	default:
-		return fmt.Errorf("received unicast with unknown content type: %T", v)
+	// TODO: in case of future unicast types, consider rate limiting per type, and how to track them.
+	//  we currently rely on tsscommon.trackingID to track unicasts.
+	content, ok := unicast.Content.(*tsscommv1.Unicast_Tss)
+	if !ok {
+		return fmt.Errorf("unicast content is not of type Tss, got: %T", unicast.Content)
 	}
 
-	return nil
+	return t.handleUnicastTSS(content, m.GetSource())
 }
 
 // handleUnicastTSS is helper function. responsible for handling unicast.TSS messages.
@@ -819,6 +836,10 @@ func (t *Engine) handleUnicastTSS(v *tsscommv1.Unicast_Tss, src *Identity) error
 		}
 
 		return err
+	}
+
+	if !t.rateLimiter.Add(trackableMessage{&serializeableMessage{fpmsg}}, src.Pid) {
+		return fmt.Errorf("rate limit exceeded for guardian %v", src.Hostname)
 	}
 
 	if !isUnicastType(fpmsg) {
