@@ -3,8 +3,6 @@ package tss
 import (
 	"errors"
 	"fmt"
-	"sync"
-	"time"
 
 	cmpdkg "github.com/xlabs/multi-party-sig/protocols/cmp/keygen"
 	cmpsign "github.com/xlabs/multi-party-sig/protocols/cmp/sign"
@@ -15,111 +13,6 @@ import (
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
 	"go.uber.org/zap"
 )
-
-type set[T comparable] map[T]struct{}
-
-type strPartyId string
-
-// activeSigCounter is a helper struct to keep track of active signatures.
-// Each signature has a digest, and each guardian is allowed to be active
-// for a certain number of signatures.
-// a guardian is allowed to send how many messages it want per signature, but not allowed to
-// participate in more than maxActiveSignaturesPerGuardian signatures at a time.
-type activeSigCounter struct {
-	// TODO: Merge with rateLimiter in party/limiter.go
-	mtx sync.RWMutex
-
-	digestToGuardians map[sigKey]set[strPartyId]
-	guardianToDigests map[strPartyId]set[sigKey]
-	firstSeen         map[sigKey]time.Time
-}
-
-func newSigCounter() activeSigCounter {
-	return activeSigCounter{
-		mtx: sync.RWMutex{},
-
-		digestToGuardians: make(map[sigKey]set[strPartyId]),
-		guardianToDigests: make(map[strPartyId]set[sigKey]),
-		firstSeen:         make(map[sigKey]time.Time),
-	}
-}
-
-// Add adds a guardian to the counter for a given digest.
-// returns false if this guardian is active for too many signatures ( > maxActiveSignaturesPerGuardian).
-func (c *activeSigCounter) add(trackId *common.TrackingID, guardian *common.PartyID, maxActiveSignaturesPerGuardian int) bool {
-	if trackId == nil || guardian == nil {
-		return false
-	}
-
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-
-	sgkey := trackingIdIntoSigKey(trackId)
-
-	if _, ok := c.digestToGuardians[sgkey]; !ok {
-		c.digestToGuardians[sgkey] = make(set[strPartyId])
-	}
-
-	strPartyId := strPartyId(guardian.ToString())
-
-	if _, ok := c.guardianToDigests[strPartyId]; !ok {
-		c.guardianToDigests[strPartyId] = make(set[sigKey])
-	}
-
-	// if already an active signature for this guardian, then it doesn't count as an additional signature
-	if _, ok := c.guardianToDigests[strPartyId][sgkey]; ok {
-		return true
-	}
-
-	// the guardian hasn't yet participated in this signing for the digest, we must ensure an additional signature is allowed
-	if len(c.guardianToDigests[strPartyId])+1 > maxActiveSignaturesPerGuardian {
-		return false
-	}
-
-	c.digestToGuardians[sgkey][strPartyId] = struct{}{}
-	c.guardianToDigests[strPartyId][sgkey] = struct{}{}
-	if _, ok := c.firstSeen[sgkey]; !ok {
-		c.firstSeen[sgkey] = time.Now()
-	}
-
-	return true
-}
-
-func (c *activeSigCounter) remove(trackid *common.TrackingID) {
-	if trackid == nil {
-		return
-	}
-
-	key := trackingIdIntoSigKey(trackid)
-
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-
-	c.unlockedRemover(key)
-}
-
-func (c *activeSigCounter) unlockedRemover(key sigKey) {
-	guardians := c.digestToGuardians[key]
-	delete(c.digestToGuardians, key)
-
-	for g := range guardians {
-		delete(c.guardianToDigests[g], key)
-	}
-
-	delete(c.firstSeen, key)
-}
-
-func (c *activeSigCounter) cleanSelf(maxDuration time.Duration) {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-
-	for k, v := range c.firstSeen {
-		if time.Since(v).Abs() > maxDuration {
-			c.unlockedRemover(k)
-		}
-	}
-
-}
 
 var (
 	ErrBroadcastIsNil     = fmt.Errorf("broadcast is nil")

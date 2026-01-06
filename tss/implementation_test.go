@@ -490,7 +490,7 @@ func TestBadInputs(t *testing.T) {
 		err = e1.handleIncomingTssMessage(&IncomingMessage{})
 		a.ErrorIs(err, errNilSource)
 
-		err = e1.handleIncomingTssMessage(&IncomingMessage{Source: e2.Self})
+		err = e1.handleIncomingTssMessage(&IncomingMessage{Source: e2.Self, Content: &tsscommv1.PropagatedMessage{}})
 		a.ErrorIs(err, errNeitherBroadcastNorUnicast)
 
 		err = e1.handleIncomingTssMessage(&IncomingMessage{
@@ -1327,14 +1327,6 @@ func broadcast(chns map[string]chan msgg, engine *Engine, m Sendable) {
 	}
 }
 
-// strictly for the tests.
-func (c *activeSigCounter) digestToGuardiansLen() int {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
-
-	return len(c.digestToGuardians)
-}
-
 // Used to receive all messages for some engine, then feed them all at once, and collect the result.
 // on error returns err.
 // simulates echoes for each message too!
@@ -1394,189 +1386,6 @@ func (b *echoFeed) genEcho(msg IncomingMessage) *Echo {
 	}
 
 	return b.eng.makeEcho(&msg, parsed)
-}
-
-func TestSigCounter(t *testing.T) {
-	a := assert.New(t)
-
-	t.Run("MaxCountBlockAdditionalUpdates", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
-		defer cancel()
-
-		// t.Skip("TODO: implement this test, fails since we've moved to broadcast only messages!")
-
-		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-		}
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		e1 := getSigningGuardian(a, engines, tsks...)
-
-		e1.maxSimultaneousSignatures = 1
-		feeder := &echoFeed{
-			eng:   e1,
-			peers: engines,
-		}
-
-		signersTask0 := getSigningGuardians(a, engines, tsks[0])
-		signersTask1 := getSigningGuardians(a, engines, tsks[1])
-
-		for taskNum, committee := range [][]*Engine{signersTask0, signersTask1} {
-			for _, e := range committee {
-				e.Start(ctx, logger)
-
-				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:])
-				feeder.addMessage(e, msg)
-
-				if err := feeder.feedWithEchoes(); err != nil {
-					a.ErrorContains(err, "maximum number of simultaneous")
-
-					return
-				}
-			}
-		}
-
-		// try grabbing another message from e1:
-		a.NotPanics(func() {
-			for {
-				feeder.addMessage(e1, waitOnChannelForNonHashEcho(e1))
-				if err := feeder.feedWithEchoes(); err != nil {
-					a.ErrorContains(err, "maximum number of simultaneous")
-
-					return
-				}
-			}
-		})
-	})
-
-	t.Run("ErrorReduceCount", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
-		defer cancel()
-
-		// Tests might fail due to change of the GuardianStorage files
-
-		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-		}
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		e1 := getSigningGuardian(a, engines, tsks...)
-		e1.maxSimultaneousSignatures = 1
-
-		e1.Start(ctx, logger)
-
-		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:])
-
-		feeder := &echoFeed{
-			eng:   e1,
-			peers: engines,
-		}
-
-		feeder.addMessage(e1, msg)
-		a.NoError(feeder.feedWithEchoes())
-
-		incoming := &IncomingMessage{
-			Source:  e1.Self,
-			Content: msg.GetNetworkMessage(),
-		}
-
-		parsed, err := e1.parseTssContent(incoming.toBroadcastMsg().Message.GetTssContent(), incoming.GetSource())
-		a.NoError(err)
-
-		tid := parsed.getTrackingID()
-		// test:
-		a.Equal(e1.sigCounter.digestToGuardiansLen(), 1)
-		select {
-		case e1.fpCommChans.ErrChannel <- common.NewTrackableError(fmt.Errorf("dummyerr"), "de", -1, e1.Self.Pid, tid):
-		case <-time.After(time.Second * 1):
-			t.FailNow()
-			return
-		}
-		time.Sleep(time.Millisecond * 500)
-
-		a.Equal(e1.sigCounter.digestToGuardiansLen(), 0)
-	})
-
-	t.Run("sigDoneReduceCount", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
-		defer cancel()
-
-		// Tests might fail due to change of the GuardianStorage files
-		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-		}
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		e1 := getSigningGuardian(a, engines, tsks...)
-		e1.maxSimultaneousSignatures = 1
-
-		e1.Start(ctx, logger)
-
-		msg := beginSigningAndGrabMessage(e1, tsks[0].Digest[:])
-
-		feeder := &echoFeed{
-			eng:   e1,
-			peers: engines,
-		}
-
-		feeder.addMessage(e1, msg)
-		a.NoError(feeder.feedWithEchoes())
-
-		incoming := &IncomingMessage{
-			Source:  e1.Self,
-			Content: msg.GetNetworkMessage(),
-		}
-
-		parsed, err := e1.parseTssContent(incoming.toBroadcastMsg().Message.GetTssContent(), incoming.GetSource())
-		a.NoError(err)
-
-		// test:
-		a.Equal(e1.sigCounter.digestToGuardiansLen(), 1)
-		e1.fpCommChans.SignatureOutputChannel <- &common.SignatureData{
-			Signature:         []byte{},
-			SignatureRecovery: []byte{},
-			R:                 []byte{},
-			S:                 []byte{},
-			M:                 []byte{},
-			TrackingId:        parsed.getTrackingID(),
-		}
-		s := <-e1.signResponseChan
-		_, ok := s.Response.(*signer.SignResponse_Signature)
-		a.True(ok, "expected signature response. got %T", s.Response)
-
-		time.Sleep(time.Second * 1)
-		a.Equal(e1.sigCounter.digestToGuardiansLen(), 0)
-	})
-
-	t.Run("CanHaveSimulSigners", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
-		defer cancel()
-
-		tsks := []party.SigningTask{
-			party.SigningTask{Digest: party.Digest{1}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-			party.SigningTask{Digest: party.Digest{2}, Faulties: []*common.PartyID{}, AuxiliaryData: nil, ProtocolType: common.ProtocolFROSTSign},
-		}
-		engines := load5GuardiansSetupForBroadcastChecks(a)
-		e1 := getSigningGuardian(a, engines, tsks...)
-
-		e1.maxSimultaneousSignatures = 2
-		feeder := &echoFeed{
-			eng:   e1,
-			peers: engines,
-		}
-
-		signersTask0 := getSigningGuardians(a, engines, tsks[0])
-		signersTask1 := getSigningGuardians(a, engines, tsks[1])
-
-		for taskNum, committee := range [][]*Engine{signersTask0, signersTask1} {
-			for _, e := range committee {
-				e.Start(ctx, logger)
-
-				msg := beginSigningAndGrabMessage(e, tsks[taskNum].Digest[:])
-				feeder.addMessage(e, msg)
-				err := feeder.feedWithEchoes()
-				a.NoError(err)
-			}
-		}
-	})
 }
 
 func getSigningGuardian(a *assert.Assertions, engines []*Engine, tsks ...party.SigningTask) *Engine {
@@ -1985,11 +1794,11 @@ func TestNewEngine(t *testing.T) {
 	})
 
 	t.Run("Default values", func(t *testing.T) {
-		storage.maxSimultaneousSignatures = 0
+		storage.MaxSimultaneousSignatures = 0
 		storage.MaxSignerTTL = 0
 		engine, err := newEngine(storage)
 		a.NoError(err)
-		a.Equal(defaultMaxLiveSignatures, engine.GuardianStorage.maxSimultaneousSignatures)
+		a.Equal(defaultMaxLiveSignatures, engine.GuardianStorage.MaxSimultaneousSignatures)
 		a.Equal(defaultMaxSignerTTL, engine.GuardianStorage.MaxSignerTTL)
 	})
 }
@@ -2106,9 +1915,6 @@ func TestEngineErrorAndWarningHandling(t *testing.T) { // Renamed the function
 			// Expected
 		}
 
-		// Scenario 3: detailedErr has a valid TrackingID
-		initialSigCount := e.sigCounter.digestToGuardiansLen()
-
 		// Add a dummy entry to sigCounter to ensure `remove` has an effect
 		dummyDigest := party.Digest{1, 2, 3}
 		dummyTID := &common.TrackingID{
@@ -2118,8 +1924,6 @@ func TestEngineErrorAndWarningHandling(t *testing.T) { // Renamed the function
 			Protocol:      uint32(common.ProtocolFROSTSign.ToInt()),
 		}
 		// Simulate a guardian participating in a signature
-		e.sigCounter.add(dummyTID, e.Self.Pid, 10)
-		a.Equal(initialSigCount+1, e.sigCounter.digestToGuardiansLen(), "expected sigCounter to increase")
 
 		testErr := errors.New("test error message")
 		detailedErr := common.NewTrackableError(
@@ -2132,8 +1936,6 @@ func TestEngineErrorAndWarningHandling(t *testing.T) { // Renamed the function
 		)
 
 		e.handleFpError(detailedErr)
-
-		a.Equal(initialSigCount, e.sigCounter.digestToGuardiansLen(), "expected sigCounter to decrease after remove")
 
 		select {
 		case resp := <-e.signResponseChan:
@@ -2170,4 +1972,28 @@ func TestGetEthAddress(t *testing.T) {
 
 	_, err = e.GetEthAddress("invalid_protocol")
 	a.Error(err)
+}
+
+func TestFullChan(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	e := engines[0]
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	e.logger = zap.New(core)
+
+	e.messageOutChan = make(chan Sendable, 1) // small buffer to test full chan
+
+	fake := generateFakeMessageWithRandomContent(e.Self.Pid, nil, round2Message, party.Digest{1})
+	msg := parsedIntoEcho(a, e, fake)
+
+	broadcast := &deliverableMessage{&parsedTssContent{fake, ""}}
+	// Fill the channel
+	e.sendEchoOut(broadcast, msg)
+	e.sendEchoOut(broadcast, msg)
+
+	a.Equal(1, logs.Len())
+	if logs.Len() > 0 {
+		a.Equal("couldn't echo the message, network output channel buffer is full", logs.All()[0].Message)
+	}
 }

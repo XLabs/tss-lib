@@ -197,7 +197,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		maxTTl:               p.MaxSignerTTL,
 		loadDistributionSeed: p.LoadDistributionSeed,
 
-		rateLimiter: newRateLimiter(p.MaxActiveSessions),
+		rateLimiter: NewRateLimiter(p.MaxActiveSessions),
 	}
 
 	return imp, nil

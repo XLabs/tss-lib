@@ -128,10 +128,10 @@ func (st *signerTester) run(t *testing.T) {
 		party.Stop()
 
 		p := party.(*Impl)
-		l := p.rateLimiter.lenDigestMap()
+		l := p.rateLimiter.lenTrackedMap()
 
 		p.rateLimiter.mtx.Lock()
-		for key := range p.rateLimiter.digestToPeer {
+		for key := range p.rateLimiter.trackedToPeer {
 			_, ok := p.sessionMap.Load(string(key))
 			a.False(ok, "expected session to be removed from session map")
 		}
@@ -315,10 +315,10 @@ func TestCleanup(t *testing.T) {
 		Digest:       digest,
 		ProtocolType: common.ProtocolFROSTSign,
 	})
-	p1.rateLimiter.add(info.TrackingID, p1.self) // manually adding to rate limiter, as fpSign doesn't do it.
+	p1.rateLimiter.Add(info.TrackingID, p1.self) // manually adding to rate limiter, as fpSign doesn't do it.
 
 	a.Equal(getLen(&p1.sessionMap.Map), 1, "expected 1 signer ")
-	a.Equal(1, p1.rateLimiter.lenDigestMap(), "expected 1 digest in rate limiter")
+	a.Equal(1, p1.rateLimiter.lenTrackedMap(), "expected 1 digest in rate limiter")
 
 	<-time.After(maxTTL * 3)
 
@@ -330,7 +330,7 @@ func TestCleanup(t *testing.T) {
 	}
 
 	a.Equal(getLen(&p1.sessionMap.Map), 0, "expected 0 signers ")
-	a.Equal(0, p1.rateLimiter.lenDigestMap(), "expected 0 digest in rate limiter")
+	a.Equal(0, p1.rateLimiter.lenTrackedMap(), "expected 0 digest in rate limiter")
 
 	stopParties(parties)
 }
