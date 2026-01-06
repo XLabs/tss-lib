@@ -786,8 +786,6 @@ func (t *Engine) handleUnicast(m Incoming) error {
 		return err
 	}
 
-	// TODO: in case of future unicast types, consider rate limiting per type, and how to track them.
-	//  we currently rely on tsscommon.trackingID to track unicasts.
 	content, ok := unicast.Content.(*tsscommv1.Unicast_Tss)
 	if !ok {
 		return fmt.Errorf("unicast content is not of type Tss, got: %T", unicast.Content)
