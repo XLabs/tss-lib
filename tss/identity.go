@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
 	"google.golang.org/protobuf/proto"
 )
@@ -33,20 +35,16 @@ type Identity struct {
 	// TODO: is this field mutable? in the future, when this field is set via guardian communications,
 	// would it be set ONCE, or multiple times? (if once, we can use atomics to indicate whether it is set or not).
 	// otherwise, we'll need a lock.
-	VAAv1PubKey *ethcommon.Address `json:"VAAv1PubKey,omitempty"` // mapping between VaaV1 and PID (used in TSS)
+	EthAddress *ethcommon.Address `json:"VAAv1PubKey,omitempty"` // mapping between VaaV1 and PID (used in TSS)
 }
 
 func (id *Identity) Copy() *Identity {
-	keypem := make([]byte, len(id.KeyPEM))
-	copy(keypem, id.KeyPEM)
-
-	certPem := make([]byte, len(id.CertPem))
-	copy(certPem, id.CertPem)
-
+	certPem := slices.Clone(id.CertPem)
 	c, k, _ := extractCertAndKeyFromPem(certPem)
+
 	cpy := &Identity{
 		Pid:                id.getPidCopy(),
-		KeyPEM:             keypem,
+		KeyPEM:             slices.Clone(id.KeyPEM),
 		CertPem:            certPem,
 		CommunicationIndex: id.CommunicationIndex,
 		Hostname:           id.Hostname,
@@ -88,11 +86,11 @@ type IdentitiesKeep struct {
 	Identities []*Identity
 
 	// maps and slices to ensure quick lookups.
-	pemkeyToIndex      map[string]int
-	vaav1PubToIdentity map[ethcommon.Address]int
-	partyidToIndex     map[string]int
-	peerCerts          []*x509.Certificate
-	partyIds           []*common.PartyID
+	pemkeyToIndex  map[string]int
+	ethAddToIndex  map[ethcommon.Address]int
+	partyidToIndex map[string]int
+	peerCerts      []*x509.Certificate
+	partyIds       []*common.PartyID
 }
 
 var errUnknownPartyID = fmt.Errorf("unknown partyID")
@@ -169,10 +167,10 @@ func (ids *IdentitiesKeep) fetchIdentityFromIndex(senderId SenderIndex) (*Identi
 	return ids.Identities[senderId], nil
 }
 
-func (ids *IdentitiesKeep) fetchIdentityFromVaav1Pubkey(pubkey ethcommon.Address) (*Identity, error) {
-	index, ok := ids.vaav1PubToIdentity[pubkey]
+func (ids *IdentitiesKeep) fetchIdentityFromEthAddress(pubkey ethcommon.Address) (*Identity, error) {
+	index, ok := ids.ethAddToIndex[pubkey]
 	if !ok {
-		return nil, fmt.Errorf("unknown vaav1 pubkey %s", pubkey.Hex())
+		return nil, fmt.Errorf("unknown eth address %s", pubkey.Hex())
 	}
 
 	return ids.fetchIdentityFromIndex(SenderIndex(index))
@@ -185,4 +183,21 @@ func (ids *IdentitiesKeep) GetPeers() []*x509.Certificate {
 
 func (ids *IdentitiesKeep) GetPartyIDs() []*common.PartyID {
 	return ids.partyIds
+}
+
+func (ids *IdentitiesKeep) fetchIdentityFromTypedKey(key *signer.TypedKey) (*Identity, error) {
+	switch key.Type {
+	case signer.TypedKey_EthKey:
+		// check if we have a mapping for this eth key.
+		return nil, fmt.Errorf("fetch by eth key not implemented yet")
+	case signer.TypedKey_P256CertKey:
+		index, ok := ids.pemkeyToIndex[string(key.Key)]
+		if !ok {
+			return nil, fmt.Errorf("no identity found for given pem-encoded ecdsa pubkey")
+		}
+
+		return ids.Identities[index], nil
+	default:
+		return nil, fmt.Errorf("unknown key type: %s", key.Type.Descriptor().Name())
+	}
 }

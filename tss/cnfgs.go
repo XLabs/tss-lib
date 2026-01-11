@@ -14,8 +14,11 @@ import (
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
 	"github.com/xlabs/multi-party-sig/protocols/frost"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // StorageLoader is a helper struct to load GuardianStorage from file.
@@ -46,13 +49,18 @@ func (s *StorageLoader) load() error {
 	if s == nil {
 		return fmt.Errorf("GuardianStorage is nil")
 	}
-	if s.gs == nil {
-		s.gs = &GuardianStorage{}
-	}
 
 	storageData, err := internal.ReadFileWithLimit(s.Path, maxConfigFileSize)
 	if err != nil {
 		return err
+	}
+
+	return s.loadFromJSON(storageData)
+}
+
+func (s *StorageLoader) loadFromJSON(storageData []byte) error {
+	if s.gs == nil {
+		s.gs = &GuardianStorage{}
 	}
 
 	if err := s.unmarshalFromJSON(storageData); err != nil {
@@ -66,7 +74,6 @@ func (s *StorageLoader) load() error {
 	if s.gs.frostconf == nil && s.gs.ecdsaconf == nil {
 		return fmt.Errorf("no TSS secrets found in storage")
 	}
-
 	return nil
 }
 
@@ -199,31 +206,24 @@ func (s *GuardianStorage) SetInnerFields() error {
 		return err
 	}
 
-	numGuardians := len(s.IdentitiesKeep.Identities)
+	numPeers := len(s.IdentitiesKeep.Identities)
 
-	s.IdentitiesKeep.peerCerts = make([]*x509.Certificate, numGuardians)
-	s.IdentitiesKeep.partyIds = make([]*common.PartyID, numGuardians)
+	s.IdentitiesKeep.peerCerts = make([]*x509.Certificate, numPeers)
+	s.IdentitiesKeep.partyIds = make([]*common.PartyID, numPeers)
 	s.IdentitiesKeep.pemkeyToIndex = make(map[string]int)
-	s.IdentitiesKeep.vaav1PubToIdentity = make(map[ethcommon.Address]int)
+	s.IdentitiesKeep.ethAddToIndex = make(map[ethcommon.Address]int)
 	s.IdentitiesKeep.partyidToIndex = make(map[string]int)
 	// Since the guardians are sorted by key, we can use their position as their index.
-	for i := range numGuardians {
+	for i := range numPeers {
 		s.IdentitiesKeep.peerCerts[i] = s.IdentitiesKeep.Identities[i].Cert
 		s.IdentitiesKeep.partyIds[i] = s.IdentitiesKeep.Identities[i].Pid
 		s.IdentitiesKeep.pemkeyToIndex[string(s.IdentitiesKeep.Identities[i].KeyPEM)] = i
 		s.IdentitiesKeep.partyidToIndex[string(s.IdentitiesKeep.Identities[i].Pid.GetID())] = i
 
-		if s.IdentitiesKeep.Identities[i].VAAv1PubKey != nil {
-			s.IdentitiesKeep.vaav1PubToIdentity[*(s.IdentitiesKeep.Identities[i].VAAv1PubKey)] = i
+		if s.IdentitiesKeep.Identities[i].EthAddress != nil {
+			s.IdentitiesKeep.ethAddToIndex[*(s.IdentitiesKeep.Identities[i].EthAddress)] = i
 		}
 	}
-
-	if s.LeaderIdentity == nil {
-		// since the guardians are expected to be sorted already, the first guardian is the leader.
-		s.LeaderIdentity = s.IdentitiesKeep.Identities[0].KeyPEM
-	}
-
-	s.isleader = bytes.Equal(s.Self.KeyPEM, s.LeaderIdentity)
 
 	return nil
 }
@@ -317,3 +317,60 @@ func (s *GuardianStorage) ExistingSecretsTypes() []common.ProtocolType {
 
 	return types
 }
+
+// Copy performs a deep copy of the GuardianStorage by marshalling and unmarshalling it.
+func (gs *GuardianStorage) Copy() (*GuardianStorage, error) {
+	data, err := json.Marshal(gs)
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling guardian storage for copy: %v", err)
+	}
+
+	ldr := StorageLoader{
+		// we don't need to demand any secrets for a copy: if they exist, they will be copied.
+		DemandFrost: false,
+		DemandECDSA: false,
+	}
+
+	if err := ldr.loadFromJSON(data); err != nil {
+		return nil, fmt.Errorf("error unmarshalling guardian storage for copy: %v", err)
+	}
+
+	return ldr.gs, nil
+}
+
+func typedKeyAsString(typedKey *signer.TypedKey) string {
+	return typedKey.Type.String() + "-" + string(typedKey.Key)
+}
+
+func checkDuplicated(rq *signer.UpdateKeysRequest) error {
+	seen := make(map[string]struct{})
+
+	for _, pair := range rq.GetPairs() {
+		strRep := typedKeyAsString(pair.KnownKey) + typedKeyAsString(pair.UpdateKey)
+
+		if _, exists := seen[strRep]; exists {
+			return status.Error(codes.InvalidArgument, "duplicate key pairs in update request")
+		}
+
+		seen[strRep] = struct{}{}
+	}
+
+	return nil
+}
+
+// func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) error {
+// 	if err := checkDuplicated(rq); err != nil {
+// 		return err
+// 	}
+
+// 	gs, err := s.Copy()
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// apply update to the copy
+// 	for _, pair := range rq.GetPairs() {
+// 		s.fetchIdentityFromTypedKey(pair.KnownKey)
+// 	}
+
+// }

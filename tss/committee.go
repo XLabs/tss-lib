@@ -29,7 +29,7 @@ func (st *GuardianStorage) translateEthCommitteeMembers(committee []*signer.Type
 		}
 
 		memberAddress := ethcommon.BytesToAddress(member.Key)
-		id, err := st.fetchIdentityFromVaav1Pubkey(memberAddress)
+		id, err := st.fetchIdentityFromEthAddress(memberAddress)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't map committee member %s to guardian identity: %w", memberAddress.String(), err)
 		}

@@ -1,7 +1,6 @@
 package tss
 
 import (
-	"bytes"
 	"context"
 	crand "crypto/rand"
 	"crypto/sha512"
@@ -716,25 +715,6 @@ func TestRouteCheck(t *testing.T) {
 	e1.fpCommChans.ErrChannel <- nil
 
 	time.Sleep(time.Millisecond * 200)
-}
-
-func TestDefaultSameLeader(t *testing.T) {
-	a := assert.New(t)
-
-	engines := load5GuardiansSetupForBroadcastChecks(a)
-
-	leader := engines[0].LeaderIdentity
-	a.NotNil(leader)
-
-	for _, e := range engines {
-		a.Equal(e.LeaderIdentity, leader)
-
-		if bytes.Equal(e.Self.KeyPEM, leader) {
-			a.True(e.isleader)
-		} else {
-			a.False(e.isleader)
-		}
-	}
 }
 
 func TestNoFaultsFlow(t *testing.T) {
@@ -1650,15 +1630,15 @@ func TestTranslateEthCommitteeMembers(t *testing.T) {
 	for i, id := range storage.Identities {
 		addr := ethcommon.Address{}
 		binary.BigEndian.PutUint64(addr[:], uint64(i+1)) // Simple unique address
-		id.VAAv1PubKey = &addr
+		id.EthAddress = &addr
 	}
 	// Re-run SetInnerFields to populate the vaav1PubToIdentity map
 	a.NoError(storage.SetInnerFields())
 
 	validCommittee := []*signer.TypedKey{
-		{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].VAAv1PubKey.Bytes()},
-		{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].VAAv1PubKey.Bytes()},
-		{Type: signer.TypedKey_EthKey, Key: storage.Identities[2].VAAv1PubKey.Bytes()},
+		{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].EthAddress.Bytes()},
+		{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].EthAddress.Bytes()},
+		{Type: signer.TypedKey_EthKey, Key: storage.Identities[2].EthAddress.Bytes()},
 	}
 	t.Run("Valid committee", func(t *testing.T) {
 		committee := slices.Clone(validCommittee)
@@ -1674,7 +1654,7 @@ func TestTranslateEthCommitteeMembers(t *testing.T) {
 		committee := slices.Clone(validCommittee)
 		committee = append(committee, &signer.TypedKey{
 			Type: signer.TypedKey_EthKey,
-			Key:  storage.Identities[3].VAAv1PubKey.Bytes(),
+			Key:  storage.Identities[3].EthAddress.Bytes(),
 		})
 
 		members, err := storage.translateEthCommitteeMembers(committee)
@@ -1711,9 +1691,9 @@ func TestTranslateEthCommitteeMembers(t *testing.T) {
 
 	t.Run("Committee with repeating members", func(t *testing.T) {
 		committee := []*signer.TypedKey{
-			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].VAAv1PubKey.Bytes()},
-			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].VAAv1PubKey.Bytes()}, // Duplicate
-			{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].VAAv1PubKey.Bytes()},
+			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].EthAddress.Bytes()},
+			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].EthAddress.Bytes()}, // Duplicate
+			{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].EthAddress.Bytes()},
 		}
 		_, err := storage.translateEthCommitteeMembers(committee)
 		a.ErrorIs(err, errRepeatingCommitteeMembers)
@@ -1721,8 +1701,8 @@ func TestTranslateEthCommitteeMembers(t *testing.T) {
 
 	t.Run("Committee too small", func(t *testing.T) {
 		committee := []*signer.TypedKey{
-			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].VAAv1PubKey.Bytes()},
-			{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].VAAv1PubKey.Bytes()},
+			{Type: signer.TypedKey_EthKey, Key: storage.Identities[0].EthAddress.Bytes()},
+			{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].EthAddress.Bytes()},
 		}
 		_, err := storage.translateEthCommitteeMembers(committee)
 		a.ErrorIs(err, errCommitteeTooSmall)
