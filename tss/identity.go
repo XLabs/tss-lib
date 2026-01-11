@@ -11,7 +11,6 @@ import (
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	common "github.com/xlabs/tss-common"
-	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
 	"google.golang.org/protobuf/proto"
 )
@@ -183,21 +182,4 @@ func (ids *IdentitiesKeep) GetPeers() []*x509.Certificate {
 
 func (ids *IdentitiesKeep) GetPartyIDs() []*common.PartyID {
 	return ids.partyIds
-}
-
-func (ids *IdentitiesKeep) fetchIdentityFromTypedKey(key *signer.TypedKey) (*Identity, error) {
-	switch key.Type {
-	case signer.TypedKey_EthKey:
-		// check if we have a mapping for this eth key.
-		return nil, fmt.Errorf("fetch by eth key not implemented yet")
-	case signer.TypedKey_P256CertKey:
-		index, ok := ids.pemkeyToIndex[string(key.Key)]
-		if !ok {
-			return nil, fmt.Errorf("no identity found for given pem-encoded ecdsa pubkey")
-		}
-
-		return ids.Identities[index], nil
-	default:
-		return nil, fmt.Errorf("unknown key type: %s", key.Type.Descriptor().Name())
-	}
 }

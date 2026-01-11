@@ -243,7 +243,7 @@ func (s *GuardianStorage) fillAndValidateStoredIdentities() error {
 			return fmt.Errorf("error parsing guardian %v: %w", i, err)
 		}
 
-		if id.Pid == nil {
+		if id.Pid == nil || len(id.Pid.GetID()) == 0 {
 			return fmt.Errorf("error guardian %v PartyID is nil", i)
 		}
 
@@ -269,7 +269,10 @@ func (s *GuardianStorage) fillAndValidateStoredIdentities() error {
 			return fmt.Errorf("error converting guardian %v  cert's PK  to pem: %v", i, err)
 		}
 
-		id.KeyPEM = keypem
+		// ensuring the stored KeyPEM matches the cert's public key.
+		if !bytes.Equal(keypem, id.KeyPEM) {
+			return fmt.Errorf("error guardian %v stored KeyPEM does not match cert's public key", i)
+		}
 
 		id.CommunicationIndex = SenderIndex(i)
 		id.networkname = id.portAndHostToNetName()
@@ -319,8 +322,8 @@ func (s *GuardianStorage) ExistingSecretsTypes() []common.ProtocolType {
 }
 
 // Copy performs a deep copy of the GuardianStorage by marshalling and unmarshalling it.
-func (gs *GuardianStorage) Copy() (*GuardianStorage, error) {
-	data, err := json.Marshal(gs)
+func (s *GuardianStorage) Copy() (*GuardianStorage, error) {
+	data, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling guardian storage for copy: %v", err)
 	}
@@ -358,19 +361,60 @@ func checkDuplicated(rq *signer.UpdateKeysRequest) error {
 	return nil
 }
 
-// func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) error {
-// 	if err := checkDuplicated(rq); err != nil {
-// 		return err
-// 	}
+// creates a deep copy of the GuardianStorage and applies the key updates from the request.
+// outputs the updated copy.
+func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*GuardianStorage, error) {
+	if err := checkDuplicated(rq); err != nil {
+		return nil, err
+	}
 
-// 	gs, err := s.Copy()
-// 	if err != nil {
-// 		return err
-// 	}
+	gs, err := s.Copy()
+	if err != nil {
+		return nil, err
+	}
 
-// 	// apply update to the copy
-// 	for _, pair := range rq.GetPairs() {
-// 		s.fetchIdentityFromTypedKey(pair.KnownKey)
-// 	}
+	// apply update to the copy
+	for _, pair := range rq.GetPairs() {
+		var idIndex int
+		var ok bool
 
-// }
+		known := pair.GetKnownKey()
+		switch known.Type {
+		case signer.TypedKey_EthKey:
+			idIndex, ok = s.IdentitiesKeep.ethAddToIndex[ethcommon.BytesToAddress(known.Key)]
+		case signer.TypedKey_P256CertKey:
+			idIndex, ok = s.IdentitiesKeep.pemkeyToIndex[string(known.Key)]
+		default:
+			return nil, status.Errorf(codes.FailedPrecondition, "unknown key type %s", known.Type.Descriptor().Name())
+		}
+
+		if !ok {
+			return nil, status.Error(codes.NotFound, "no identity found for given pem-encoded ecdsa pubkey")
+		}
+
+		idToUpdate := gs.Identities[idIndex]
+		update := pair.GetUpdateKey()
+
+		switch update.Type {
+		case signer.TypedKey_EthKey:
+			tmp := ethcommon.BytesToAddress(update.Key)
+			idToUpdate.EthAddress = &tmp
+		case signer.TypedKey_P256CertKey:
+			ecdsaPublicKey, err := internal.PemToPublicKey(update.Key)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "error parsing updated ecdsa public key: %v", err)
+			}
+			idToUpdate.Key = ecdsaPublicKey
+			idToUpdate.KeyPEM = update.Key
+
+			// create a dummy cert with the new public key to extract the pem and validate.
+			dummyCert := &x509.Certificate{
+				PublicKey: ecdsaPublicKey,
+			}
+
+			idToUpdate.CertPem = internal.CertToPem(dummyCert)
+		}
+	}
+
+	return gs, gs.SetInnerFields()
+}

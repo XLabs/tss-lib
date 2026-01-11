@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -15,28 +14,26 @@ import (
 	"testing"
 	"time"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	common "github.com/xlabs/tss-common"
+	"github.com/xlabs/tss-common/service/signer"
+	"github.com/xlabs/tss-lib/v2/tss/internal"
 )
 
 func generateTestKeys(t *testing.T) ([]byte, []byte, []byte) {
+	a := require.New(t)
+
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a.NoError(err)
 
-	privBytes, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privPem := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
+	privPem := internal.PrivateKeyToPem(priv)
 
-	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pubPem := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+	pubPem, err := internal.PublicKeyToPem(&priv.PublicKey)
+	a.NoError(err)
 
-	template := x509.Certificate{
+	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "test"},
 		NotBefore:             time.Now(),
@@ -45,12 +42,8 @@ func generateTestKeys(t *testing.T) ([]byte, []byte, []byte) {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-
-	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	certPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
+	_, certPem, err := internal.CreateCert(template, template, &priv.PublicKey, priv)
+	a.NoError(err)
 
 	return privPem, pubPem, certPem
 }
@@ -242,4 +235,103 @@ func writeMockGuardianStorage(t *testing.T, gs *GuardianStorage, path string) {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestUpdatePeerKeys(t *testing.T) {
+	a := require.New(t)
+	gs := loadMockGuardianStorage(0, "tss5")
+
+	id1 := gs.Identities[0]
+	id1.EthAddress = &ethcommon.Address{1, 2, 3, 4}
+	id2 := gs.Identities[1]
+	id2.EthAddress = &ethcommon.Address{4, 3, 2, 1}
+
+	require.NoError(t, gs.SetInnerFields())
+
+	t.Run("Duplicate keys", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id1.EthAddress.Bytes()},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id2.EthAddress.Bytes()},
+				},
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id1.EthAddress.Bytes()},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id2.EthAddress.Bytes()},
+				},
+			},
+		}
+		_, err := gs.UpdatePeerKeys(req)
+		a.ErrorContains(err, "duplicate key pairs")
+	})
+
+	t.Run("Unknown Key Type", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_Unspecified, Key: []byte("foo")},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id2.EthAddress.Bytes()},
+				},
+			},
+		}
+		_, err := gs.UpdatePeerKeys(req)
+		a.ErrorContains(err, "unknown key type")
+	})
+
+	t.Run("Identity Not Found", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: []byte("random")},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id2.EthAddress.Bytes()},
+				},
+			},
+		}
+		_, err := gs.UpdatePeerKeys(req)
+		a.ErrorContains(err, "no identity found")
+	})
+
+	t.Run("Update Eth Key", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id1.EthAddress.Bytes()},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: id2.EthAddress.Bytes()},
+				},
+			},
+		}
+		newGs, err := gs.UpdatePeerKeys(req)
+		require.NoError(t, err)
+		a.Equal(*id2.EthAddress, *newGs.Identities[0].EthAddress)
+		// Ensure original is untouched
+		a.Equal(*id1.EthAddress, *gs.Identities[0].EthAddress)
+	})
+
+	t.Run("Update P256CertKey", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id1.KeyPEM},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id2.KeyPEM},
+				},
+			},
+		}
+		newGs, err := gs.UpdatePeerKeys(req)
+		a.NoError(err)
+		a.Equal(id2.KeyPEM, newGs.Identities[0].KeyPEM)
+		a.NotEqual(gs.Identities[0].CertPem, newGs.Identities[0].CertPem)
+	})
+
+	t.Run("Invalid Update Key", func(t *testing.T) {
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id1.KeyPEM},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: []byte("invalid")},
+				},
+			},
+		}
+		_, err := gs.UpdatePeerKeys(req)
+		assert.ErrorContains(t, err, "error parsing updated ecdsa public key")
+	})
 }
