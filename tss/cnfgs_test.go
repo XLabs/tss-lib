@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"encoding/json"
 	"math/big"
 	"os"
@@ -288,7 +289,7 @@ func TestUpdatePeerKeys(t *testing.T) {
 			},
 		}
 		_, err := gs.UpdatePeerKeys(req)
-		a.ErrorContains(err, "no identity found")
+		a.ErrorContains(err, "unknown eth address")
 	})
 
 	t.Run("Update Eth Key", func(t *testing.T) {
@@ -311,14 +312,14 @@ func TestUpdatePeerKeys(t *testing.T) {
 		req := &signer.UpdateKeysRequest{
 			Pairs: []*signer.UpdateKeyPair{
 				{
-					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id1.KeyPEM},
-					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id2.KeyPEM},
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_CertKey, Key: id1.CertPem},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_CertKey, Key: id2.CertPem},
 				},
 			},
 		}
 		newGs, err := gs.UpdatePeerKeys(req)
 		a.NoError(err)
-		a.Equal(id2.KeyPEM, newGs.Identities[0].KeyPEM)
+		a.Equal(id2.CertPem, newGs.Identities[0].CertPem)
 		a.NotEqual(gs.Identities[0].CertPem, newGs.Identities[0].CertPem)
 	})
 
@@ -326,12 +327,120 @@ func TestUpdatePeerKeys(t *testing.T) {
 		req := &signer.UpdateKeysRequest{
 			Pairs: []*signer.UpdateKeyPair{
 				{
-					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: id1.KeyPEM},
-					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_P256CertKey, Key: []byte("invalid")},
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_CertKey, Key: id1.CertPem},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_CertKey, Key: []byte("invalid")},
 				},
 			},
 		}
 		_, err := gs.UpdatePeerKeys(req)
-		assert.ErrorContains(t, err, "error parsing updated ecdsa public key")
+		assert.ErrorContains(t, err, "malformed update CertKey")
+	})
+}
+
+func TestEthKey(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	storage := engines[0].GuardianStorage
+
+	// Setup identities with eth addresses
+	for i, id := range storage.Identities {
+		addr := ethcommon.Address{}
+		binary.BigEndian.PutUint64(addr[:], uint64(i+1))
+		id.EthAddress = &addr
+	}
+	a.NoError(storage.SetInnerFields())
+
+	t.Run("findIdPos", func(t *testing.T) {
+		targetId := storage.Identities[1]
+		k := ethKey{&signer.TypedKey{
+			Type: signer.TypedKey_EthKey,
+			Key:  targetId.EthAddress.Bytes(),
+		}}
+
+		pos, err := k.findIdPos(&storage.IdentitiesKeep)
+		a.NoError(err)
+		a.Equal(targetId.pos, pos)
+
+		// Unknown address
+		unknownAddr := ethcommon.Address{1}
+		kUnknown := ethKey{&signer.TypedKey{
+			Type: signer.TypedKey_EthKey,
+			Key:  unknownAddr.Bytes(),
+		}}
+		_, err = kUnknown.findIdPos(&storage.IdentitiesKeep)
+		a.Error(err)
+	})
+
+	t.Run("updateIdentity", func(t *testing.T) {
+		id := storage.Identities[0]
+		newAddr := ethcommon.Address{0xAA}
+		k := ethKey{&signer.TypedKey{
+			Type: signer.TypedKey_EthKey,
+			Key:  newAddr.Bytes(),
+		}}
+
+		err := k.updateIdentity(id)
+		a.NoError(err)
+		a.Equal(newAddr, *id.EthAddress)
+
+		// Invalid length
+		kInvalid := ethKey{&signer.TypedKey{
+			Type: signer.TypedKey_EthKey,
+			Key:  []byte{1, 2},
+		}}
+		err = kInvalid.updateIdentity(id)
+		a.Error(err)
+	})
+}
+
+func TestCertKey(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	storage := engines[0].GuardianStorage
+
+	t.Run("findIdPos", func(t *testing.T) {
+		targetId := storage.Identities[1]
+		k := certKey{&signer.TypedKey{
+			Type: signer.TypedKey_CertKey,
+			Key:  targetId.CertPem,
+		}}
+
+		pos, err := k.findIdPos(&storage.IdentitiesKeep)
+		a.NoError(err)
+		a.Equal(targetId.pos, pos)
+
+		// Invalid cert pem
+		kInvalid := certKey{&signer.TypedKey{
+			Type: signer.TypedKey_CertKey,
+			Key:  []byte("invalid"),
+		}}
+		_, err = kInvalid.findIdPos(&storage.IdentitiesKeep)
+		a.Error(err)
+	})
+
+	t.Run("updateIdentity", func(t *testing.T) {
+		id := storage.Identities[0]
+
+		// Generate new cert
+		_, _, certPem := generateTestKeys(t)
+
+		k := certKey{&signer.TypedKey{
+			Type: signer.TypedKey_CertKey,
+			Key:  certPem,
+		}}
+
+		err := k.updateIdentity(id)
+		a.NoError(err)
+		a.Equal(PEM(certPem), id.CertPem)
+		a.NotNil(id.Cert)
+		a.NotNil(id.Key)
+
+		// Invalid cert
+		kInvalid := certKey{&signer.TypedKey{
+			Type: signer.TypedKey_CertKey,
+			Key:  []byte("invalid"),
+		}}
+		err = kInvalid.updateIdentity(id)
+		a.Error(err)
 	})
 }

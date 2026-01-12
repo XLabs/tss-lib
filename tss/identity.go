@@ -35,6 +35,8 @@ type Identity struct {
 	// would it be set ONCE, or multiple times? (if once, we can use atomics to indicate whether it is set or not).
 	// otherwise, we'll need a lock.
 	EthAddress *ethcommon.Address `json:"VAAv1PubKey,omitempty"` // mapping between VaaV1 and PID (used in TSS)
+
+	pos int // internal use only: position in the IdentitiesKeep slice.
 }
 
 func (id *Identity) Copy() *Identity {

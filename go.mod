@@ -8,7 +8,7 @@ require (
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/stretchr/testify v1.11.1
 	github.com/xlabs/multi-party-sig v0.0.2-0.20260106091636-03df0eb97600
-	github.com/xlabs/tss-common v0.0.0-20260111080111-b939a2a19eca
+	github.com/xlabs/tss-common v0.0.0-20260112075615-2ef4f5a2142a
 	golang.org/x/crypto v0.41.0
 	google.golang.org/protobuf v1.36.11
 )

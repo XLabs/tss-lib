@@ -223,6 +223,8 @@ func (s *GuardianStorage) SetInnerFields() error {
 		if s.IdentitiesKeep.Identities[i].EthAddress != nil {
 			s.IdentitiesKeep.ethAddToIndex[*(s.IdentitiesKeep.Identities[i].EthAddress)] = i
 		}
+
+		s.IdentitiesKeep.Identities[i].pos = i
 	}
 
 	return nil
@@ -361,6 +363,94 @@ func checkDuplicated(rq *signer.UpdateKeysRequest) error {
 	return nil
 }
 
+type idExtractor interface {
+	// finds the Identity's position in the IdentitiesKeep slice based on this key type and value.
+	findIdPos(*IdentitiesKeep) (int, error)
+}
+type updaterKey interface {
+	// sets this key's value into the provided Identity in the appropriate field.
+	updateIdentity(*Identity) error
+}
+
+type peerUpdate interface {
+	idExtractor
+	updaterKey
+}
+
+// wrappers that implement the peerUpdate interface.
+type ethKey struct{ *signer.TypedKey }
+type certKey struct{ *signer.TypedKey }
+
+func (k ethKey) findIdPos(ids *IdentitiesKeep) (int, error) {
+	id, err := ids.fetchIdentityFromEthAddress(ethcommon.BytesToAddress(k.Key))
+	if err != nil {
+		return 0, status.Error(codes.NotFound, "couldn't find eth address, an error occurred: "+err.Error())
+	}
+
+	return id.pos, nil
+}
+
+func (k ethKey) updateIdentity(id *Identity) error {
+	if len(k.Key) != ethcommon.AddressLength {
+		return status.Errorf(codes.InvalidArgument, "invalid eth address length: %d", len(k.Key))
+	}
+
+	tmp := ethcommon.BytesToAddress(k.Key)
+	id.EthAddress = &tmp
+
+	return nil
+}
+
+func (k certKey) findIdPos(ids *IdentitiesKeep) (int, error) {
+	cert, err := internal.PemToCert(k.Key)
+	if err != nil {
+		return 0, status.Error(codes.InvalidArgument, "invalid cert key: "+err.Error())
+	}
+
+	id, err := ids.FetchIdentity(cert)
+	if err != nil {
+		return 0, status.Error(codes.NotFound, "couldn't find cert key, an error occurred: "+err.Error())
+	}
+
+	return id.pos, nil
+}
+
+func (k certKey) updateIdentity(id *Identity) error {
+	cert, key, err := extractCertAndKeyFromPem(k.Key)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "malformed update CertKey: "+err.Error())
+	}
+	keyPEM, err := internal.PublicKeyToPem(key)
+	if err != nil {
+		return status.Errorf(codes.Internal, "error converting update CertKey's public key to pem: %v", err)
+	}
+
+	id.CertPem = k.Key
+	id.Cert = cert
+	id.Key = key
+	id.KeyPEM = keyPEM
+
+	return nil
+}
+
+func typedKeyToPeerUpdater(typedKey *signer.TypedKey) (peerUpdate, error) {
+	switch typedKey.Type {
+	case signer.TypedKey_EthKey:
+		return ethKey{typedKey}, nil
+	case signer.TypedKey_CertKey:
+		return certKey{typedKey}, nil
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown key type %s", typedKey.Type.Descriptor().Name())
+	}
+}
+
+func typedKeyToPeerExtractor(typedKey *signer.TypedKey) (idExtractor, error) {
+	return typedKeyToPeerUpdater(typedKey)
+}
+func typedKeyToUpdaterKey(typedKey *signer.TypedKey) (updaterKey, error) {
+	return typedKeyToPeerUpdater(typedKey)
+}
+
 // creates a deep copy of the GuardianStorage and applies the key updates from the request.
 // outputs the updated copy.
 func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*GuardianStorage, error) {
@@ -375,44 +465,24 @@ func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*Guardia
 
 	// apply update to the copy
 	for _, pair := range rq.GetPairs() {
-		var idIndex int
-		var ok bool
-
-		known := pair.GetKnownKey()
-		switch known.Type {
-		case signer.TypedKey_EthKey:
-			idIndex, ok = s.IdentitiesKeep.ethAddToIndex[ethcommon.BytesToAddress(known.Key)]
-		case signer.TypedKey_P256CertKey:
-			idIndex, ok = s.IdentitiesKeep.pemkeyToIndex[string(known.Key)]
-		default:
-			return nil, status.Errorf(codes.FailedPrecondition, "unknown key type %s", known.Type.Descriptor().Name())
+		knownkey, err := typedKeyToPeerExtractor(pair.GetKnownKey())
+		if err != nil {
+			return nil, err
 		}
 
-		if !ok {
-			return nil, status.Error(codes.NotFound, "no identity found for given pem-encoded ecdsa pubkey")
+		idIndex, err := knownkey.findIdPos(&gs.IdentitiesKeep)
+		if err != nil {
+			return nil, err
 		}
 
 		idToUpdate := gs.Identities[idIndex]
-		update := pair.GetUpdateKey()
+		updater, err := typedKeyToUpdaterKey(pair.GetUpdateKey())
+		if err != nil {
+			return nil, err
+		}
 
-		switch update.Type {
-		case signer.TypedKey_EthKey:
-			tmp := ethcommon.BytesToAddress(update.Key)
-			idToUpdate.EthAddress = &tmp
-		case signer.TypedKey_P256CertKey:
-			ecdsaPublicKey, err := internal.PemToPublicKey(update.Key)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "error parsing updated ecdsa public key: %v", err)
-			}
-			idToUpdate.Key = ecdsaPublicKey
-			idToUpdate.KeyPEM = update.Key
-
-			// create a dummy cert with the new public key to extract the pem and validate.
-			dummyCert := &x509.Certificate{
-				PublicKey: ecdsaPublicKey,
-			}
-
-			idToUpdate.CertPem = internal.CertToPem(dummyCert)
+		if err := updater.updateIdentity(idToUpdate); err != nil {
+			return nil, err
 		}
 	}
 
