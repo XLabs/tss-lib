@@ -1696,7 +1696,7 @@ func TestTranslateEthCommitteeMembers(t *testing.T) {
 			{Type: signer.TypedKey_EthKey, Key: storage.Identities[1].EthAddress.Bytes()},
 		}
 		_, err := storage.translateEthCommitteeMembers(committee)
-		a.ErrorIs(err, errRepeatingCommitteeMembers)
+		a.ErrorIs(err, errMappingCommitteeMembers)
 	})
 
 	t.Run("Committee too small", func(t *testing.T) {

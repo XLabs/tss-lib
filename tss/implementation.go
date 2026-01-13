@@ -915,7 +915,3 @@ func (t *Engine) StartDKG(task party.DkgTask) (chan *party.TSSSecrets, error) {
 
 	return t.fpCommChans.KeygenOutputChannel, err
 }
-
-func (t *Engine) GetSecretStorage() (*GuardianStorage, error) {
-	return t.GuardianStorage.Copy()
-}

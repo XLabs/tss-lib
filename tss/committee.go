@@ -9,7 +9,7 @@ import (
 	"github.com/xlabs/tss-common/service/signer"
 )
 
-var errRepeatingCommitteeMembers = errors.New("couldn't map all committee members")
+var errMappingCommitteeMembers = errors.New("couldn't map all committee members")
 var errCommitteeTooSmall = errors.New("committee is too small")
 
 func (st *GuardianStorage) translateEthCommitteeMembers(committee []*signer.TypedKey) (map[SenderIndex]*Identity, error) {
@@ -38,7 +38,7 @@ func (st *GuardianStorage) translateEthCommitteeMembers(committee []*signer.Type
 	}
 
 	if len(signersID) != len(committee) {
-		return nil, errRepeatingCommitteeMembers
+		return nil, errMappingCommitteeMembers // either duplicate members or some members couldn't be mapped.
 	}
 
 	if st.Threshold > len(signersID) {
