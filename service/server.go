@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -280,6 +282,13 @@ func (s *server) backupSecrets() error {
 	}
 	defer dst.Close()
 
-	_, err = io.Copy(dst, src)
-	return err
+	if _, err := io.Copy(dst, src); err != nil {
+		if err2 := os.Remove(backupPath); err2 != nil {
+			err = errors.Join(err, fmt.Errorf("failed to remove incomplete backup: %w", err2))
+		}
+
+		return err
+	}
+
+	return nil
 }
