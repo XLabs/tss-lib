@@ -53,6 +53,7 @@ func (s *server) SignMessage(stream signer.Signer_SignMessageServer) error {
 	defer s.removeSubscriber()
 
 	s.logger.Info("Client subscribed to signing stream")
+	defer s.logger.Info("Client unsubscribed from signing stream")
 
 	ch := make(chan *signer.SignResponse, bufferSize) // Buffered channel for sending status updates
 	errChan := make(chan error, 2)                    // Buffer size 2 to avoid blocking
@@ -101,9 +102,12 @@ func (s *server) requestReader(stream signer.Signer_SignMessageServer, errChan c
 			return
 		}
 
+		s.logger.Debug("Received signing request", zap.String("protocol", req.Protocol), zap.String("digest", fmt.Sprintf("%x", req.Digest)))
+
 		// TODO: support warning and async error reports to client?
 		err = s.Signer.BeginAsyncThresholdSigningProtocol(req) // start the signing protocol
 		if err == nil {
+			s.logger.Debug("Started signing protocol", zap.String("digest", fmt.Sprintf("%x", req.Digest)))
 			continue
 		}
 
@@ -156,6 +160,8 @@ func (s *server) GetPublicData(ctx context.Context, _ *signer.PublicDataRequest)
 		return nil, status.Error(codes.Internal, "public data not initialized")
 	}
 
+	s.logger.Debug("Public data requested")
+
 	return s.pubData, nil
 }
 
@@ -207,6 +213,8 @@ func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatur
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported protocol type: %s", protocol.ToString())
 	}
 
+	s.logger.Debug("Verifying signature", zap.String("protocol", protocol.ToString()))
+
 	// we currently support only a single curve: secp256k1
 	pubkey, err := (&curve.Secp256k1{}).UnmarshalPoint(pkeyBytes)
 	if err != nil {
@@ -233,6 +241,8 @@ func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatur
 		isValid = sig.Verify(pubkey, msg)
 	}
 
+	s.logger.Debug("Signature verification completed", zap.Bool("isValid", isValid))
+
 	return &signer.VerifySignatureResponse{IsValid: isValid}, nil
 }
 
@@ -245,6 +255,8 @@ func (s *server) UpdateKeys(ctx context.Context, req *signer.UpdateKeysRequest) 
 		return nil, status.Error(codes.InvalidArgument, "request is nil")
 	}
 
+	s.logger.Info("Received key update request", zap.Int("pairs", len(req.GetPairs())))
+
 	if len(req.GetPairs()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "no key pairs provided for update")
 	}
@@ -255,13 +267,17 @@ func (s *server) UpdateKeys(ctx context.Context, req *signer.UpdateKeysRequest) 
 	}
 
 	if err := s.backupSecrets(); err != nil {
+		s.logger.Error("Failed to backup secrets", zap.Error(err))
 		return nil, status.Error(codes.Internal, "failed to backup peer keys: "+err.Error())
 	}
 
 	// overwrite existing secrets file with updated keys
 	if err := gs.Save(s.secretsPath); err != nil {
+		s.logger.Error("Failed to overwrite peer keys", zap.Error(err))
 		return nil, status.Error(codes.Internal, "Created backup, but failed to overwrite peer keys: "+err.Error())
 	}
+
+	s.logger.Info("Peer keys updated successfully")
 
 	return &signer.UpdateKeysResponse{}, nil
 }
@@ -277,6 +293,8 @@ func (s *server) backupSecrets() error {
 	timestamp := time.Now().Format("2006_01_02_150405.000000000")
 	backupPath := s.secretsPath + "." + timestamp + ".old"
 	dst, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	s.logger.Info("Backing up secrets", zap.String("path", backupPath))
+
 	if err != nil {
 		return err
 	}
