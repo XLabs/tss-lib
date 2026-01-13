@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -29,16 +30,17 @@ import (
 )
 
 func TestGetPublicData(t *testing.T) {
+	a := require.New(t)
 	s := &server{}
 	ctx := context.Background()
 
 	t.Run("PublicDataNotInitialized", func(t *testing.T) {
 		resp, err := s.GetPublicData(ctx, &signer.PublicDataRequest{})
-		assert.Error(t, err)
-		assert.Nil(t, resp)
+		a.Error(err)
+		a.Nil(resp)
 		st, _ := status.FromError(err)
-		assert.Equal(t, codes.Internal, st.Code())
-		assert.Contains(t, err.Error(), "public data not initialized")
+		a.Equal(codes.Internal, st.Code())
+		a.Contains(err.Error(), "public data not initialized")
 	})
 
 	t.Run("Success", func(t *testing.T) {
@@ -49,7 +51,7 @@ func TestGetPublicData(t *testing.T) {
 		s.pubData = expectedPubData
 
 		resp, err := s.GetPublicData(ctx, &signer.PublicDataRequest{})
-		assert.NoError(t, err)
+		a.NoError(err)
 		assert.Equal(t, expectedPubData, resp)
 	})
 }
@@ -259,10 +261,8 @@ func TestSigTranslateValidWithEcrecover(t *testing.T) {
 func TestUpdateKeys(t *testing.T) {
 	a := require.New(t)
 	// Setup temporary directory for secrets
-	tmpDir := t.TempDir()
-	secretsPath := filepath.Join(tmpDir, "secrets.json")
-	err := os.WriteFile(secretsPath, []byte("original secrets"), 0600)
-	a.NoError(err)
+	secretsPath := path.Join(t.TempDir(), "secrets.json")
+	a.NoError(os.WriteFile(secretsPath, []byte("original secrets"), 0600)) // creating new secrets file
 
 	s := &server{
 		secretsPath: secretsPath,
@@ -304,6 +304,7 @@ func TestUpdateKeys(t *testing.T) {
 	})
 
 	t.Run("BackupSecretsError", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		// Point to non-existent file to trigger backup error
 		s.secretsPath = filepath.Join(tmpDir, "nonexistent.json")
 
@@ -351,26 +352,65 @@ func TestUpdateKeys(t *testing.T) {
 			},
 		}
 		resp, err := s.UpdateKeys(ctx, req)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
+		a.NoError(err)
+		a.NotNil(resp)
 
 		// Verify backup created
-		_, err = os.Stat(secretsPath + ".old")
-		assert.NoError(t, err)
-		content, err := os.ReadFile(secretsPath + ".old")
-		assert.NoError(t, err)
-		assert.Equal(t, "original secrets", string(content))
+		matches, err := filepath.Glob(secretsPath + ".*.old")
+		a.NoError(err)
+		a.Len(matches, 1)
+		content, err := os.ReadFile(matches[0])
+		a.NoError(err)
+		a.Equal("original secrets", string(content))
 
 		// Verify updated file created
-		_, err = os.Stat(secretsPath + ".updated")
-		assert.NoError(t, err)
-
 		res, err := tss.LoadGuardianStorage(tss.StorageLoader{
-			Path: secretsPath + ".updated",
+			Path: secretsPath,
 		})
-		assert.NoError(t, err)
-		assert.NotNil(t, res)
+		a.NoError(err)
+		a.NotNil(res)
+		a.Equal(*res.IdentitiesKeep.Identities[1].EthAddress, updateKey)
 	})
+	t.Run("multiple backups created", func(t *testing.T) {
+		// Reset secrets file, and entire dir:
+		secretsPath := path.Join(t.TempDir(), "secrets.json")
+		a.NoError(os.WriteFile(secretsPath, []byte("original secrets"), 0600)) // creating new secrets file
+
+		secrets, err := tss.LoadGuardianStorage(tss.StorageLoader{
+			Path:        testSecretsPath,
+			DemandFrost: false,
+			DemandECDSA: false,
+		})
+		a.NoError(err)
+
+		sngr, err := tss.NewReliableTSS(secrets)
+		a.NoError(err)
+
+		s.Signer = sngr             // use real signer for success case
+		s.secretsPath = secretsPath // reset secrets path. Ensuring empty dir.
+
+		updateKey := ethcommon.BytesToAddress([]byte{1, 2, 3, 4, 45, 56, 67})
+		req := &signer.UpdateKeysRequest{
+			Pairs: []*signer.UpdateKeyPair{
+				{
+					KnownKey:  &signer.TypedKey{Type: signer.TypedKey_CertKey, Key: secrets.Identities[1].CertPem},
+					UpdateKey: &signer.TypedKey{Type: signer.TypedKey_EthKey, Key: updateKey.Bytes()},
+				},
+			},
+		}
+		resp, err := s.UpdateKeys(ctx, req)
+		a.NoError(err)
+		a.NotNil(resp)
+
+		resp, err = s.UpdateKeys(ctx, req)
+		a.NoError(err)
+		a.NotNil(resp)
+
+		matches, err := filepath.Glob(secretsPath + ".*.old")
+		a.NoError(err)
+		a.Len(matches, 2) // two backups should exist
+	})
+
 }
 
 func NewEcdsaSignature(x curve.Scalar, hash []byte) *ecdsa.Signature {

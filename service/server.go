@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
@@ -234,6 +235,9 @@ func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatur
 }
 
 func (s *server) UpdateKeys(ctx context.Context, req *signer.UpdateKeysRequest) (*signer.UpdateKeysResponse, error) {
+	s.mtx.Lock() // ensure only one update at a time
+	defer s.mtx.Unlock()
+
 	// inspect req for necessary fields
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is nil")
@@ -249,12 +253,12 @@ func (s *server) UpdateKeys(ctx context.Context, req *signer.UpdateKeysRequest) 
 	}
 
 	if err := s.backupSecrets(); err != nil {
-		return nil, status.Error(codes.Internal, "failed to backup signer secrets before updating: "+err.Error())
+		return nil, status.Error(codes.Internal, "failed to backup peer keys: "+err.Error())
 	}
 
 	// overwrite existing secrets file with updated keys
-	if err := gs.Save(s.secretsPath + ".updated"); err != nil {
-		return nil, status.Error(codes.Internal, "failed to save updated signer secrets: "+err.Error())
+	if err := gs.Save(s.secretsPath); err != nil {
+		return nil, status.Error(codes.Internal, "Created backup, but failed to overwrite peer keys: "+err.Error())
 	}
 
 	return &signer.UpdateKeysResponse{}, nil
@@ -267,7 +271,10 @@ func (s *server) backupSecrets() error {
 	}
 	defer src.Close()
 
-	dst, err := os.OpenFile(s.secretsPath+".old", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	// timestamp is formatted for: year_month_day_hourminutesecond_nanosecond to avoid overwriting backups
+	timestamp := time.Now().Format("2006_01_02_150405.000000000")
+	backupPath := s.secretsPath + "." + timestamp + ".old"
+	dst, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
