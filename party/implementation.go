@@ -323,7 +323,7 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 	session, _ := p.sessionMap.LoadOrStore(trackingId.ToString(), &singleSession{
 		// read-only fields
 		startTime: time.Now(),
-		// isKeygenSession: isDkg(protocol),
+
 		digest:         dgst,
 		protocol:       protocol,
 		trackingId:     trackingId,
@@ -345,11 +345,6 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 	if err != nil {
 		return nil, err
 	}
-
-	// if isDkg(prot) {
-	// 	// everyone is in the committee (DKG case).
-	// 	return common.SortPartyIDs(p.peers), nil
-	// }
 
 	validParties, err := p.getValidCommitteeMembers(trackid)
 	if err != nil {
@@ -383,8 +378,7 @@ func (p *Impl) committeeSize(prot common.ProtocolType) int {
 }
 
 func (p *Impl) makeShuffleSeed(trackid *common.TrackingID) []byte {
-	seed := append(p.loadDistributionSeed, []byte(trackid.ToString())...)
-	return seed
+	return append(p.loadDistributionSeed, []byte(trackid.ToString())...)
 }
 
 type feedMessageTask struct {
@@ -775,7 +769,7 @@ func (p *Impl) activateSingleSession(s *singleSession, threshold int) error {
 
 	handler, ok := p.handlers[s.protocol]
 	if !ok {
-		return fmt.Errorf("unsupported dkg protocol: %s", s.protocol.ToString())
+		return fmt.Errorf("unsupported protocol: %s", s.protocol.ToString())
 	}
 
 	return handler.unsafeActivate(s, threshold)
