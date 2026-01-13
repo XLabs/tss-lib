@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
 	tsscommv1 "github.com/xlabs/tss-lib/v2/tss/internal/proto/tsscomm/v1"
@@ -45,6 +46,9 @@ func (m *mockTssMessageHandler) GetCertificate() *tls.Certificate { return m.sel
 func (m *mockTssMessageHandler) GetPeers() []*x509.Certificate    { return m.peersToConnectTo }
 func (m *mockTssMessageHandler) FetchIdentity(*x509.Certificate) (*tss.Identity, error) {
 	return m.peerId, nil
+}
+func (m *mockTssMessageHandler) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*tss.GuardianStorage, error) {
+	panic("not implemented")
 }
 func (m *mockTssMessageHandler) ProducedOutputMessages() <-chan tss.Sendable {
 	return m.chn

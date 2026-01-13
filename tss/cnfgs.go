@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/fxamacker/cbor/v2"
@@ -451,8 +452,6 @@ func typedKeyToUpdaterKey(typedKey *signer.TypedKey) (updaterKey, error) {
 	return typedKeyToPeerUpdater(typedKey)
 }
 
-// creates a deep copy of the GuardianStorage and applies the key updates from the request.
-// outputs the updated copy.
 func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*GuardianStorage, error) {
 	if err := checkDuplicated(rq); err != nil {
 		return nil, err
@@ -487,4 +486,15 @@ func (s *GuardianStorage) UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*Guardia
 	}
 
 	return gs, gs.SetInnerFields()
+}
+
+// Save saves the GuardianStorage to the specified path.
+// Will overwrite any existing file at that path.
+func (s *GuardianStorage) Save(path string) error {
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal guardian storage: %w", err)
+	}
+
+	return os.WriteFile(path, data, 0600)
 }

@@ -161,7 +161,7 @@ func TestSecureConn(t *testing.T) {
 }
 
 type mockTssSigner struct {
-	tss.Signer
+	tss.ReliableTSS
 	responses              chan *signer.SignResponse
 	returnErrOnSignRequest bool
 }

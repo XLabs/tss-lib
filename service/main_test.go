@@ -28,6 +28,8 @@ func getProjectRootDir() string {
 	return path.Join(basepath, "tss-lib")
 }
 
+var testSecretsPath = filepath.Join(getProjectRootDir(), "tss", "internal", "testutils", "testdata", "tss5", "guardian0.json")
+
 func TestRunMain(t *testing.T) {
 	a := require.New(t)
 
@@ -39,7 +41,7 @@ func TestRunMain(t *testing.T) {
 	)
 	testLogger := zap.New(core, zap.WithFatalHook(zapcore.WriteThenPanic))
 
-	secretsPath := filepath.Join(getProjectRootDir(), "tss", "internal", "testutils", "testdata", "tss5", "guardian0.json")
+	secretsPath := testSecretsPath
 
 	a.Panics(func() {
 		runMain(runParams{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
@@ -24,12 +25,13 @@ const bufferSize = 100
 type server struct {
 	signer.UnimplementedSignerServer
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	logger *zap.Logger
+	secretsPath string // path to the config file (where the guardian storage is located).
+	ctx         context.Context
+	cancel      context.CancelFunc
+	logger      *zap.Logger
 
 	*grpc.Server
-	tss.Signer
+	Signer   tss.ReliableTSS
 	listener net.Listener
 
 	pubData *signer.PublicData
@@ -229,4 +231,48 @@ func (s *server) VerifySignature(ctx context.Context, req *signer.VerifySignatur
 	}
 
 	return &signer.VerifySignatureResponse{IsValid: isValid}, nil
+}
+
+func (s *server) UpdateKeys(ctx context.Context, req *signer.UpdateKeysRequest) (*signer.UpdateKeysResponse, error) {
+	// inspect req for necessary fields
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is nil")
+	}
+
+	if len(req.GetPairs()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "no key pairs provided for update")
+	}
+
+	gs, err := s.Signer.UpdatePeerKeys(req)
+	if err != nil {
+		return nil, err // propagate error from UpdatePeerKeys
+	}
+
+	if err := s.backupSecrets(); err != nil {
+		return nil, status.Error(codes.Internal, "failed to backup signer secrets before updating: "+err.Error())
+	}
+
+	// overwrite existing secrets file with updated keys
+	if err := gs.Save(s.secretsPath + ".updated"); err != nil {
+		return nil, status.Error(codes.Internal, "failed to save updated signer secrets: "+err.Error())
+	}
+
+	return &signer.UpdateKeysResponse{}, nil
+}
+
+func (s *server) backupSecrets() error {
+	src, err := os.Open(s.secretsPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(s.secretsPath+".old", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
 }

@@ -144,13 +144,14 @@ func runMain(p runParams) {
 	srvr := &server{
 		UnimplementedSignerServer: signer.UnimplementedSignerServer{}, // grpc requirement
 
-		ctx:      ctx,
-		cancel:   cancel,
-		logger:   p.logger,
-		Signer:   engine,
-		listener: l,
-		Server:   grpcServer,
-		pubData:  pubData,
+		secretsPath: p.secrets,
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      p.logger,
+		Signer:      engine,
+		listener:    l,
+		Server:      grpcServer,
+		pubData:     pubData,
 
 		mtx:           sync.Mutex{},
 		hasSubscriber: false,
