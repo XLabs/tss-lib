@@ -246,7 +246,7 @@ func (s *GuardianStorage) fillAndValidateStoredIdentities() error {
 			return fmt.Errorf("error parsing guardian %v: %w", i, err)
 		}
 
-		if id.Pid == nil || len(id.Pid.GetID()) == 0 {
+		if id.Pid == nil {
 			return fmt.Errorf("error guardian %v PartyID is nil", i)
 		}
 
