@@ -43,8 +43,6 @@ type singleSession struct {
 	// Given a timeout parameter, bookkeeping and cleanup will use this parameter.
 	startTime time.Time
 
-	isKeygenSession bool
-
 	// the state of the signer. can be one of { awaitingActivation, activated, notInCommittee }.
 	state atomic.Int64
 
@@ -241,20 +239,21 @@ func (signer *singleSession) storeMessage(message common.ParsedMessage) *common.
 	return nil
 }
 
+var protocolFinalRounds = map[common.ProtocolType]round.Number{
+	common.ProtocolFROSTSign: frost.NumRounds,
+	common.ProtocolFROSTDKG:  frost.NumRounds,
+	common.ProtocolECDSASign: cmpsign.Rounds,
+	common.ProtocolECDSADKG:  cmpdkg.Rounds,
+}
+
 func (s *singleSession) finalRound() round.Number {
 	// while s.Session supports the function FinalRoundNumber,
 	// we may not have it initialized yet. So we use the protocol type
 	// to determine the final round. It is also lock free.
-	switch s.protocol {
-	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
-		return frost.NumRounds
-	case common.ProtocolECDSASign:
-		return cmpsign.Rounds
-	case common.ProtocolECDSADKG:
-		return cmpdkg.Rounds
-	default:
-		return 0
+	if r, ok := protocolFinalRounds[s.protocol]; ok {
+		return r
 	}
+	return 0
 }
 
 func (signer *singleSession) getState() signerState {

@@ -13,7 +13,6 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/party"
 	"github.com/xlabs/multi-party-sig/pkg/pool"
-	"github.com/xlabs/multi-party-sig/pkg/protocol"
 	"github.com/xlabs/multi-party-sig/pkg/round"
 
 	"github.com/xlabs/multi-party-sig/protocols/cmp"
@@ -50,6 +49,8 @@ type Impl struct {
 	rateLimiter RateLimiter
 
 	pool *pool.Pool
+
+	handlers map[common.ProtocolType]protocolHandler
 }
 
 type workerChans struct {
@@ -144,24 +145,12 @@ var (
 )
 
 func (p *Impl) GetPublic(t common.ProtocolType) (curve.Point, error) {
-	switch t {
-	case common.ProtocolECDSASign:
-		if p.ecdsaConfig == nil {
-			return nil, ErrNoConfig
-		}
-
-		return p.ecdsaConfig.PublicPoint().Clone(), nil
-	case common.ProtocolFROSTSign:
-		if p.frostConfig == nil {
-			return nil, ErrNoConfig
-		}
-
-		return p.frostConfig.PublicKey.Clone(), nil
-	case common.ProtocolFROSTDKG, common.ProtocolECDSADKG:
-		return nil, ErrDkgHasNoPublicKey
-	default:
+	handler, ok := p.handlers[t]
+	if !ok {
 		return nil, fmt.Errorf("public not found for: %s", t.ToString())
 	}
+
+	return handler.getPublic()
 }
 
 func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
@@ -188,10 +177,11 @@ func (p *Impl) AsyncRequestNewSignature(s SigningTask) (*SigningInfo, error) {
 		return nil, err
 	}
 
-	wrkrchan := p.frostWorkerChans
-	if s.ProtocolType == common.ProtocolECDSASign {
-		wrkrchan = p.ecdsaWorkerChans
+	handler, ok := p.handlers[s.ProtocolType]
+	if !ok {
+		return nil, fmt.Errorf("unknown protocol: %s", s.ProtocolType.ToString())
 	}
+	wrkrchan := handler.getWorkerChannels()
 
 	select {
 	case <-p.ctx.Done():
@@ -209,25 +199,12 @@ var errNotConfiguredToRunDKG = errors.New("not configured to run DKG. missing Ke
 // For instance, if the task is FROST signing, we need to have the frost config set.
 // If the task is DKG, we need to have the KeygenOutputChannel set.
 func (p *Impl) validateTaskConfiguration(s task) error {
-	protoType := s.GetProtocolType()
-	switch protoType {
-	case common.ProtocolFROSTSign:
-		if p.frostConfig == nil {
-			return ErrNoConfig
-		}
-	case common.ProtocolECDSASign:
-		if p.ecdsaConfig == nil {
-			return ErrNoConfig
-		}
-	case common.ProtocolECDSADKG, common.ProtocolFROSTDKG:
-		if p.outputChannels.KeygenOutputChannel == nil {
-			return errNotConfiguredToRunDKG
-		}
-	default:
-		return fmt.Errorf("unknown protocol: %s", protoType.ToString())
+	handler, ok := p.handlers[s.GetProtocolType()]
+	if !ok {
+		return fmt.Errorf("unknown protocol: %s", s.GetProtocolType().ToString())
 	}
 
-	return nil
+	return handler.validateConfig()
 }
 
 func (p *Impl) startSigner(signer *singleSession) {
@@ -238,7 +215,7 @@ func (p *Impl) startSigner(signer *singleSession) {
 	// The following method initiates the singleSession (if it’s a committee
 	// member). Depending on the protocol, this function might be
 	// compute intensive (frost is cheap, gg18 is not).
-	if err := p.setSigningSession(signer); err != nil {
+	if err := p.activateSingleSession(signer, -1); err != nil { // threshold isn't decided in signing sessions, and thus is ignored.
 		p.outputErr(common.NewTrackableError(
 			err,
 			"startSigner",
@@ -316,39 +293,6 @@ func (p *Impl) outputKeygen(res *TSSSecrets) {
 	}
 }
 
-// This is the only method that changes the session state.
-func (p *Impl) setSigningSession(signer *singleSession) error {
-	signer.mtx.Lock()
-	defer signer.mtx.Unlock()
-
-	// once state changes from awaitingActivation, the signer is fully initialized.
-	if signer.getState() != awaitingActivation {
-		return nil
-	}
-
-	// set the state to "activated" (in committee).
-	signer.state.Store(int64(activated))
-
-	var sessionCreator protocol.StartFunc
-	switch signer.protocol {
-	case common.ProtocolFROSTSign:
-		sessionCreator = frost.Sign(p.frostConfig, pids2IDs(signer.committee), signer.digest[:])
-	case common.ProtocolECDSASign:
-		sessionCreator = cmp.Sign(p.ecdsaConfig, pids2IDs(signer.committee), signer.digest[:], p.pool)
-	default:
-		return fmt.Errorf("unsupported signing protocol: %s", signer.protocol.ToString())
-	}
-
-	session, err := sessionCreator(signer.trackingId.ToByteString())
-	if err != nil {
-		return err
-	}
-
-	signer.session = session
-
-	return nil
-}
-
 var ErrNotInCommittee = errors.New("party not in committee")
 
 // getOrCreateSingleSession returns the signer for the given digest, or creates a new one if it doesn't exist.
@@ -378,16 +322,15 @@ func (p *Impl) getOrCreateSingleSession(trackingId *common.TrackingID) (*singleS
 
 	session, _ := p.sessionMap.LoadOrStore(trackingId.ToString(), &singleSession{
 		// read-only fields
-		startTime:       time.Now(),
-		isKeygenSession: isDkg(protocol),
-		digest:          dgst,
-		protocol:        protocol,
-		trackingId:      trackingId,
-		committee:       committee,
-		self:            p.self,
-		outputChannels:  &p.outputChannels,
-
-		mtx: sync.Mutex{},
+		startTime: time.Now(),
+		// isKeygenSession: isDkg(protocol),
+		digest:         dgst,
+		protocol:       protocol,
+		trackingId:     trackingId,
+		committee:      committee,
+		self:           p.self,
+		outputChannels: &p.outputChannels,
+		mtx:            sync.Mutex{},
 		// mutable fields
 		state:    atomic.Int64{}, // default is 0 == awaitingActivation
 		messages: map[round.Number]map[strPartyID]*messageKeep{},
@@ -403,10 +346,10 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 		return nil, err
 	}
 
-	if isDkg(prot) {
-		// everyone is in the committee (DKG case).
-		return common.SortPartyIDs(p.peers), nil
-	}
+	// if isDkg(prot) {
+	// 	// everyone is in the committee (DKG case).
+	// 	return common.SortPartyIDs(p.peers), nil
+	// }
 
 	validParties, err := p.getValidCommitteeMembers(trackid)
 	if err != nil {
@@ -431,18 +374,11 @@ func (p *Impl) computeCommittee(trackid *common.TrackingID) (common.SortedPartyI
 }
 
 func (p *Impl) committeeSize(prot common.ProtocolType) int {
-	switch prot {
-	case common.ProtocolFROSTSign:
-		if p.frostConfig != nil {
-			return p.frostConfig.Threshold + 1
-		}
-	case common.ProtocolECDSASign:
-		if p.ecdsaConfig != nil {
-			return p.ecdsaConfig.Threshold + 1
-		}
+	if handler, ok := p.handlers[prot]; ok {
+		return handler.committeeSize()
 	}
 
-	// default to 0 if no config found.
+	// default to 0
 	return 0
 }
 
@@ -490,20 +426,17 @@ func (p *Impl) Update(message common.ParsedMessage) error {
 		return fmt.Errorf("unknown sender: %s", message.GetFrom().ToString())
 	}
 
-	chn := p.frostWorkerChans
 	protocol, err := trackid.GetProtocolType()
 	if err != nil {
 		return err
 	}
 
-	switch protocol {
-	case common.ProtocolFROSTSign, common.ProtocolFROSTDKG:
-		chn = p.frostWorkerChans
-	case common.ProtocolECDSASign, common.ProtocolECDSADKG:
-		chn = p.ecdsaWorkerChans
-	default:
+	handler, ok := p.handlers[protocol]
+	if !ok {
 		return fmt.Errorf("unsupported protocol type in message: %s", protocol.ToString())
 	}
+
+	chn := handler.getWorkerChannels()
 
 	// we check rate limiting last so we don't have to cancel it if the message is invalid.
 	canFeed := p.rateLimiter.Add(message.WireMsg().GetTrackingID(), peer)
@@ -652,7 +585,7 @@ func (p *Impl) StartDKG(task DkgTask) error {
 		)
 	}
 
-	if err := p.setKeygenSession(s, task.Threshold); err != nil {
+	if err := p.activateSingleSession(s, task.Threshold); err != nil {
 		return err
 	}
 
@@ -665,35 +598,185 @@ func (p *Impl) StartDKG(task DkgTask) error {
 	return nil
 }
 
-// ensures the session can advance. An unset session doesn't consume messages.
-func (p *Impl) setKeygenSession(s *singleSession, threshold int) error {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	s.isKeygenSession = true
-
-	s.committee = common.SortPartyIDs(p.peers)
-
-	var sessionCreator protocol.StartFunc
-
-	switch s.protocol {
-	// TODO: find a nice way to merge all the switch cases that inspect protocol type.
-	case common.ProtocolFROSTDKG:
-		sessionCreator = frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)
-	case common.ProtocolECDSADKG:
-		sessionCreator = cmp.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold, p.pool)
-	default:
-		return fmt.Errorf("unsupported dkg protocol: %s", s.protocol.ToString())
+func (p *Impl) setupHandlers() {
+	p.handlers = map[common.ProtocolType]protocolHandler{
+		common.ProtocolFROSTSign: &frostSignHandler{impl: p},
+		common.ProtocolECDSASign: &ecdsaSignHandler{impl: p},
+		common.ProtocolFROSTDKG:  &frostDkgHandler{impl: p},
+		common.ProtocolECDSADKG:  &ecdsaDkgHandler{impl: p},
 	}
+}
 
-	session, err := sessionCreator(s.trackingId.ToByteString())
+// protocolHandler defines the methods needed to handle a specific protocol type.
+// Each protocol type (FROST signing, ECDSA signing, FROST DKG, ECDSA DKG) will have its own implementation
+// of this interface.
+type protocolHandler interface {
+	getPublic() (curve.Point, error)
+	validateConfig() error
+	getWorkerChannels() workerChans
+	committeeSize() int
+
+	// assumes the caller has locked the session before calling this method.
+	unsafeActivate(*singleSession, int) error
+}
+
+type frostSignHandler struct{ impl *Impl }
+
+func (h *frostSignHandler) getPublic() (curve.Point, error) {
+	if h.impl.frostConfig == nil {
+		return nil, ErrNoConfig
+	}
+	return h.impl.frostConfig.PublicKey.Clone(), nil
+}
+
+func (h *frostSignHandler) validateConfig() error {
+	if h.impl.frostConfig == nil {
+		return ErrNoConfig
+	}
+	return nil
+}
+
+func (h *frostSignHandler) getWorkerChannels() workerChans {
+	return h.impl.frostWorkerChans
+}
+
+func (h *frostSignHandler) committeeSize() int {
+	if h.impl.frostConfig != nil {
+		return h.impl.frostConfig.Threshold + 1
+	}
+	return 0
+}
+
+func (h *frostSignHandler) unsafeActivate(s *singleSession, _ int) error {
+	sess, err := frost.Sign(h.impl.frostConfig, pids2IDs(s.committee), s.digest[:])(s.trackingId.ToByteString())
 	if err != nil {
 		return err
 	}
 
-	s.session = session
-
 	s.state.Store(int64(activated))
+	s.session = sess // assumed locked by caller.
 
 	return nil
+}
+
+type ecdsaSignHandler struct{ impl *Impl }
+
+func (h *ecdsaSignHandler) getPublic() (curve.Point, error) {
+	if h.impl.ecdsaConfig == nil {
+		return nil, ErrNoConfig
+	}
+	return h.impl.ecdsaConfig.PublicPoint().Clone(), nil
+}
+
+func (h *ecdsaSignHandler) validateConfig() error {
+	if h.impl.ecdsaConfig == nil {
+		return ErrNoConfig
+	}
+	return nil
+}
+
+func (h *ecdsaSignHandler) getWorkerChannels() workerChans {
+	return h.impl.ecdsaWorkerChans
+}
+
+func (h *ecdsaSignHandler) committeeSize() int {
+	if h.impl.ecdsaConfig != nil {
+		return h.impl.ecdsaConfig.Threshold + 1
+	}
+	return 0
+}
+
+func (h *ecdsaSignHandler) unsafeActivate(s *singleSession, _ int) error {
+	sess, err := cmp.Sign(h.impl.ecdsaConfig, pids2IDs(s.committee), s.digest[:], h.impl.pool)(s.trackingId.ToByteString())
+	if err != nil {
+		return err
+	}
+
+	s.state.Store(int64(activated))
+	s.session = sess // assumed locked by caller.
+
+	return nil
+}
+
+type frostDkgHandler struct{ impl *Impl }
+
+func (h *frostDkgHandler) getPublic() (curve.Point, error) {
+	return nil, ErrDkgHasNoPublicKey
+}
+
+func (h *frostDkgHandler) validateConfig() error {
+	if h.impl.outputChannels.KeygenOutputChannel == nil {
+		return errNotConfiguredToRunDKG
+	}
+	return nil
+}
+
+func (h *frostDkgHandler) getWorkerChannels() workerChans {
+	return h.impl.frostWorkerChans
+}
+
+func (h *frostDkgHandler) committeeSize() int {
+	return len(h.impl.peers) // everyone is in the committee for DKG.
+}
+
+func (h *frostDkgHandler) unsafeActivate(s *singleSession, threshold int) error {
+	sess, err := frost.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold)(s.trackingId.ToByteString())
+	if err != nil {
+		return err
+	}
+
+	s.state.Store(int64(activated))
+	s.session = sess // assumed locked by caller.
+
+	return nil
+}
+
+type ecdsaDkgHandler struct{ impl *Impl }
+
+func (h *ecdsaDkgHandler) getPublic() (curve.Point, error) {
+	return nil, ErrDkgHasNoPublicKey
+}
+
+func (h *ecdsaDkgHandler) validateConfig() error {
+	if h.impl.outputChannels.KeygenOutputChannel == nil {
+		return errNotConfiguredToRunDKG
+	}
+	return nil
+}
+
+func (h *ecdsaDkgHandler) getWorkerChannels() workerChans {
+	return h.impl.ecdsaWorkerChans
+}
+
+func (h *ecdsaDkgHandler) committeeSize() int {
+	return len(h.impl.peers) // everyone is in the committee for DKG.
+}
+
+func (h *ecdsaDkgHandler) unsafeActivate(s *singleSession, threshold int) error {
+	sess, err := cmp.Keygen(curve.Secp256k1{}, party.FromTssID(s.self), pids2IDs(s.committee), threshold, h.impl.pool)(s.trackingId.ToByteString())
+	if err != nil {
+		return err
+	}
+
+	s.state.Store(int64(activated))
+	s.session = sess // assumed locked by caller.
+
+	return nil
+}
+
+// ensures the session can advance. An unset session doesn't consume messages.
+func (p *Impl) activateSingleSession(s *singleSession, threshold int) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.getState() != awaitingActivation {
+		return nil // already activated.
+	}
+
+	handler, ok := p.handlers[s.protocol]
+	if !ok {
+		return fmt.Errorf("unsupported dkg protocol: %s", s.protocol.ToString())
+	}
+
+	return handler.unsafeActivate(s, threshold)
 }
