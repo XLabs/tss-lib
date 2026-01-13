@@ -34,7 +34,7 @@ type Identity struct {
 	// TODO: is this field mutable? in the future, when this field is set via guardian communications,
 	// would it be set ONCE, or multiple times? (if once, we can use atomics to indicate whether it is set or not).
 	// otherwise, we'll need a lock.
-	EthAddress *ethcommon.Address `json:"VAAv1PubKey,omitempty"` // mapping between VaaV1 and PID (used in TSS)
+	EthAddress *ethcommon.Address `json:"EthAddress,omitempty"` // mapping between EthhAddress and PID (used in TSS)
 
 	pos int // internal use only: position in the IdentitiesKeep slice.
 }
