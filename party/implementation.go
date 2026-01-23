@@ -214,8 +214,11 @@ func (p *Impl) startSigner(signer *singleSession) {
 
 	// The following method initiates the singleSession (if it’s a committee
 	// member). Depending on the protocol, this function might be
-	// compute intensive (frost is cheap, gg18 is not).
-	if err := p.activateSingleSession(signer, -1); err != nil { // threshold isn't decided in signing sessions, and thus is ignored.
+	//compute-intensive (frost is cheap, gg18 is not).
+	//
+	// NOTE: threshold isn't decided in signing sessions, and thus we set it with `thresholdSetOnlyInDKG` constant
+	// which is ignored.
+	if err := p.activateSingleSession(signer, thresholdSetOnlyInDKG); err != nil {
 		p.outputErr(common.NewTrackableError(
 			err,
 			"startSigner",
@@ -611,6 +614,8 @@ type protocolHandler interface {
 	committeeSize() int
 
 	// assumes the caller has locked the session before calling this method.
+	// will activate the session (if the party is in the committee).
+	// expects a session and threshold (threshold is only used in DKG sessions and otherwise ignored).
 	unsafeActivate(*singleSession, int) error
 }
 
@@ -641,6 +646,7 @@ func (h *frostSignHandler) committeeSize() int {
 	return 0
 }
 
+// threshold is ignored for signing sessions, as it is only set in DKG sessions.
 func (h *frostSignHandler) unsafeActivate(s *singleSession, _ int) error {
 	sess, err := frost.Sign(h.impl.frostConfig, pids2IDs(s.committee), s.digest[:])(s.trackingId.ToByteString())
 	if err != nil {
@@ -680,6 +686,7 @@ func (h *ecdsaSignHandler) committeeSize() int {
 	return 0
 }
 
+// threshold is ignored for signing sessions, as it is only set in DKG sessions.
 func (h *ecdsaSignHandler) unsafeActivate(s *singleSession, _ int) error {
 	sess, err := cmp.Sign(h.impl.ecdsaConfig, pids2IDs(s.committee), s.digest[:], h.impl.pool)(s.trackingId.ToByteString())
 	if err != nil {
