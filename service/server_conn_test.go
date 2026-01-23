@@ -101,7 +101,7 @@ func TestSecureConn(t *testing.T) {
 		a.NoError(stream.Send(&signer.SignRequest{
 			Digest:    []byte{1, 2, 3, 4, 5},
 			Protocol:  common.ProtocolFROSTSign.ToString(),
-			Committee: [][]byte{}, // no committee for this test
+			Committee: []*signer.TypedKey{}, // no committee for this test
 		}))
 
 		mockSigner.responses <- &signer.SignResponse{}
@@ -129,7 +129,7 @@ func TestSecureConn(t *testing.T) {
 		a.NoError(stream.Send(&signer.SignRequest{
 			Digest:    []byte{1, 2, 3, 4, 5},
 			Protocol:  common.ProtocolFROSTSign.ToString(),
-			Committee: [][]byte{}, // no committee for this test
+			Committee: []*signer.TypedKey{}, // no committee for this test
 		}))
 
 		msg, err := stream.Recv()
@@ -161,7 +161,7 @@ func TestSecureConn(t *testing.T) {
 }
 
 type mockTssSigner struct {
-	tss.Signer
+	tss.ReliableTSS
 	responses              chan *signer.SignResponse
 	returnErrOnSignRequest bool
 }
