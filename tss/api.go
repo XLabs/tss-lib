@@ -43,6 +43,9 @@ type Incoming interface {
 // complete a TSS round. In addition it supplies a server with certificates of any
 // party member, including itself.
 type ReliableMessenger interface {
+	// creates a deep copy of the GuardianStorage used by this messenger,
+	// applies the key updates from the request on a copy of the storage, outputs the updated copy.
+	UpdatePeerKeys(rq *signer.UpdateKeysRequest) (*GuardianStorage, error)
 	// HandleIncomingTssMessage receives a network `message`` and process it using a reliable-broadcast protocol.
 	HandleIncomingTssMessage(msg Incoming)
 	ProducedOutputMessages() <-chan Sendable // just need to propagate this through the p2p network

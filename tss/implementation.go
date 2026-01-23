@@ -1,7 +1,6 @@
 package tss
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -68,15 +67,6 @@ type Configurations struct {
 	// MaxSignerTTL is the maximum time a signature is allowed to be active.
 	// used to release resources.
 	MaxSignerTTL time.Duration
-
-	ChainsWithNoSelfReport []uint16
-
-	// LeaderIdentity is used by the TSS engine protocol to determine who is responsible for telling
-	// the other guardians about a new VAAv1.
-	LeaderIdentity PEM // The public key of the leader in PEM format.
-
-	// The list of chains that use ECDSA signatures.
-
 }
 
 // GuardianStorage is a struct that holds the data needed for a guardian to participate in the TSS protocol
@@ -103,8 +93,6 @@ type GuardianStorage struct {
 	ecdsaconf  *cmp.Config
 
 	LoadDistributionKey []byte
-
-	isleader bool
 }
 
 // Responses lets a listener receive the output signatures once they're ready.
@@ -263,10 +251,6 @@ func newEngine(storage *GuardianStorage) (*Engine, error) {
 		storage.MaxSignerTTL = defaultMaxSignerTTL
 	}
 
-	if bytes.Equal(storage.Self.CertPem, storage.LeaderIdentity) {
-		storage.isleader = true
-	}
-
 	fpParams := &party.Parameters{
 		FrostSecrets: storage.frostconf,
 		EcdsaSecrets: storage.ecdsaconf,
@@ -350,15 +334,9 @@ func (t *Engine) Start(ctx context.Context, zapLogger *zap.Logger) error {
 	// closing the t.fp.start inside th listener
 	go t.fpListener()
 
-	leaderIdentity, err := t.GuardianStorage.fetchIdentityFromKeyPEM(t.LeaderIdentity)
-	if err != nil {
-		return fmt.Errorf("leader identity not found in guardian storage: %w", err)
-	}
-
 	t.logger.Info(
 		"tss engine started",
 		zap.Any("configs", t.GuardianStorage.Configurations),
-		zap.String("leaderID", leaderIdentity.Hostname),
 	)
 
 	return nil

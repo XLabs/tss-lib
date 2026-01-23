@@ -85,7 +85,7 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 			Hostname:           peer.Hostname,
 			Port:               peer.Port,
 			Key:                nil, // Filled by the guardian storage on boot.
-			VAAv1PubKey:        nil, // not used in dkg, so nil.
+			EthAddress:         nil, // not used in dkg, so nil.
 		}
 
 		keyToID[string(bts)] = &cnfg.Peers[i]
