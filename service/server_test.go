@@ -18,7 +18,7 @@ import (
 	"github.com/xlabs/multi-party-sig/pkg/eth"
 	"github.com/xlabs/multi-party-sig/pkg/math/curve"
 	"github.com/xlabs/multi-party-sig/pkg/math/sample"
-	"github.com/xlabs/multi-party-sig/protocols/frost"
+	"github.com/xlabs/multi-party-sig/protocols/frost/sign"
 	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/party"
@@ -31,7 +31,9 @@ import (
 
 func TestGetPublicData(t *testing.T) {
 	a := require.New(t)
-	s := &server{}
+	s := &server{
+		logger: zap.NewNop(),
+	}
 	ctx := context.Background()
 
 	t.Run("PublicDataNotInitialized", func(t *testing.T) {
@@ -57,7 +59,9 @@ func TestGetPublicData(t *testing.T) {
 }
 
 func TestVerifySignature(t *testing.T) {
-	s := &server{}
+	s := &server{
+		logger: zap.NewNop(),
+	}
 	ctx := context.Background()
 
 	t.Run("InvalidRequest", func(t *testing.T) {
@@ -172,20 +176,22 @@ func TestVerifySignature(t *testing.T) {
 	// Perhaps by exposing a method in multi-party-sig/protocol/frost package
 	// consider exposing ecdsa basic signature generation as well while at it (and remove NewEcdsaSignature here).
 	t.Run("FROST signature", func(t *testing.T) {
-		// These values were generated using a real FROST signing session with multiple parties.
-		sBytes := mustHexDecode("7543bc351af14435c68d9dda741fecd0ee5f493721dd1b5c46587a7409272f3e")
-		z, err := grp.UnmarshalScalar(sBytes)
-		require.NoError(t, err)
+		var secret curve.Scalar
+		for i := range 10 { // try up to 10 times to get a valid secret
+			secret = sample.Scalar(rand.Reader, curve.Secp256k1{})
+			if !secret.IsOverHalfOrder() && sign.PublicKeyValidForContract(secret.ActOnBase()) {
+				break
+			}
 
-		rBytes := mustHexDecode("021ab28eac5cdbb509242f6bae290fee91f0265238f89ba40036d88fa7362eb7fd")
-		r, err := grp.UnmarshalPoint(rBytes)
-		require.NoError(t, err)
-		sig := frost.Signature{
-			R: r,
-			Z: z,
+			if i == 9 {
+				t.Fatal("failed to generate valid secret after 10 attempts")
+			}
 		}
 
 		msgDigest := mustHexDecode("deadbeef00000000000000000000000000000000000000000000000000000000")
+		sig, err := sign.SignEcSchnorr(secret, msgDigest)
+		require.NoError(t, err)
+		require.NotNil(t, sig)
 
 		commonsig, commonerr := party.FrostSigToCommonSig(&sig, nil, &common.TrackingID{
 			Protocol: uint32(common.ProtocolFROSTSign.ToInt()),
@@ -193,12 +199,14 @@ func TestVerifySignature(t *testing.T) {
 		})
 		require.Nil(t, commonerr)
 
-		pk := mustHexDecode("0356ae26bf1fabda965a58baf385b8ab96c72bfdfbe8f2cdd3d65035af29d95a61")
+		pk := secret.ActOnBase()
+		pkbytes, err := grp.MarshalPoint(pk)
+		require.NoError(t, err)
 
 		req := &signer.VerifySignatureRequest{
 			Signature: commonsig,
 			PublicData: &signer.PublicData{
-				FrostPublicData: pk,
+				FrostPublicData: pkbytes,
 			},
 		}
 

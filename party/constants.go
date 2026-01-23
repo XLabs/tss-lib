@@ -19,6 +19,10 @@ const DigestSize = 32
 
 const unknownRound = -1
 
+// thresholdSetOnlyInDKG is a placeholder value in activating signers, since
+// the threshold can only be set in DKG sessions.
+const thresholdSetOnlyInDKG = -1
+
 const (
 	directMessagePos    = 0
 	broadcastMessagePos = 1

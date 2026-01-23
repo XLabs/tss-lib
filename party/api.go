@@ -200,6 +200,7 @@ func NewFullParty(p *Parameters) (FullParty, error) {
 		rateLimiter: NewRateLimiter(p.MaxActiveSessions),
 	}
 
+	imp.setupHandlers()
 	return imp, nil
 }
 
