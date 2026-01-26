@@ -43,6 +43,12 @@ func (id *Identity) Copy() *Identity {
 	certPem := slices.Clone(id.CertPem)
 	c, k, _ := extractCertAndKeyFromPem(certPem)
 
+	var ethaddr *ethcommon.Address
+	if id.EthAddress != nil {
+		ethaddr = &ethcommon.Address{}
+		copy((*ethaddr)[:], (*id.EthAddress)[:])
+	}
+
 	cpy := &Identity{
 		Pid:                id.getPidCopy(),
 		KeyPEM:             slices.Clone(id.KeyPEM),
@@ -53,6 +59,8 @@ func (id *Identity) Copy() *Identity {
 		Key:                k,
 		Cert:               c,
 		networkname:        id.networkname,
+		EthAddress:         ethaddr,
+		pos:                id.pos,
 	}
 
 	return cpy

@@ -906,6 +906,151 @@ func TestNoFaultsFlow(t *testing.T) {
 			a.FailNow("context expired")
 		}
 	})
+
+	t.Run("fromCommittee", func(t *testing.T) {
+		a := assert.New(t)
+		engines, err := loadGuardians(5, "tss5")
+		a.NoError(err)
+
+		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+		defer cancel()
+
+		setEthAddresses(engines) // ensures each guardian has an eth address set.
+
+		fmt.Println("starting engines.")
+		for _, engine := range engines {
+			a.NoError(engine.Start(ctx, logger))
+		}
+
+		fmt.Println("msgHandler settup:")
+		dnchn := msgHandler(ctx, engines, 1)
+
+		fmt.Println("engines started, requesting sigs")
+
+		committee := make([]*signer.TypedKey, 0, len(engines))
+		for i, engine := range engines {
+			typedKey := &signer.TypedKey{
+				Type: signer.TypedKey_EthKey,
+				Key:  (*engine.GuardianStorage.Self.EthAddress)[:],
+			}
+			a.NoError(err)
+			committee = append(committee, typedKey)
+
+			if i >= engine.GuardianStorage.Threshold {
+				break
+			}
+		}
+		// all engines are started, now we can begin the protocol.
+		for _, engine := range engines {
+			tmp := make([]byte, 32)
+			copy(tmp, dgst[:])
+
+			err := engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:    tmp,
+				Protocol:  common.ProtocolFROSTSign.ToString(),
+				Committee: committee,
+			})
+
+			a.NoError(err)
+		}
+
+		if ctxExpiredFirst(ctx, dnchn) {
+			a.FailNow("context expired")
+		}
+	})
+
+	t.Run("tooLargeCommittee", func(t *testing.T) {
+		a := assert.New(t)
+		engines, err := loadGuardians(5, "tss5")
+		a.NoError(err)
+
+		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+		defer cancel()
+
+		setEthAddresses(engines) // ensures each guardian has an eth address set.
+
+		fmt.Println("starting engines.")
+		for _, engine := range engines {
+			a.NoError(engine.Start(ctx, logger))
+		}
+
+		fmt.Println("msgHandler settup:")
+		dnchn := msgHandler(ctx, engines, 1)
+
+		fmt.Println("engines started, requesting sigs")
+
+		committee := make([]*signer.TypedKey, 0, len(engines))
+		for _, engine := range engines { // everyone is in the committee.
+			typedKey := &signer.TypedKey{
+				Type: signer.TypedKey_EthKey,
+				Key:  (*engine.GuardianStorage.Self.EthAddress)[:],
+			}
+			a.NoError(err)
+			committee = append(committee, typedKey)
+		}
+		// all engines are started, now we can begin the protocol.
+		for _, engine := range engines {
+			tmp := make([]byte, 32)
+			copy(tmp, dgst[:])
+
+			err := engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:    tmp,
+				Protocol:  common.ProtocolFROSTSign.ToString(),
+				Committee: committee,
+			})
+
+			a.NoError(err)
+		}
+
+		if ctxExpiredFirst(ctx, dnchn) {
+			a.FailNow("context expired")
+		}
+	})
+
+	t.Run("tooSmallCommittee", func(t *testing.T) {
+		a := assert.New(t)
+		engines, err := loadGuardians(5, "tss5")
+		a.NoError(err)
+
+		dgst := party.Digest{1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+		defer cancel()
+
+		setEthAddresses(engines) // ensures each guardian has an eth address set.
+
+		fmt.Println("starting engines.")
+		for _, engine := range engines {
+			a.NoError(engine.Start(ctx, logger))
+		}
+
+		committee := make([]*signer.TypedKey, 0, len(engines))
+
+		typedKey := &signer.TypedKey{
+			Type: signer.TypedKey_EthKey,
+			Key:  (*engines[0].GuardianStorage.Self.EthAddress)[:],
+		}
+		a.NoError(err)
+		committee = append(committee, typedKey)
+
+		// all engines are started, now we can begin the protocol.
+		for _, engine := range engines {
+			tmp := make([]byte, 32)
+			copy(tmp, dgst[:])
+
+			err := engine.BeginAsyncThresholdSigningProtocol(&signer.SignRequest{
+				Digest:    tmp,
+				Protocol:  common.ProtocolFROSTSign.ToString(),
+				Committee: committee,
+			})
+
+			a.Error(err)
+		}
+	})
 }
 
 func ctxExpiredFirst[T any](ctx context.Context, ch chan T) bool {
@@ -1979,5 +2124,25 @@ func TestFullChan(t *testing.T) {
 	a.Equal(1, logs.Len())
 	if logs.Len() > 0 {
 		a.Equal("couldn't echo the message, network output channel buffer is full", logs.All()[0].Message)
+	}
+}
+
+func setEthAddresses(engines []*Engine) {
+	for i, e := range engines {
+		addr := ethcommon.Address{byte(i + 1)}
+		engines[i].Self.EthAddress = &addr
+		for _, engine := range engines {
+			id, err := engine.FetchIdentity(e.Self.Cert)
+			if err != nil {
+				panic(err)
+			}
+			id.EthAddress = &addr
+		}
+	}
+
+	for _, engine := range engines {
+		if err := engine.GuardianStorage.SetInnerFields(); err != nil {
+			panic(err)
+		}
 	}
 }
