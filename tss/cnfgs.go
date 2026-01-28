@@ -310,15 +310,16 @@ func (s *GuardianStorage) NumGuardians() int {
 	return len(s.Identities)
 }
 
-func (s *GuardianStorage) ExistingSecretsTypes() []common.ProtocolType {
+// ExistingSecretsForSigning returns the list of ProtocolTypes for which this GuardianStorage has secret.
+func (s *GuardianStorage) ExistingSecretsForSigning() []common.ProtocolType {
 	types := []common.ProtocolType{}
 
 	if s.frostconf != nil {
-		types = append(types, common.ProtocolFROSTDKG)
+		types = append(types, common.ProtocolFROSTSign)
 	}
 
 	if s.ecdsaconf != nil {
-		types = append(types, common.ProtocolECDSADKG)
+		types = append(types, common.ProtocolECDSASign)
 	}
 
 	return types

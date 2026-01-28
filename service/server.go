@@ -165,20 +165,25 @@ func (s *server) GetPublicData(ctx context.Context, _ *signer.PublicDataRequest)
 	return s.pubData, nil
 }
 
-func genPubData(s tss.Signer) (*signer.PublicData, error) {
-	frostPubBytes, err := getPubkey(s, common.ProtocolFROSTSign)
-	if err != nil {
-		return nil, err
-	}
+// genPubData generates the PublicData message containing public keys
+// for the supported protocols.
+//
+// returns an error if any public key retrieval fails.
+func genPubData(s tss.Signer, protocols []common.ProtocolType) (*signer.PublicData, error) {
+	protToPub := make(map[common.ProtocolType][]byte, len(protocols))
+	for _, prot := range protocols {
+		pubBytes, err := getPubkey(s, prot)
+		if err != nil {
+			return nil, err
+		}
 
-	ecdsaPubBytes, err := getPubkey(s, common.ProtocolECDSASign)
-	if err != nil {
-		return nil, err
+		protToPub[prot] = pubBytes
 	}
 
 	return &signer.PublicData{
-		FrostPublicData: frostPubBytes,
-		EcdsaPublicData: ecdsaPubBytes,
+		// map will return nil for missing keys
+		FrostPublicData: protToPub[common.ProtocolFROSTSign],
+		EcdsaPublicData: protToPub[common.ProtocolECDSASign],
 	}, nil
 }
 
