@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 
+	common "github.com/xlabs/tss-common"
 	"github.com/xlabs/tss-common/service/signer"
 	"github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/comm"
@@ -76,13 +77,12 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to load secrets file", zap.Error(err))
 	}
 
-	tmp := st.ExistingSecretsTypes()
-	types := make([]string, 0, len(tmp))
-	for _, t := range tmp {
-		types = append(types, t.ToString())
-	}
+	supportedProtocols := st.ExistingSecretsForSigning()
 
-	p.logger.Info("Loaded secrets, starting server...", zap.Strings("loaded_schemes", types))
+	p.logger.Info(
+		"Loaded secrets, starting server...",
+		zap.Strings("loaded_schemes", protocolsToString(supportedProtocols...)),
+	)
 
 	p.logger.Info("starting TSS engine...")
 	engine, err := tss.NewReliableTSS(st)
@@ -97,7 +97,7 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to start TSS signer", zap.Error(err))
 	}
 
-	pubData, err := genPubData(engine)
+	pubData, err := genPubData(engine, supportedProtocols)
 	if err != nil {
 		p.logger.Fatal("failed to generate public data", zap.Error(err))
 	}
@@ -173,6 +173,17 @@ func runMain(p runParams) {
 
 	p.logger.Info("Shutting down gRPC server...")
 	srvr.GracefulStop()
+}
+
+// protocolsToString converts a list of ProtocolType to their string representations.
+// Used for logging purposes.
+func protocolsToString(prot ...common.ProtocolType) []string {
+	typesAsString := make([]string, 0, len(prot))
+	for _, t := range prot {
+		typesAsString = append(typesAsString, t.ToString())
+	}
+
+	return typesAsString
 }
 
 func makeCreds(st *tss.GuardianStorage) grpc.ServerOption {

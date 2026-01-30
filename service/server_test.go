@@ -176,17 +176,7 @@ func TestVerifySignature(t *testing.T) {
 	// Perhaps by exposing a method in multi-party-sig/protocol/frost package
 	// consider exposing ecdsa basic signature generation as well while at it (and remove NewEcdsaSignature here).
 	t.Run("FROST signature", func(t *testing.T) {
-		var secret curve.Scalar
-		for i := range 10 { // try up to 10 times to get a valid secret
-			secret = sample.Scalar(rand.Reader, curve.Secp256k1{})
-			if !secret.IsOverHalfOrder() && sign.PublicKeyValidForContract(secret.ActOnBase()) {
-				break
-			}
-
-			if i == 9 {
-				t.Fatal("failed to generate valid secret after 10 attempts")
-			}
-		}
+		secret := contractValidSecretKey(t)
 
 		msgDigest := mustHexDecode("deadbeef00000000000000000000000000000000000000000000000000000000")
 		sig, err := sign.SignEcSchnorr(secret, msgDigest)
@@ -221,6 +211,20 @@ func TestVerifySignature(t *testing.T) {
 		require.NotNil(t, resp)
 		assert.False(t, resp.IsValid)
 	})
+}
+
+func contractValidSecretKey(t *testing.T) curve.Scalar {
+	var secret curve.Scalar
+	for range 100 { // try up to 100 times to get a valid secret
+		secret = sample.Scalar(rand.Reader, curve.Secp256k1{})
+		if sign.PublicKeyValidForContract(secret.ActOnBase()) {
+			return secret
+		}
+	}
+
+	t.Fatal("failed to generate contract valid secret key")
+
+	return nil
 }
 
 // Ensures that signatures created using NewSignature are valid for ECDSA verification according to multi-party-sig's ECDSA implementation.
