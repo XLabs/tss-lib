@@ -223,6 +223,8 @@ func contractValidSecretKey(t *testing.T) curve.Scalar {
 	}
 
 	t.Fatal("failed to generate contract valid secret key")
+
+	return nil
 }
 
 // Ensures that signatures created using NewSignature are valid for ECDSA verification according to multi-party-sig's ECDSA implementation.

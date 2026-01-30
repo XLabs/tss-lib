@@ -310,7 +310,7 @@ func (s *GuardianStorage) NumGuardians() int {
 	return len(s.Identities)
 }
 
-// ExistingSecretsForSigning returns the list of ProtocolTypes for which this GuardianStorage has secret.
+// ExistingSecretsForSigning returns the list of ProtocolTypes for which this GuardianStorage has a secret.
 func (s *GuardianStorage) ExistingSecretsForSigning() []common.ProtocolType {
 	types := []common.ProtocolType{}
 
