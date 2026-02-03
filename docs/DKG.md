@@ -37,8 +37,8 @@ where Identifier  is a subobject with fields:
 
 | Field | Explanation |
 |-------|-------------|
-| `numParticipants` | The number of nodes in the system. |
-| `wantedThreshold` | The minimum count of signers to reach signature threshold. |
+| `NumParticipants` | The number of nodes in the system. |
+| `WantedThreshold` | The minimum count of signers to reach signature threshold. |
 | `Self` | Describes the runner of the binary. Hostname must be a valid DNS host used in the X509 certificate. |
 | `SelfSecret` | The runner node's secret key used to sign your certificate. |
 | `StorageLocation` | tbd (use `.`) |
