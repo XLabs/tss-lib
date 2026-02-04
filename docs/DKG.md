@@ -41,5 +41,5 @@ where Identifier  is a subobject with fields:
 | `WantedThreshold` | The minimum count of participants to create a valid signature. |
 | `Self` | Describes the runner of the binary. Hostname must be a valid DNS host used in the X509 certificate. |
 | `SelfSecret` | The runner node's secret key used to sign your certificate. |
-| `StorageLocation` | tbd (use `.`) |
+| `StorageLocation` | Path to the directory where secrets.json will be saved (default `.`) |
 | `Peers` | An array of all possible participants, including self. |
