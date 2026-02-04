@@ -19,8 +19,8 @@ This library is designed for distributed systems, such as bridge guardians or MP
 ## CLI Tools
 
 The repository includes command-line tools for running DKG and runing a Signer.
-*   **DKG Runner**: Located in `tss/internal/cmd`, this tool allows running the DKG protocol as a standalone binary. See tss/internal/cmd/README.md for details.
-* **Signer**: Located in the `service` package. This tool sets up a TSS signer, connects to its peers and offers gRPC API to sign messages.
+*   [**DKG Runner**](docs/DKG.md): Located in `tss/internal/cmd`, this tool allows running the DKG protocol as a standalone binary. See tss/internal/cmd/README.md for details.
+*   **Signer**: Located in the `service` package. This tool sets up a TSS signer, connects to its peers and offers gRPC API to sign messages.
 
 
 ## Testing
@@ -30,6 +30,3 @@ The library includes extensive tests covering the cryptographic protocols and ne
 ```bash
 go test ./...
 ```
-
-### [DKG](docs/DKG.md)
-

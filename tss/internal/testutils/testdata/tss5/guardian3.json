@@ -1,7 +1,5 @@
 {
   "MaxSignerTTL": 300000000000,
-  "ChainsWithNoSelfReport": null,
-  "LeaderIdentity": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFNWpIYk5WMzBvWTYrUnhTdHZBRm0wVHc1UG85Rwp3cTMxSFVlWS9tT1k2NmZCUmNjQkxyenhIREJUdWd1bjRnMVZNMXJRdWxhdDZHbnFaZHkzL3JHR05BPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==",
   "EcdsaChains": null,
   "Self": {
     "Pid": {
