@@ -31,4 +31,5 @@ The library includes extensive tests covering the cryptographic protocols and ne
 go test ./...
 ```
 
+### [DKG](docs/DKG.md)
 
