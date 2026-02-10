@@ -155,8 +155,7 @@ func (s *server) closeConnection(con *connection) {
 	}
 }
 
-// ensurePeerConnection checks if there are any missing connections to peers,
-// and tries to schedule dialResponse for them.
+// ensurePeerConnection creates dialRequest for any missing connection.
 func (s *server) ensurePeerConnection() {
 	if len(s.unsafeConnectionsMap) == len(s.peers) {
 		return // all peers are connected, no need to force dial.
@@ -241,18 +240,18 @@ func (s *server) dialer() {
 		select {
 		case <-s.ctx.Done():
 			return
-		case dialRqst := <-s.dialingScheduleChan:
-			if err := s.dial(dialRqst.hostname); err != nil {
+		case hostname := <-s.dialChan:
+			if err := s.dial(hostname); err != nil {
 				// schedule another dial attempt for this peer.
 				redialRequested := s.nonBlockingDialScheduling(dialRequest{
-					hostname:    dialRqst.hostname,
+					hostname:    hostname,
 					immediately: false,
 				})
 
 				s.logger.Error(
 					"couldn't create direct link to peer, will retry after some time",
 					zap.Error(err),
-					zap.String("hostname", dialRqst.hostname),
+					zap.String("hostname", hostname),
 					zap.Bool("redialRequestedNow", redialRequested),
 				)
 			}
