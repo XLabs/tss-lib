@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 // MustGetMockGuardianTssStorage returns the path to a mock guardian storage file.
@@ -34,9 +35,9 @@ func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...strin
 }
 
 func NewTestLogger(t testing.TB) *zap.Logger {
-	lg, err := zap.NewDevelopment()
-	if err != nil {
-		t.Fatalf("failed to create test logger: %v", err)
-	}
-	return lg
+	logger := zaptest.NewLogger(t)
+	t.Cleanup(func() {
+		_ = logger.Sync()
+	})
+	return logger
 }
