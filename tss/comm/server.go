@@ -89,7 +89,7 @@ const connectionCheckTime = time.Second * 5
 //
 // only this goroutine reads or writes to the connections map to ensure thread-safety without locks.
 func (s *server) sender() {
-	s.ensurePeerConnection()
+	s.ensurePeerConnection(immediateDial)
 
 	connectionCheckTicker := time.NewTicker(connectionCheckTime)
 	defer connectionCheckTicker.Stop()
@@ -107,7 +107,7 @@ func (s *server) sender() {
 		case resp := <-s.dialResponse:
 			s.receiveNewConnection(resp)
 		case <-connectionCheckTicker.C:
-			s.ensurePeerConnection()
+			s.ensurePeerConnection(backoffDial)
 		}
 	}
 }
@@ -117,7 +117,9 @@ func (s *server) receiveNewConnection(resp dialResponse) {
 	select {
 	case s.resetAttemptsChan <- resp.name:
 	default:
-		s.logger.Debug("couldn't send reset command to scheduler: channel blocked", zap.String("hostname", resp.name))
+		s.logger.Warn("couldn't send reset command to scheduler: channel blocked",
+			zap.String("hostname", resp.name),
+		)
 	}
 
 	if _, ok := s.unsafeConnectionsMap[resp.name]; ok {
@@ -156,18 +158,28 @@ func (s *server) closeConnection(con *connection) {
 	}
 }
 
+// adds readability
+type dialStrategy int
+
+const (
+	immediateDial dialStrategy = iota
+	backoffDial
+)
+
 // ensurePeerConnection creates dialRequest for any missing connection.
-func (s *server) ensurePeerConnection() {
+func (s *server) ensurePeerConnection(strategy dialStrategy) {
 	if len(s.unsafeConnectionsMap) == len(s.peers) {
 		return // all peers are connected, no need to force dial.
 	}
+
+	immediately := strategy == immediateDial
 
 	for _, id := range s.peers {
 		hostname := id.NetworkName()
 		if _, ok := s.unsafeConnectionsMap[hostname]; !ok {
 			s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
-				immediately: true,
+				immediately: immediately,
 			})
 		}
 	}
