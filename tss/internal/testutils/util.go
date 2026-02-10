@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
+	"go.uber.org/zap/zaptest"
 )
 
 // MustGetMockGuardianTssStorage returns the path to a mock guardian storage file.
@@ -35,16 +35,9 @@ func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...strin
 }
 
 func NewTestLogger(t testing.TB) *zap.Logger {
-	core, recorded := observer.New(zap.DebugLevel)
+	logger := zaptest.NewLogger(t)
 	t.Cleanup(func() {
-		logs := recorded.All()
-		for _, log := range logs {
-			t.Logf("TSS LOG [%s]: %s\n", log.Level.String(), log.Message)
-			for _, field := range log.Context {
-				t.Logf("    %s: %v\n", field.Key, field.Interface)
-			}
-		}
+		_ = logger.Sync()
 	})
-
-	return zap.New(core)
+	return logger
 }

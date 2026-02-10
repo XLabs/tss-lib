@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/xlabs/tss-lib/v2/tss"
@@ -25,14 +26,14 @@ type connection struct {
 	stream tsscommv1.DirectLink_SendClient
 }
 
-type redialResponse struct {
+type dialResponse struct {
 	name string
 	conn *connection
 }
 
-type redialRequest struct {
+type dialRequest struct {
 	hostname    string
-	immediately bool //used to skip waiting in the dialer backoff mechanism
+	immediately bool //used to skip waiting in the scheduler backoff mechanism
 }
 
 type server struct {
@@ -45,10 +46,18 @@ type server struct {
 
 	peers      []*tss.Identity
 	peerToCert map[string]*x509.Certificate
-	// to ensure thread-safety without locks, only the sender is allowed to change this map.
-	connections   map[string]*connection
-	requestRedial chan redialRequest
-	redials       chan redialResponse
+	// to ensure thread-safety without locks, only the sender goroutine is allowed to change this map.
+	unsafeConnectionsMap map[string]*connection
+	// used to schedule dial attempts to peers, the scheduler listens to this channel,
+	// and once it deems a dial attempt should be made, it sends the hostname to dial to the dialer.
+	dialingScheduleChan chan dialRequest
+	// dialer sends dialResponse to this channel once a dial attempt is made to be picked up by
+	// the sender, which uses the connections.
+	dialResponse chan dialResponse
+	// dialer waits on this channel to receive dial requests, and tries to dial to the requested peer.
+	dialChan chan string
+	// scheduler listens to this channel to reset the backoff attempts for a specific peer.
+	resetAttemptsChan chan string
 
 	fullyConnected chan struct{} // used to signal that the server is fully connected to all peers.
 }
@@ -65,55 +74,77 @@ func (s *server) WaitForConnections(ctx context.Context) error {
 }
 
 func (s *server) run() {
-	go s.dialer()
+	go s.scheduler()
 	go s.sender()
 
-	for _, id := range s.peers {
-		hostname := id.NetworkName()
-		s.enqueueRedialRequest(redialRequest{
-			hostname:    hostname,
-			immediately: false,
-		})
+	for range runtime.NumCPU() {
+		go s.dialer()
 	}
 }
 
 const connectionCheckTime = time.Second * 5
 
+// sender is responsible for sending messages to peers, also
+// checks the health of connections by catching send errors and scheduling dialRequests.
+//
+// only this goroutine reads or writes to the connections map to ensure thread-safety without locks.
 func (s *server) sender() {
+	s.ensurePeerConnection(immediateDial)
+
 	connectionCheckTicker := time.NewTicker(connectionCheckTime)
+	defer connectionCheckTicker.Stop()
 
 	for {
 		select {
 		case <-s.ctx.Done():
-			for _, con := range s.connections {
+			for _, con := range s.unsafeConnectionsMap {
 				s.closeConnection(con)
 			}
 
 			return
-
 		case o := <-s.tssMessenger.ProducedOutputMessages():
 			s.send(o)
-
-		case redial := <-s.redials:
-			if _, ok := s.connections[redial.name]; ok {
-				// shouldn't open the same connection twice.
-				// if a redial request is still needed, it will be enqueued again either
-				// on the next send attempt, or once the ticker pops.
-				s.closeConnection(redial.conn)
-
-				continue
-			}
-
-			s.connections[redial.name] = redial.conn
-			if len(s.connections) == len(s.peers) {
-				select {
-				case s.fullyConnected <- struct{}{}:
-				default: // don't block if the channel is already full.
-				}
-			}
-
+		case resp := <-s.dialResponse:
+			s.receiveNewConnection(resp)
 		case <-connectionCheckTicker.C:
-			s.forceDialIfNotConnected()
+			s.ensurePeerConnection(backoffDial)
+		}
+	}
+}
+
+func (s *server) receiveNewConnection(resp dialResponse) {
+	// once we receive a new connection, we can reset the backoff attempts for this peer in the scheduler,
+	select {
+	case s.resetAttemptsChan <- resp.name:
+	default:
+		s.logger.Warn("couldn't send reset command to scheduler: channel blocked",
+			zap.String("hostname", resp.name),
+		)
+	}
+
+	if _, ok := s.unsafeConnectionsMap[resp.name]; ok {
+		// shouldn't open the same connection twice.
+		// if a redial request is still needed, it will be enqueued again either
+		// on the next send attempt, or once the sender's ticker pops.
+		s.closeConnection(resp.conn)
+
+		return
+	}
+
+	s.unsafeConnectionsMap[resp.name] = resp.conn
+
+	s.logger.Info("established new direct link to peer",
+		zap.String("hostname", resp.name),
+		zap.Int("currentConnectedPeers", len(s.unsafeConnectionsMap)),
+		zap.Int("totalPeers", len(s.peers)),
+	)
+
+	if len(s.unsafeConnectionsMap) == len(s.peers) {
+		// signal to users that we're fully connected,
+		// but don't block if the channel is already full.
+		select {
+		case s.fullyConnected <- struct{}{}:
+		default:
 		}
 	}
 }
@@ -127,16 +158,29 @@ func (s *server) closeConnection(con *connection) {
 	}
 }
 
-func (s *server) forceDialIfNotConnected() {
-	if len(s.connections) != len(s.peers) {
-		for _, id := range s.peers {
-			hostname := id.NetworkName()
-			if _, ok := s.connections[hostname]; !ok {
-				s.enqueueRedialRequest(redialRequest{
-					hostname:    hostname,
-					immediately: true,
-				})
-			}
+// adds readability
+type dialStrategy int
+
+const (
+	immediateDial dialStrategy = iota
+	backoffDial
+)
+
+// ensurePeerConnection creates dialRequest for any missing connection.
+func (s *server) ensurePeerConnection(strategy dialStrategy) {
+	if len(s.unsafeConnectionsMap) == len(s.peers) {
+		return // all peers are connected, no need to force dial.
+	}
+
+	immediately := strategy == immediateDial
+
+	for _, id := range s.peers {
+		hostname := id.NetworkName()
+		if _, ok := s.unsafeConnectionsMap[hostname]; !ok {
+			s.nonBlockingDialScheduling(dialRequest{
+				hostname:    hostname,
+				immediately: immediately,
+			})
 		}
 	}
 }
@@ -145,9 +189,9 @@ func (s *server) send(msg tss.Sendable) {
 	for _, recipient := range msg.GetDestinations() {
 		hostname := recipient.NetworkName()
 
-		conn, ok := s.connections[hostname]
+		conn, ok := s.unsafeConnectionsMap[hostname]
 		if !ok {
-			s.enqueueRedialRequest(redialRequest{
+			s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
 				immediately: false,
 			})
@@ -161,15 +205,19 @@ func (s *server) send(msg tss.Sendable) {
 			continue
 		}
 
+		// Send blocks until the message is scheduled to be sent,
+		// and returns an error if the connection is unhealthy.
+		// Does not block until the message is actually sent,
+		// so it won't cause head-of-line blocking on the sender side.
 		if err := conn.stream.Send(msg.GetNetworkMessage()); err != nil {
 			if err == io.EOF {
 				_, err2 := conn.stream.CloseAndRecv()
 				err = fmt.Errorf("stream closed by peer. peer's reason: %w", err2)
 			}
 
-			delete(s.connections, hostname)
+			delete(s.unsafeConnectionsMap, hostname)
 
-			s.enqueueRedialRequest(redialRequest{
+			redialRequested := s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
 				immediately: false,
 			})
@@ -178,25 +226,56 @@ func (s *server) send(msg tss.Sendable) {
 				"couldn't send message to peer due to error.",
 				zap.Error(err),
 				zap.String("hostname", hostname),
+				zap.Bool("redialRequestedNow", redialRequested),
+				zap.Int("currentConnectedPeers", len(s.unsafeConnectionsMap)),
+				zap.Int("totalPeers", len(s.peers)),
 			)
 		}
 	}
 }
 
-func (s *server) enqueueRedialRequest(rqst redialRequest) {
+// nonBlockingDialScheduling tries to schedule a dial request without blocking, may fail if channel is full.
+func (s *server) nonBlockingDialScheduling(rqst dialRequest) bool {
 	select {
-	case s.requestRedial <- rqst:
+	case s.dialingScheduleChan <- rqst:
 		s.logger.Debug("requested redial", zap.String("hostname", rqst.hostname))
 
-		return
+		return true
 	default:
 		s.logger.Debug("channel to request redial blocked dropping redial request to", zap.String("hostname", rqst.hostname))
+
+		return false
 	}
 }
 
 func (s *server) dialer() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case hostname := <-s.dialChan:
+			if err := s.dial(hostname); err != nil {
+				// schedule another dial attempt for this peer.
+				redialRequested := s.nonBlockingDialScheduling(dialRequest{
+					hostname:    hostname,
+					immediately: false,
+				})
+
+				s.logger.Error(
+					"couldn't create direct link to peer, will retry after some time",
+					zap.Error(err),
+					zap.String("hostname", hostname),
+					zap.Bool("redialRequestedNow", redialRequested),
+				)
+			}
+		}
+	}
+}
+
+// scheduler is responsible for scheduling dial attempts to peers.
+func (s *server) scheduler() {
 	// using a heap instead of time.AfterFunc/ After to reduce the number of
-	// goroutines generated to 0 (not including the dialer itself).
+	// goroutines generated to 0 (not including the scheduler itself).
 	waiters := newBackoffHeap()
 
 	for {
@@ -205,9 +284,11 @@ func (s *server) dialer() {
 		select {
 		case <-s.ctx.Done():
 			return
+		case successfulDial := <-s.resetAttemptsChan:
+			waiters.ResetAttempts(successfulDial)
 		case <-waiters.WaitOnTimer():
 			dialTo = waiters.Dequeue()
-		case rqst := <-s.requestRedial:
+		case rqst := <-s.dialingScheduleChan:
 			if rqst.immediately {
 				dialTo = rqst.hostname // will drop down to the dialing section.
 			} else {
@@ -219,20 +300,12 @@ func (s *server) dialer() {
 			continue // skip (nothing to dial to)
 		}
 
-		if err := s.dial(dialTo); err != nil {
-			s.logger.Error(
-				"couldn't create direct link to peer",
-				zap.Error(err),
-				zap.String("hostname", dialTo),
-			)
-
-			waiters.Enqueue(dialTo) // ensuring a retry.
-
-			continue
+		select {
+		case s.dialChan <- dialTo:
+			s.logger.Info("Scheduled dial to peer", zap.String("hostname", dialTo))
+		case <-s.ctx.Done():
+			return
 		}
-
-		s.logger.Info("dialed to peer", zap.String("hostname", dialTo))
-		waiters.ResetAttempts(dialTo)
 	}
 }
 
@@ -284,12 +357,20 @@ func (s *server) dial(hostname string) error {
 		return err
 	}
 
-	s.redials <- redialResponse{
+	d := dialResponse{
 		name: hostname,
 		conn: &connection{
 			cc:     cc,
 			stream: stream,
 		},
+	}
+
+	select {
+	case <-s.ctx.Done():
+		cc.Close() // avoid leaking connections if we're shutting down while dialing.
+
+		return s.ctx.Err()
+	case s.dialResponse <- d:
 	}
 
 	return nil

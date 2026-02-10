@@ -994,12 +994,15 @@ func TestSocketPathCreation(t *testing.T) {
 
 	// For coverage completness we Invoke Run and close the server.
 
-	go tmpSrvr2.Run(ctx)
-	time.Sleep(time.Second * 1)
+	done := make(chan struct{})
+	go func() {
+		_ = tmpSrvr2.Run(ctx)
+		close(done)
+	}()
 
 	cancel()
 	select {
-	case <-ctx.Done():
+	case <-done:
 	case <-time.After(time.Second * 2):
 		t.Fatal("server run did not stop after context cancel")
 	}
