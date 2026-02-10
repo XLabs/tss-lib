@@ -88,8 +88,9 @@ func newServer(socketPath string, logger *zap.Logger, tssMessenger tss.ReliableM
 		peerToCert:                    peerToCert,
 		connections:                   make(map[string]*connection, len(peers)),
 		dialingScheduleChan:           make(chan dialRequest, len(peers)),
-		dialResponse:                  make(chan dialResponse, 1),
-		fullyConnected:                make(chan struct{}, 1), // buffered to avoid blocking
+		dialResponse:                  make(chan dialResponse), // unbuffered, ensures waiting on sender.
+		fullyConnected:                make(chan struct{}, 1),
+		dialChan:                      make(chan string, len(peers)),
 	}, nil
 }
 

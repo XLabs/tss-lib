@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/xlabs/tss-lib/v2/tss"
@@ -46,9 +47,15 @@ type server struct {
 	peers      []*tss.Identity
 	peerToCert map[string]*x509.Certificate
 	// to ensure thread-safety without locks, only the sender is allowed to change this map.
-	connections         map[string]*connection
+	connections map[string]*connection
+	// used to schedule dial attempts to peers, the scheduler listens to this channel,
+	// and once it deems a dial attempt should be made, it sends the hostname to dial to the dialer.
 	dialingScheduleChan chan dialRequest
-	dialResponse        chan dialResponse
+	// dialer sends dialResponse to this channel once a dial attempt is made to be picked up by
+	// the sender, which uses the connections.
+	dialResponse chan dialResponse
+	// dialer waits on this channel to receive dial requests, and tries to dial to the requested peer.
+	dialChan chan string
 
 	fullyConnected chan struct{} // used to signal that the server is fully connected to all peers.
 }
@@ -67,6 +74,10 @@ func (s *server) WaitForConnections(ctx context.Context) error {
 func (s *server) run() {
 	go s.scheduler()
 	go s.sender()
+
+	for range runtime.NumCPU() {
+		go s.dialer()
+	}
 
 	for _, id := range s.peers {
 		hostname := id.NetworkName()
@@ -199,10 +210,31 @@ func (s *server) nonBlockingDialScheduling(rqst dialRequest) {
 	select {
 	case s.dialingScheduleChan <- rqst:
 		s.logger.Debug("requested redial", zap.String("hostname", rqst.hostname))
-
-		return
 	default:
 		s.logger.Debug("channel to request redial blocked dropping redial request to", zap.String("hostname", rqst.hostname))
+	}
+}
+
+func (s *server) dialer() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case dialRqst := <-s.dialingScheduleChan:
+			if err := s.dial(dialRqst.hostname); err != nil {
+				s.logger.Error(
+					"couldn't create direct link to peer",
+					zap.Error(err),
+					zap.String("hostname", dialRqst.hostname),
+				)
+
+				// schedule another dial attempt for this peer.
+				s.nonBlockingDialScheduling(dialRequest{
+					hostname:    dialRqst.hostname,
+					immediately: false,
+				})
+			}
+		}
 	}
 }
 
@@ -232,20 +264,12 @@ func (s *server) scheduler() {
 			continue // skip (nothing to dial to)
 		}
 
-		if err := s.dial(dialTo); err != nil {
-			s.logger.Error(
-				"couldn't create direct link to peer",
-				zap.Error(err),
-				zap.String("hostname", dialTo),
-			)
-
-			waiters.Enqueue(dialTo) // ensuring a retry.
-
-			continue
+		select {
+		case s.dialChan <- dialTo:
+			s.logger.Info("Scheduled dial to peer", zap.String("hostname", dialTo))
+		default:
+			s.logger.Debug("channel to request dial blocked, dropping dial request to", zap.String("hostname", dialTo))
 		}
-
-		s.logger.Info("dialed to peer", zap.String("hostname", dialTo))
-		waiters.ResetAttempts(dialTo)
 	}
 }
 
