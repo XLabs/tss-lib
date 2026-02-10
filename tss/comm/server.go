@@ -92,6 +92,7 @@ func (s *server) sender() {
 	s.ensurePeerConnection()
 
 	connectionCheckTicker := time.NewTicker(connectionCheckTime)
+	defer connectionCheckTicker.Stop()
 
 	for {
 		select {
