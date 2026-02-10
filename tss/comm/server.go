@@ -46,8 +46,8 @@ type server struct {
 
 	peers      []*tss.Identity
 	peerToCert map[string]*x509.Certificate
-	// to ensure thread-safety without locks, only the sender is allowed to change this map.
-	connections map[string]*connection
+	// to ensure thread-safety without locks, only the sender goroutine is allowed to change this map.
+	unsafeConnectionsMap map[string]*connection
 	// used to schedule dial attempts to peers, the scheduler listens to this channel,
 	// and once it deems a dial attempt should be made, it sends the hostname to dial to the dialer.
 	dialingScheduleChan chan dialRequest
@@ -56,6 +56,8 @@ type server struct {
 	dialResponse chan dialResponse
 	// dialer waits on this channel to receive dial requests, and tries to dial to the requested peer.
 	dialChan chan string
+	// scheduler listens to this channel to reset the backoff attempts for a specific peer.
+	resetAttemptsChan chan string
 
 	fullyConnected chan struct{} // used to signal that the server is fully connected to all peers.
 }
@@ -78,56 +80,68 @@ func (s *server) run() {
 	for range runtime.NumCPU() {
 		go s.dialer()
 	}
-
-	for _, id := range s.peers {
-		hostname := id.NetworkName()
-		s.nonBlockingDialScheduling(dialRequest{
-			hostname:    hostname,
-			immediately: false,
-		})
-	}
 }
 
 const connectionCheckTime = time.Second * 5
 
-// sender is responsible for sending messages to peers, and
-// checking the health of connections by catching send errors and scheduling dialResponse.
+// sender is responsible for sending messages to peers, also
+// checks the health of connections by catching send errors and scheduling dialRequests.
+//
+// only this goroutine reads or writes to the connections map to ensure thread-safety without locks.
 func (s *server) sender() {
+	s.ensurePeerConnection()
+
 	connectionCheckTicker := time.NewTicker(connectionCheckTime)
 
 	for {
 		select {
 		case <-s.ctx.Done():
-			for _, con := range s.connections {
+			for _, con := range s.unsafeConnectionsMap {
 				s.closeConnection(con)
 			}
 
 			return
-
 		case o := <-s.tssMessenger.ProducedOutputMessages():
 			s.send(o)
-
 		case resp := <-s.dialResponse:
-			if _, ok := s.connections[resp.name]; ok {
-				// shouldn't open the same connection twice.
-				// if a redial request is still needed, it will be enqueued again either
-				// on the next send attempt, or once the ticker pops.
-				s.closeConnection(resp.conn)
-
-				continue
-			}
-
-			s.connections[resp.name] = resp.conn
-			if len(s.connections) == len(s.peers) {
-				// signal that we're fully connected, but don't block if the channel is already full.
-				select {
-				case s.fullyConnected <- struct{}{}:
-				default:
-				}
-			}
-
+			s.receiveNewConnection(resp)
 		case <-connectionCheckTicker.C:
 			s.ensurePeerConnection()
+		}
+	}
+}
+
+func (s *server) receiveNewConnection(resp dialResponse) {
+	// once we receive a new connection, we can reset the backoff attempts for this peer in the scheduler,
+	select {
+	case s.resetAttemptsChan <- resp.name:
+	default:
+		s.logger.Debug("couldn't send reset command to scheduler: channel blocked", zap.String("hostname", resp.name))
+	}
+
+	if _, ok := s.unsafeConnectionsMap[resp.name]; ok {
+		// shouldn't open the same connection twice.
+		// if a redial request is still needed, it will be enqueued again either
+		// on the next send attempt, or once the sender's ticker pops.
+		s.closeConnection(resp.conn)
+
+		return
+	}
+
+	s.unsafeConnectionsMap[resp.name] = resp.conn
+
+	s.logger.Info("established new direct link to peer",
+		zap.String("hostname", resp.name),
+		zap.Int("currentConnectedPeers", len(s.unsafeConnectionsMap)),
+		zap.Int("totalPeers", len(s.peers)),
+	)
+
+	if len(s.unsafeConnectionsMap) == len(s.peers) {
+		// signal to users that we're fully connected,
+		// but don't block if the channel is already full.
+		select {
+		case s.fullyConnected <- struct{}{}:
+		default:
 		}
 	}
 }
@@ -144,13 +158,13 @@ func (s *server) closeConnection(con *connection) {
 // ensurePeerConnection checks if there are any missing connections to peers,
 // and tries to schedule dialResponse for them.
 func (s *server) ensurePeerConnection() {
-	if len(s.connections) == len(s.peers) {
+	if len(s.unsafeConnectionsMap) == len(s.peers) {
 		return // all peers are connected, no need to force dial.
 	}
 
 	for _, id := range s.peers {
 		hostname := id.NetworkName()
-		if _, ok := s.connections[hostname]; !ok {
+		if _, ok := s.unsafeConnectionsMap[hostname]; !ok {
 			s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
 				immediately: true,
@@ -163,7 +177,7 @@ func (s *server) send(msg tss.Sendable) {
 	for _, recipient := range msg.GetDestinations() {
 		hostname := recipient.NetworkName()
 
-		conn, ok := s.connections[hostname]
+		conn, ok := s.unsafeConnectionsMap[hostname]
 		if !ok {
 			s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
@@ -189,9 +203,9 @@ func (s *server) send(msg tss.Sendable) {
 				err = fmt.Errorf("stream closed by peer. peer's reason: %w", err2)
 			}
 
-			delete(s.connections, hostname)
+			delete(s.unsafeConnectionsMap, hostname)
 
-			s.nonBlockingDialScheduling(dialRequest{
+			redialRequested := s.nonBlockingDialScheduling(dialRequest{
 				hostname:    hostname,
 				immediately: false,
 			})
@@ -200,18 +214,25 @@ func (s *server) send(msg tss.Sendable) {
 				"couldn't send message to peer due to error.",
 				zap.Error(err),
 				zap.String("hostname", hostname),
+				zap.Bool("redialRequestedNow", redialRequested),
+				zap.Int("currentConnectedPeers", len(s.unsafeConnectionsMap)),
+				zap.Int("totalPeers", len(s.peers)),
 			)
 		}
 	}
 }
 
 // nonBlockingDialScheduling tries to schedule a dial request without blocking, may fail if channel is full.
-func (s *server) nonBlockingDialScheduling(rqst dialRequest) {
+func (s *server) nonBlockingDialScheduling(rqst dialRequest) bool {
 	select {
 	case s.dialingScheduleChan <- rqst:
 		s.logger.Debug("requested redial", zap.String("hostname", rqst.hostname))
+
+		return true
 	default:
 		s.logger.Debug("channel to request redial blocked dropping redial request to", zap.String("hostname", rqst.hostname))
+
+		return false
 	}
 }
 
@@ -222,17 +243,18 @@ func (s *server) dialer() {
 			return
 		case dialRqst := <-s.dialingScheduleChan:
 			if err := s.dial(dialRqst.hostname); err != nil {
-				s.logger.Error(
-					"couldn't create direct link to peer",
-					zap.Error(err),
-					zap.String("hostname", dialRqst.hostname),
-				)
-
 				// schedule another dial attempt for this peer.
-				s.nonBlockingDialScheduling(dialRequest{
+				redialRequested := s.nonBlockingDialScheduling(dialRequest{
 					hostname:    dialRqst.hostname,
 					immediately: false,
 				})
+
+				s.logger.Error(
+					"couldn't create direct link to peer, will retry after some time",
+					zap.Error(err),
+					zap.String("hostname", dialRqst.hostname),
+					zap.Bool("redialRequestedNow", redialRequested),
+				)
 			}
 		}
 	}
@@ -250,6 +272,8 @@ func (s *server) scheduler() {
 		select {
 		case <-s.ctx.Done():
 			return
+		case successfulDial := <-s.resetAttemptsChan:
+			waiters.ResetAttempts(successfulDial)
 		case <-waiters.WaitOnTimer():
 			dialTo = waiters.Dequeue()
 		case rqst := <-s.dialingScheduleChan:
@@ -267,8 +291,8 @@ func (s *server) scheduler() {
 		select {
 		case s.dialChan <- dialTo:
 			s.logger.Info("Scheduled dial to peer", zap.String("hostname", dialTo))
-		default:
-			s.logger.Debug("channel to request dial blocked, dropping dial request to", zap.String("hostname", dialTo))
+		case <-s.ctx.Done():
+			return
 		}
 	}
 }
@@ -321,12 +345,20 @@ func (s *server) dial(hostname string) error {
 		return err
 	}
 
-	s.dialResponse <- dialResponse{
+	d := dialResponse{
 		name: hostname,
 		conn: &connection{
 			cc:     cc,
 			stream: stream,
 		},
+	}
+
+	select {
+	case <-s.ctx.Done():
+		cc.Close() // avoid leaking connections if we're shutting down while dialing.
+
+		return s.ctx.Err()
+	case s.dialResponse <- d:
 	}
 
 	return nil
