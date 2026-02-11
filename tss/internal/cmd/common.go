@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/sha512"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	common "github.com/xlabs/tss-common"
 	engine "github.com/xlabs/tss-lib/v2/tss"
@@ -114,4 +117,41 @@ func SortIdentities(unsortedIdentities map[string]*engine.Identity) []*engine.Id
 	}
 
 	return sortedIDS
+}
+
+func serializeIdentifier(id *Identifier) []byte {
+	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port.
+	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8)
+
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.TlsX509)))
+	buf = append(buf, id.TlsX509...)
+
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.Hostname)))
+	buf = append(buf, id.Hostname...)
+
+	return binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+}
+
+// PeersFingerprint computes a fingerprint of the peers in the config.
+// It does this by serializing each peer's identifier, sorting them, and then hashing the
+// concatenated result.
+// This can be used to verify that all parties have the same view of the peers configuration.
+func PeersFingerprint(cnfgs *SetupConfigs) string {
+	peersAsBytes := make([][]byte, len(cnfgs.Peers))
+	for i, peer := range cnfgs.Peers {
+		peersAsBytes[i] = serializeIdentifier(&peer)
+	}
+
+	// Using stable sort to ensure that the order of peers with the same identifier
+	// does not affect the fingerprint.
+	slices.SortStableFunc(peersAsBytes, func(a, b []byte) int {
+		return bytes.Compare(a, b)
+	})
+
+	h := sha512.New512_256()
+	for _, peerBytes := range peersAsBytes {
+		h.Write(peerBytes)
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
 }
