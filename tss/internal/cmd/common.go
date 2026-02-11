@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/sha512"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	common "github.com/xlabs/tss-common"
 	engine "github.com/xlabs/tss-lib/v2/tss"
@@ -114,4 +117,25 @@ func SortIdentities(unsortedIdentities map[string]*engine.Identity) []*engine.Id
 	}
 
 	return sortedIDS
+}
+
+func idToBytes(id *Identifier) []byte {
+	buf := make([]byte, 0, len(id.Hostname)+len(id.TlsX509)+8)
+
+	buf = append(buf, id.TlsX509...)
+	buf = append(buf, id.Hostname...)
+	return binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+}
+
+func PeersFingerprint(cnfgs *SetupConfigs) string {
+	slices.SortFunc(cnfgs.Peers, func(a, b Identifier) int {
+		return bytes.Compare(a.TlsX509, b.TlsX509)
+	})
+
+	h := sha512.New512_256()
+	for _, peer := range cnfgs.Peers {
+		h.Write(idToBytes(&peer))
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
 }

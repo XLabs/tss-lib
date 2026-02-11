@@ -47,6 +47,14 @@ func main() {
 	logger.Info("Loading KeyGenerator and GuardianStorage for DKG...")
 	cnfgs, prot := loadConfigsFromFlags(logger)
 
+	peersFingerprint := cmd.PeersFingerprint(cnfgs)
+
+	logger.Info("Config fingerprint",
+		zap.String("fingerprint", peersFingerprint),
+		zap.Int("numParticipants", cnfgs.NumParticipants),
+		zap.Int("threshold", cnfgs.WantedThreshold),
+	)
+
 	keygen, gst := keygeneratorSetup(cnfgs)
 
 	ctx, cancel := context.WithCancel(context.Background())
