@@ -49,9 +49,9 @@ func main() {
 
 	peersFingerprint := cmd.PeersFingerprint(cnfgs)
 
-	logger.Info("Config fingerprint",
-		zap.String("fingerprint", peersFingerprint),
-		zap.Int("numParticipants", cnfgs.NumParticipants),
+	logger.Info("Config loaded successfully. Starting DKG server with the following parameters:",
+		zap.String("peers-fingerprint", peersFingerprint),
+		zap.Int("num-participants", cnfgs.NumParticipants),
 		zap.Int("threshold", cnfgs.WantedThreshold),
 	)
 
