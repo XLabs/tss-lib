@@ -172,17 +172,16 @@ func (t *Engine) attemptSetCommittee(req *signer.SignRequest, signTask *party.Si
 	if len(req.Committee) == 0 {
 		return nil
 	}
+
 	// indicates a specific committee was requested.
-	// changing auxiliary data to ensure the trackingID won't match the trackingID of a request without a specific committee, even if the same digest and protocol were requested.
+	// changing auxiliary data to ensure the trackingID won't match the
+	// trackingID of a request with a default committee, even if the
+	// same digest and protocol were requested.
 	signTask.AuxiliaryData = []byte{specificCommitteeFlag}
 	signTask.Faulties = nil
 
-	if !t.HasEthKeyMappings() {
-		t.logger.Warn("specific committee requested, but no eth key mappings found! proceeding with default committee.")
-
-		return nil
-	}
-
+	// attempts to translate the requested committee, might fail due
+	// to missing partyIDs or eth address mappings.
 	members, err := t.translateEthCommitteeMembers(req.Committee)
 	if err != nil {
 		return err

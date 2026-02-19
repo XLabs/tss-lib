@@ -214,7 +214,7 @@ func (s *GuardianStorage) SetInnerFields() error {
 	s.IdentitiesKeep.pemkeyToIndex = make(map[string]int)
 	s.IdentitiesKeep.ethAddToIndex = make(map[ethcommon.Address]int)
 	s.IdentitiesKeep.partyidToIndex = make(map[string]int)
-	s.IdentitiesKeep.hasEthMapping = true
+	s.IdentitiesKeep.hasFullEthMappings = true
 
 	// Since the guardians are sorted by key, we can use their position as their index.
 	for i := range numPeers {
@@ -226,7 +226,7 @@ func (s *GuardianStorage) SetInnerFields() error {
 		if s.IdentitiesKeep.Identities[i].EthAddress != nil {
 			s.IdentitiesKeep.ethAddToIndex[*(s.IdentitiesKeep.Identities[i].EthAddress)] = i
 		} else {
-			s.IdentitiesKeep.hasEthMapping = false
+			s.IdentitiesKeep.hasFullEthMappings = false
 		}
 
 		s.IdentitiesKeep.Identities[i].pos = i
