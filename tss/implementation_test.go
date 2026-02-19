@@ -751,6 +751,8 @@ func TestBeginAsyncThresholdSigningProtocol_CommitteeCheck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
 
+	setEthAddresses(engines)
+
 	fmt.Println("starting engines.")
 	for _, engine := range engines {
 		a.NoError(engine.Start(ctx, logger))
@@ -773,8 +775,6 @@ func TestBeginAsyncThresholdSigningProtocol_CommitteeCheck(t *testing.T) {
 	a.NoError(err)
 	a.NotNil(mock.capturedTask.AuxiliaryData)
 	a.Equal(byte(specificCommitteeFlag), mock.capturedTask.AuxiliaryData[0])
-
-	setEthAddresses(engines)
 
 	// 2. Test without Committee (Flag should NOT be set)
 	req.Committee = nil
