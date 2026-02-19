@@ -65,7 +65,7 @@ const (
 	// where:
 	// *protocolType is 1 byte (uint8)
 	// *Digest is 32 bytes (sha256)
-	// *AuxiliaryData is 2 bytes (emitterChain)
+	// *AuxiliaryData is variable length (max 32 bytes), currently used for flags (e.g. leaderRequested)
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
 	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 

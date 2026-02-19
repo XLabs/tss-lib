@@ -42,9 +42,7 @@ var (
 		round3Message,
 	}
 
-	allRounds                  = append(unicastRounds, broadcastRounds...)
-	reportableConsistancyLevel = uint8(1) // TODO
-	// nonReportableConsistancyLevel = instantConsistencyLevel // TODO
+	allRounds = append(unicastRounds, broadcastRounds...)
 )
 
 var (
@@ -379,7 +377,7 @@ func TestEquivocation(t *testing.T) {
 			parsed2 := generateFakeMessageWithRandomContent(e1.Self.Pid, e2.Self.Pid, rndType, trackingId)
 
 			shouldBroadcast, deliverable, err = receiver.broadcastInspection(&deliverableMessage{&parsedTssContent{parsed2, ""}}, parsedIntoEcho(a, e2, parsed2))
-			a.ErrorContains(err, "equivication")
+			a.ErrorIs(err, errEquivocation)
 			a.False(shouldBroadcast)
 			a.Nil(deliverable)
 
@@ -443,7 +441,136 @@ func TestEquivocation(t *testing.T) {
 
 			msg.Content.Message.(*tsscommv1.PropagatedMessage_Unicast).
 				Unicast.Content.(*tsscommv1.Unicast_Tss).Tss.Payload = bts
-			a.ErrorIs(receiver.handleUnicast(msg), ErrEquivicatingGuardian)
+			a.ErrorIs(receiver.handleUnicast(msg), errEquivocation)
+		}
+	})
+
+	t.Run("TestEquivocationOnReplaySameDigest", func(t *testing.T) {
+		a := assert.New(t)
+		engines, err := loadGuardians(5, "tss5")
+		a.NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		for _, engine := range engines {
+			a.NoError(engine.Start(ctx, logger))
+		}
+
+		// Use a separate context for the router so we can stop it without stopping the engines
+		routerCtx, stopRouter := context.WithCancel(ctx)
+		dnchn := msgHandler(routerCtx, engines, 1)
+
+		digest := party.Digest{1, 2, 3, 4}
+		req := &signer.SignRequest{
+			Digest:   digest[:],
+			Protocol: common.ProtocolFROSTSign.ToString(),
+		}
+
+		// 1. Run successful ceremony
+		for _, engine := range engines {
+			a.NoError(engine.BeginAsyncThresholdSigningProtocol(req))
+		}
+
+		select {
+		case <-dnchn:
+			// Success
+		case <-time.After(time.Second * 20):
+			a.FailNow("timeout waiting for first signature")
+		}
+
+		// Stop the router to take manual control of message routing
+		stopRouter()
+		// Allow some time for router goroutines to exit
+		time.Sleep(100 * time.Millisecond)
+
+		// 2. Trigger Replay on Sender
+		sender := engines[0]
+		receiver := engines[1]
+
+		// Requesting the same signature again from sender
+		a.NoError(sender.BeginAsyncThresholdSigningProtocol(req))
+
+		// Capture the broadcast message
+		var msg Sendable
+		timeout := time.After(time.Second * 5)
+		found := false
+		for !found {
+			select {
+			case m := <-sender.ProducedOutputMessages():
+				if m.IsBroadcast() {
+					msg = m
+					found = true
+				}
+			case <-timeout:
+				a.FailNow("timeout waiting for sender to produce message")
+			}
+		}
+
+		// 3. Feed to receiver and expect Equivocation error
+		incoming := &IncomingMessage{
+			Source:  sender.Self,
+			Content: msg.GetNetworkMessage(),
+		}
+
+		err = receiver.handleIncomingTssMessage(incoming)
+		a.Error(err)
+		a.ErrorIs(err, errEquivocation)
+	})
+
+	t.Run("TestNoEquivocationBetweenCommitteeAndNonCommittee", func(t *testing.T) {
+		a := assert.New(t)
+		engines, err := loadGuardians(5, "tss5")
+		a.NoError(err)
+
+		// Ensure Eth addresses are set for committee usage
+		setEthAddresses(engines)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		for _, engine := range engines {
+			a.NoError(engine.Start(ctx, logger))
+		}
+
+		// We expect 2 distinct signatures (different TrackingIDs)
+		dnchn := msgHandler(ctx, engines, 2)
+
+		digest := party.Digest{1, 1, 1, 1}
+		req1 := &signer.SignRequest{
+			Digest:    digest[:],
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: nil,
+		}
+
+		// 1. Start Non-Committee Request
+		for _, engine := range engines {
+			a.NoError(engine.BeginAsyncThresholdSigningProtocol(req1))
+		}
+
+		// 2. Start Committee Request (Same Digest)
+		committee := []*signer.TypedKey{}
+		for i := 0; i < 3; i++ {
+			committee = append(committee, &signer.TypedKey{
+				Type: signer.TypedKey_EthKey,
+				Key:  (*engines[i].GuardianStorage.Self.EthAddress)[:],
+			})
+		}
+		req2 := &signer.SignRequest{
+			Digest:    digest[:],
+			Protocol:  common.ProtocolFROSTSign.ToString(),
+			Committee: committee,
+		}
+
+		for _, engine := range engines {
+			a.NoError(engine.BeginAsyncThresholdSigningProtocol(req2))
+		}
+
+		select {
+		case <-dnchn:
+			// Success: received 2 distinct signatures
+		case <-time.After(time.Second * 20):
+			a.FailNow("timeout waiting for signatures - likely collision occurred")
 		}
 	})
 }
@@ -608,6 +735,72 @@ func TestBadInputs(t *testing.T) {
 	})
 }
 
+func TestBeginAsyncThresholdSigningProtocol_CommitteeCheck(t *testing.T) {
+	a := assert.New(t)
+	engines := load5GuardiansSetupForBroadcastChecks(a)
+	e := engines[0]
+
+	// Setup Eth Addresses for the engine to recognize committee members
+	for i, id := range e.Identities {
+		addr := ethcommon.Address{}
+		binary.BigEndian.PutUint64(addr[:], uint64(i+1))
+		id.EthAddress = &addr
+	}
+	a.NoError(e.GuardianStorage.SetInnerFields())
+
+	// fullParty with capture to inspect the SigningTask passed to AsyncRequestNewSignature
+	mock := &fullPartyWithCapture{
+		FullParty: e.fp,
+	}
+	e.fp = mock
+
+	// Manually start the engine
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
+
+	fmt.Println("starting engines.")
+	for _, engine := range engines {
+		a.NoError(engine.Start(ctx, logger))
+	}
+
+	// 1. Test with Committee (Flag should be set)
+	committee := []*signer.TypedKey{
+		{Type: signer.TypedKey_EthKey, Key: e.Identities[0].EthAddress.Bytes()},
+		{Type: signer.TypedKey_EthKey, Key: e.Identities[1].EthAddress.Bytes()},
+		{Type: signer.TypedKey_EthKey, Key: e.Identities[2].EthAddress.Bytes()},
+	}
+
+	req := &signer.SignRequest{
+		Digest:    make([]byte, 32),
+		Protocol:  common.ProtocolFROSTSign.ToString(),
+		Committee: committee,
+	}
+
+	err := e.BeginAsyncThresholdSigningProtocol(req)
+	a.NoError(err)
+	a.NotNil(mock.capturedTask.AuxiliaryData)
+	a.Equal(byte(leaderRequestedFlag), mock.capturedTask.AuxiliaryData[0])
+
+	// 2. Test without Committee (Flag should NOT be set)
+	req.Committee = nil
+	err = e.BeginAsyncThresholdSigningProtocol(req)
+	a.NoError(err)
+	a.Nil(mock.capturedTask.AuxiliaryData)
+}
+
+// mockFullParty wraps the real FullParty to capture arguments
+type fullPartyWithCapture struct {
+	party.FullParty
+	capturedTask party.SigningTask
+}
+
+func (m *fullPartyWithCapture) AsyncRequestNewSignature(task party.SigningTask) (*party.SigningInfo, error) {
+	m.capturedTask = task
+
+	// Return valid info to pass validation in beginTSSSign
+	return m.FullParty.AsyncRequestNewSignature(task)
+}
+
 func createX509Cert(dnsName string) *x509.Certificate {
 	// using random serial number
 	var serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)
@@ -717,9 +910,8 @@ func TestRouteCheck(t *testing.T) {
 	time.Sleep(time.Millisecond * 200)
 }
 
-func TestNoFaultsFlow(t *testing.T) {
-	// checking metrics first since this is a bit flakey.
-	t.Run("regularflow", func(t *testing.T) {
+func TestRegularFlow(t *testing.T) {
+	t.Run("sign once", func(t *testing.T) {
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)
@@ -961,7 +1153,8 @@ func TestNoFaultsFlow(t *testing.T) {
 		}
 	})
 
-	t.Run("tooLargeCommittee", func(t *testing.T) {
+	t.Run("LargeCommittee", func(t *testing.T) {
+		// Should pass, large committee means less excluded parties, not an error by itself.
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)

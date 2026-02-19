@@ -668,6 +668,12 @@ func (t *Engine) HandleIncomingTssMessage(msg Incoming) {
 	}
 
 	if err := t.handleIncomingTssMessage(msg); err != nil {
+		if errors.Is(err, errEquivocation) {
+			t.logger.Warn("possible equivocation detected, perhaps a replay of the same digest?", zap.Error(err), zap.String("sender", msg.GetSource().NetworkName()))
+
+			return
+		}
+
 		t.logger.Error("failed to handle incoming TSS message", zap.Error(err))
 	}
 }
@@ -837,7 +843,7 @@ func (t *Engine) validateUnicastDoesntExist(parsed common.ParsedMessage) error {
 		}
 
 		if *stored.verifiedDigest != msgDigest {
-			return fmt.Errorf("%w. (duration from prev unicast %v)", ErrEquivicatingGuardian, time.Since(stored.timeReceived))
+			return fmt.Errorf("%w. (duration from prev unicast %v)", errEquivocation, time.Since(stored.timeReceived))
 		}
 
 		return errUnicastAlreadyReceived
