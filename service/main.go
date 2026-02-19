@@ -77,6 +77,10 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to load secrets file", zap.Error(err))
 	}
 
+	if !st.HasFullEthKeyMappings() {
+		p.logger.Warn("missing full ethereum-key mappings, leader mechanism might not work as expected.")
+	}
+
 	supportedProtocols := st.ExistingSecretsForSigning()
 
 	p.logger.Info(

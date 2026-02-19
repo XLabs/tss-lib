@@ -95,11 +95,16 @@ type IdentitiesKeep struct {
 	Identities []*Identity
 
 	// maps and slices to ensure quick lookups.
-	pemkeyToIndex  map[string]int
-	ethAddToIndex  map[ethcommon.Address]int
-	partyidToIndex map[string]int
-	peerCerts      []*x509.Certificate
-	partyIds       []*common.PartyID
+	pemkeyToIndex      map[string]int
+	ethAddToIndex      map[ethcommon.Address]int
+	partyidToIndex     map[string]int
+	peerCerts          []*x509.Certificate
+	partyIds           []*common.PartyID
+	hasFullEthMappings bool
+}
+
+func (ids *IdentitiesKeep) HasFullEthKeyMappings() bool {
+	return ids.hasFullEthMappings
 }
 
 var errUnknownPartyID = fmt.Errorf("unknown partyID")

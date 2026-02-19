@@ -200,7 +200,7 @@ func (t *Engine) getDeliverableIfAllowed(s *broadcaststate) deliverable {
 	return s.deliverable
 }
 
-var ErrEquivicatingGuardian = fmt.Errorf("equivication, guardian sent two different messages for the same round and session")
+var errEquivocation = fmt.Errorf("equivocation, guardian sent two different messages for the same round and session")
 
 func (t *Engine) updateState(s *broadcaststate, parsed broadcastMessage, unparsedContent Incoming) (shouldEcho bool, err error) {
 	unparsedSignedMessage := unparsedContent.toBroadcastMsg().Message
@@ -338,12 +338,22 @@ func (t *Engine) validateBroadcastState(s *broadcaststate, parsed broadcastMessa
 			return fmt.Errorf("caught bad behaviour: Echoer %v sent a digest that can't be verified", src.Hostname)
 		}
 
+		tid := ""
+		if s.deliverable != nil && s.deliverable.getTrackingID() != nil {
+			tid = s.deliverable.getTrackingID().ToString()
+		}
+
 		// no error and two different digests:
 		// NOTICE: this error will be triggered when a leader has no valid mapping from VAAv1 addresses/ publicKeys to
 		// the VAAv2 keys/ identities. As a result, the leader sends effectively the same VAA to be signed by the
 		// exact same guardians, which will result in TWO attempts to sign, creating a false 'equivocation' error.
-		return fmt.Errorf("equivication attack detected. Sender %v sent two different digests. "+
-			"Time %v passed from prev msg", unparsedSignedMessage.Sender, time.Since(s.timeReceived))
+		return fmt.Errorf(
+			"%w. Sender %v sent two different digests. Time %v from prev msg, extracted trackingID: %s",
+			errEquivocation,
+			src.NetworkName(),
+			time.Since(s.timeReceived),
+			tid,
+		)
 	}
 
 	return nil

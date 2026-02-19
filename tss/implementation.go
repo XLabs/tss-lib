@@ -153,30 +153,49 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	d := party.Digest{}
 	copy(d[:], req.Digest)
 
-	excluded := []*common.PartyID{}
-	if len(req.Committee) != 0 {
-		members, err := t.translateEthCommitteeMembers(req.Committee)
-		if err != nil {
-			return err
-		}
-
-		excluded = t.findExcludeesFromCommittee(members)
+	signTask := party.SigningTask{
+		Digest:       d,
+		ProtocolType: protocol,
 	}
 
-	return t.beginTSSSign(protocol, d, excluded)
+	if err := t.attemptSetCommittee(req, &signTask); err != nil {
+		return err
+	}
+
+	return t.beginTSSSign(signTask)
 }
 
-func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, fauilties []*common.PartyID) error {
-	sigtask := party.SigningTask{
-		Digest: d,
-		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      fauilties,
-		AuxiliaryData: nil, // not used anymore.
-		ProtocolType:  protocolType,
+// attemptSetCommittee will set a specific committee according to the request.
+// if a committee was requested, it'll change auxdata to ensure the trackingID will be
+// different from a request without a specific committee, even if the same digest and protocol were requested.
+func (t *Engine) attemptSetCommittee(req *signer.SignRequest, signTask *party.SigningTask) error {
+	if len(req.Committee) == 0 {
+		return nil
 	}
 
+	// indicates a specific committee was requested.
+	// changing auxiliary data to ensure the trackingID won't match the
+	// trackingID of a request with a default committee, even if the
+	// same digest and protocol were requested.
+	signTask.AuxiliaryData = []byte{specificCommitteeFlag}
+
+	// attempts to translate the requested committee, might fail due
+	// to missing partyIDs or eth address mappings.
+	members, err := t.translateEthCommitteeMembers(req.Committee)
+	if err != nil {
+		return err
+	}
+
+	// faulties specifies the parties that should be excluded from the signing committee.
+	signTask.Faulties = t.findExcludeesFromCommittee(members)
+
+	return nil
+}
+
+func (t *Engine) beginTSSSign(sigtask party.SigningTask) error {
+
 	t.logger.Info("signature requested",
-		zap.String("digest", fmt.Sprintf("%x", d[:])),
+		zap.String("digest", fmt.Sprintf("%x", sigtask.Digest[:])),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
 
@@ -197,7 +216,7 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 					Code:     int32(codes.FailedPrecondition),
 					Message:  party.ErrNotInCommittee.Error(),
 					Digest:   info.TrackingID.Digest[:],
-					Protocol: protocolType.ToString(),
+					Protocol: sigtask.ProtocolType.ToString(),
 				},
 			},
 		})
@@ -660,6 +679,12 @@ func (t *Engine) HandleIncomingTssMessage(msg Incoming) {
 	}
 
 	if err := t.handleIncomingTssMessage(msg); err != nil {
+		if errors.Is(err, errEquivocation) {
+			t.logger.Warn("possible equivocation detected, perhaps a replay of the same digest?", zap.Error(err), zap.String("sender", msg.GetSource().NetworkName()))
+
+			return
+		}
+
 		t.logger.Error("failed to handle incoming TSS message", zap.Error(err))
 	}
 }
@@ -829,7 +854,7 @@ func (t *Engine) validateUnicastDoesntExist(parsed common.ParsedMessage) error {
 		}
 
 		if *stored.verifiedDigest != msgDigest {
-			return fmt.Errorf("%w. (duration from prev unicast %v)", ErrEquivicatingGuardian, time.Since(stored.timeReceived))
+			return fmt.Errorf("%w. (duration from prev unicast %v)", errEquivocation, time.Since(stored.timeReceived))
 		}
 
 		return errUnicastAlreadyReceived
