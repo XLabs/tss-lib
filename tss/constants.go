@@ -50,8 +50,7 @@ const (
 	started    uint32 = 1
 
 	// byte sizes
-	hostnameSize = 255
-	pemKeySize   = 178
+	pemKeySize = 178
 
 	maxParties = 256
 
@@ -70,34 +69,16 @@ const (
 	// *MaxParties is 32 bytes (bitmap of max parties, currently set to 256 max parties)
 	trackingIDHexStrSize = protocolTypeSize + digestStrHexSize + auxStrHexSize + maxPartiesStrHexSize + numdashesInTrackingIDStr
 
-	defaultMaxLiveSignatures  = 20000
-	defaultMaxMessagesPerPeer = defaultMaxLiveSignatures * (numBroadcastsPerSignature + numUnicastsRounds)
+	defaultMaxLiveSignatures = 20000
 
-	// Since each sigState is created via almost any of the ftCommands, I decided on setting it as 1000 sigs a minute
-	// and multiplied it by number of minutes we have
-	sigStateRateLimit = defaultMaxLiveSignatures * int(2*defaultMaxSignerTTL/time.Minute)
-
-	defaultMaxSignerTTL     = time.Minute * 5
-	defaultDelayGraceTime   = time.Minute
-	defaultGuardianDownTime = time.Minute * 10
+	defaultMaxSignerTTL = time.Minute * 5
 
 	numBroadcastsPerSignature = 8 // GG18
 	numUnicastsRounds         = 2 // GG18
 
-	// the assumed time that a message can be delayed between two parties.
-	// for instance guardian 1 received a problem report at time 00:07, then guardian 2 can be
-	// assumed to have received the same problem report between times 00:02 and 00:12
-	synchronsingInterval = time.Second * 5
-
 	// Domain separation strings for hashing.
 	// Ensures that similar digest are different for different domains.
-	parsedProblemDomain  = "problem"
-	tssContentDomain     = "content"
-	newAnouncementDomain = "anncmnt"
-	trackingDomain       = "trackables"
+	tssContentDomain = "content"
 
-	defaultMaxDownTimeJitter = time.Minute
-	maxHeartbeatInterval     = defaultGuardianDownTime
-
-	senderIndexSize = int(unsafe.Sizeof(SenderIndex(0)))
+	leaderRequestedFlag = 1 << 0
 )

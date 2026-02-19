@@ -154,7 +154,10 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	copy(d[:], req.Digest)
 
 	excluded := []*common.PartyID{}
+
+	var flags byte
 	if len(req.Committee) != 0 {
+		flags |= leaderRequestedFlag
 		members, err := t.translateEthCommitteeMembers(req.Committee)
 		if err != nil {
 			return err
@@ -163,20 +166,25 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 		excluded = t.findExcludeesFromCommittee(members)
 	}
 
-	return t.beginTSSSign(protocol, d, excluded)
-}
-
-func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, fauilties []*common.PartyID) error {
-	sigtask := party.SigningTask{
-		Digest: d,
-		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      fauilties,
-		AuxiliaryData: nil, // not used anymore.
-		ProtocolType:  protocolType,
+	auxiliaryData := ([]byte)(nil)
+	if flags != 0 {
+		auxiliaryData = []byte{flags}
 	}
 
+	signTask := party.SigningTask{
+		Digest: d,
+		// indicating the reviving guardian will be given a chance to join the protocol.
+		Faulties:      excluded,
+		AuxiliaryData: auxiliaryData, // used to differentiate between different signing requests with the same digest.
+		ProtocolType:  protocol,
+	}
+	return t.beginTSSSign(signTask)
+}
+
+func (t *Engine) beginTSSSign(sigtask party.SigningTask) error {
+
 	t.logger.Info("signature requested",
-		zap.String("digest", fmt.Sprintf("%x", d[:])),
+		zap.String("digest", fmt.Sprintf("%x", sigtask.Digest[:])),
 		zap.String("signingProtocol", sigtask.ProtocolType.ToString()),
 	)
 
@@ -197,7 +205,7 @@ func (t *Engine) beginTSSSign(protocolType common.ProtocolType, d party.Digest, 
 					Code:     int32(codes.FailedPrecondition),
 					Message:  party.ErrNotInCommittee.Error(),
 					Digest:   info.TrackingID.Digest[:],
-					Protocol: protocolType.ToString(),
+					Protocol: sigtask.ProtocolType.ToString(),
 				},
 			},
 		})
