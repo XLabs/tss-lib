@@ -457,9 +457,7 @@ func TestEquivocation(t *testing.T) {
 			a.NoError(engine.Start(ctx, logger))
 		}
 
-		// Use a separate context for the router so we can stop it without stopping the engines
-		routerCtx, stopRouter := context.WithCancel(ctx)
-		dnchn := msgHandler(routerCtx, engines, 1)
+		dnchn := msgHandler(ctx, engines, 1)
 
 		digest := party.Digest{1, 2, 3, 4}
 		req := &signer.SignRequest{
@@ -478,11 +476,6 @@ func TestEquivocation(t *testing.T) {
 		case <-time.After(time.Second * 20):
 			a.FailNow("timeout waiting for first signature")
 		}
-
-		// Stop the router to take manual control of message routing
-		stopRouter()
-		// Allow some time for router goroutines to exit
-		time.Sleep(100 * time.Millisecond)
 
 		// 2. Trigger Replay on Sender
 		sender := engines[0]

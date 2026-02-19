@@ -203,7 +203,7 @@ func (s *GuardianStorage) SetInnerFields() error {
 
 	s.tlsCert = &tlsCert
 
-	if err := s.fillAndValidateStoredIdentities(); err != nil {
+	if err := s.processIdentities(); err != nil {
 		return err
 	}
 
@@ -236,57 +236,80 @@ func (s *GuardianStorage) SetInnerFields() error {
 }
 
 // validates the stored Identity structs. Ensures that the cert and key are valid and match.
-// ensures no nil values are stored. Verifies that the tss-lib.PartyIDs are unique.
-func (s *GuardianStorage) fillAndValidateStoredIdentities() error {
-	uniquePidIDs := make(map[string]struct{})
+// ensures no nil values are stored. Verifies that the tss-lib.PartyIDs are unique and sets
+// the communication indexes based on the sorted order of PartyIDs.
+func (s *GuardianStorage) processIdentities() error {
+	uniquePIDs := make(map[string]*Identity)
+	pids := make([]*common.PartyID, len(s.Identities))
 
 	for i, id := range s.Identities {
-		if id == nil {
-			return fmt.Errorf("error guardian %v is nil", i)
+		if err := s.setupIdentity(id); err != nil {
+			return fmt.Errorf("error processing guardian %d: %w", i, err)
 		}
 
-		c, key, err := extractCertAndKeyFromPem(id.CertPem)
-		if err != nil {
-			return fmt.Errorf("error parsing guardian %v: %w", i, err)
-		}
-
-		if id.Pid == nil {
-			return fmt.Errorf("error guardian %v PartyID is nil", i)
-		}
-
-		if len(id.Hostname) == 0 {
-			return fmt.Errorf("error guardian %v hostname is empty", i)
-		}
-
-		if len(id.Pid.GetID()) == 0 {
-			return fmt.Errorf("error guardian %v PartyID.Id is empty", i)
-		}
-
-		if _, ok := uniquePidIDs[id.Pid.GetID()]; ok {
+		if _, ok := uniquePIDs[id.Pid.GetID()]; ok {
 			return fmt.Errorf("error guardian %v PartyID.Id is not unique", i)
 		}
-		uniquePidIDs[id.Pid.GetID()] = struct{}{}
+		uniquePIDs[id.Pid.GetID()] = id
+		pids[i] = id.Pid
+	}
 
-		// storing the cert and key in the identity struct.
-		id.Key = key
-		id.Cert = c
+	// sorting the PartyIDs to ensure a deterministic order for tss-lib,
+	//  which relies on the order of PartyIDs to assign communication indexes.
+	sortedPids := common.SortPartyIDs(pids)
 
-		keypem, err := internal.PublicKeyToPem(key)
-		if err != nil {
-			return fmt.Errorf("error converting guardian %v  cert's PK  to pem: %v", i, err)
-		}
+	sortedIdentities := make([]*Identity, len(s.Identities))
+	for i, pid := range sortedPids {
+		sortedIdentities[i] = uniquePIDs[pid.GetID()]
+		sortedIdentities[i].CommunicationIndex = SenderIndex(i)
+	}
 
-		// ensuring the stored KeyPEM matches the cert's public key.
-		if !bytes.Equal(keypem, id.KeyPEM) {
-			return fmt.Errorf("error guardian %v stored KeyPEM does not match cert's public key", i)
-		}
+	// re-assigning the sorted identities back to the storage.
+	s.IdentitiesKeep.Identities = sortedIdentities
 
-		id.CommunicationIndex = SenderIndex(i)
-		id.networkname = id.portAndHostToNetName()
+	return nil
+}
 
-		if bytes.Equal(id.KeyPEM, s.Self.KeyPEM) {
-			s.Self = id.Copy() // ensuring Self is set up correctly.
-		}
+func (s *GuardianStorage) setupIdentity(id *Identity) error {
+	if id == nil {
+		return fmt.Errorf("guardian is nil")
+	}
+
+	c, key, err := extractCertAndKeyFromPem(id.CertPem)
+	if err != nil {
+		return fmt.Errorf("error parsing guardian: %w", err)
+	}
+
+	if id.Pid == nil {
+		return fmt.Errorf("guardian PartyID is nil")
+	}
+
+	if len(id.Hostname) == 0 {
+		return fmt.Errorf("guardian hostname is empty")
+	}
+
+	if len(id.Pid.GetID()) == 0 {
+		return fmt.Errorf("guardian PartyID.Id is empty")
+	}
+
+	// storing the cert and key in the identity struct.
+	id.Key = key
+	id.Cert = c
+
+	keypem, err := internal.PublicKeyToPem(key)
+	if err != nil {
+		return fmt.Errorf("error converting guardian cert's PK to pem: %v", err)
+	}
+
+	// ensuring the stored KeyPEM matches the cert's public key.
+	if !bytes.Equal(keypem, id.KeyPEM) {
+		return fmt.Errorf("guardian stored KeyPEM does not match cert's public key")
+	}
+
+	id.networkname = id.portAndHostToNetName()
+
+	if bytes.Equal(id.KeyPEM, s.Self.KeyPEM) {
+		s.Self = id.Copy() // ensuring Self is set up correctly.
 	}
 
 	return nil
