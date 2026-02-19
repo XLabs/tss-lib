@@ -8,7 +8,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -443,4 +445,41 @@ func TestCertKey(t *testing.T) {
 		err = kInvalid.updateIdentity(id)
 		a.Error(err)
 	})
+}
+
+func TestSelfUpdatedAfterProcessIdentities(t *testing.T) {
+	a := require.New(t)
+
+	engines, err := loadGuardians(5, "tss5")
+	a.NoError(err)
+
+	// Use the last engine to ensure the index is not 0
+	gs := &engines[4].GuardianStorage
+
+	// Shuffle identities to ensure sorting is actually happening
+	mathrand.Shuffle(
+		len(gs.Identities),
+		func(i, j int) { gs.Identities[i], gs.Identities[j] = gs.Identities[j], gs.Identities[i] },
+	)
+	fmt.Println("Shuffled Identities:", gs.Identities)
+
+	incorrectIndex := SenderIndex(len(gs.Identities) + 10)
+	gs.Self.CommunicationIndex = incorrectIndex
+
+	// Call SetInnerFields which triggers processIdentities
+	a.NoError(gs.SetInnerFields())
+
+	// Verify incorrectIndex!=Self.CommunicationIndex <len(identities) updated correctly
+	a.NotEqual(incorrectIndex, gs.Self.CommunicationIndex)
+	a.Less(int(gs.Self.CommunicationIndex), len(gs.IdentitiesKeep.Identities))
+
+	// verify self identity is in its stated position in identitiesKeep
+	a.Equal(gs.IdentitiesKeep.Identities[gs.Self.CommunicationIndex].Pid, gs.Self.Pid)
+
+	// Verify identities are sorted
+	for i := 0; i < len(gs.Identities)-1; i++ {
+		id1 := gs.Identities[i].Pid.GetID()
+		id2 := gs.Identities[i+1].Pid.GetID()
+		a.Less(id1, id2, "Identities should be sorted by PartyID")
+	}
 }

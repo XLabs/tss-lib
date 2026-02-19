@@ -178,7 +178,6 @@ func (t *Engine) attemptSetCommittee(req *signer.SignRequest, signTask *party.Si
 	// trackingID of a request with a default committee, even if the
 	// same digest and protocol were requested.
 	signTask.AuxiliaryData = []byte{specificCommitteeFlag}
-	signTask.Faulties = nil
 
 	// attempts to translate the requested committee, might fail due
 	// to missing partyIDs or eth address mappings.

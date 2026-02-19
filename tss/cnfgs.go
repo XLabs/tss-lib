@@ -255,13 +255,17 @@ func (s *GuardianStorage) processIdentities() error {
 	}
 
 	// sorting the PartyIDs to ensure a deterministic order for tss-lib,
-	//  which relies on the order of PartyIDs to assign communication indexes.
+	// since each is unique it's safe to use the sorted order to assign communication indexes.
 	sortedPids := common.SortPartyIDs(pids)
 
 	sortedIdentities := make([]*Identity, len(s.Identities))
 	for i, pid := range sortedPids {
 		sortedIdentities[i] = uniquePIDs[pid.GetID()]
 		sortedIdentities[i].CommunicationIndex = SenderIndex(i)
+
+		if bytes.Equal(sortedIdentities[i].KeyPEM, s.Self.KeyPEM) {
+			s.Self = sortedIdentities[i].Copy() // ensuring Self is set up correctly.
+		}
 	}
 
 	// re-assigning the sorted identities back to the storage.
@@ -307,10 +311,6 @@ func (s *GuardianStorage) setupIdentity(id *Identity) error {
 	}
 
 	id.networkname = id.portAndHostToNetName()
-
-	if bytes.Equal(id.KeyPEM, s.Self.KeyPEM) {
-		s.Self = id.Copy() // ensuring Self is set up correctly.
-	}
 
 	return nil
 }
