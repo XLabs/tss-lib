@@ -347,9 +347,8 @@ func (t *Engine) validateBroadcastState(s *broadcaststate, parsed broadcastMessa
 		// NOTICE: this error will be triggered when a leader has no valid mapping from VAAv1 addresses/ publicKeys to
 		// the VAAv2 keys/ identities. As a result, the leader sends effectively the same VAA to be signed by the
 		// exact same guardians, which will result in TWO attempts to sign, creating a false 'equivocation' error.
-		s.deliverable.getTrackingID()
 		return fmt.Errorf(
-			"%w. Sender %v sent two different digests.Time %v from prev msg, extracted trackingID: %s",
+			"%w. Sender %v sent two different digests. Time %v from prev msg, extracted trackingID: %s",
 			errEquivocation,
 			src.NetworkName(),
 			time.Since(s.timeReceived),

@@ -445,7 +445,7 @@ func TestEquivocation(t *testing.T) {
 		}
 	})
 
-	t.Run("TestEquivocationOnReplaySameDigest", func(t *testing.T) {
+	t.Run("replaySameDigest", func(t *testing.T) {
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)
@@ -518,7 +518,7 @@ func TestEquivocation(t *testing.T) {
 		a.ErrorIs(err, errEquivocation)
 	})
 
-	t.Run("TestNoEquivocationBetweenCommitteeAndNonCommittee", func(t *testing.T) {
+	t.Run("noEquivocationBetweenCommitteeAndNonCommittee", func(t *testing.T) {
 		a := assert.New(t)
 		engines, err := loadGuardians(5, "tss5")
 		a.NoError(err)
@@ -788,7 +788,7 @@ func TestBeginAsyncThresholdSigningProtocol_CommitteeCheck(t *testing.T) {
 	a.Nil(mock.capturedTask.AuxiliaryData)
 }
 
-// mockFullParty wraps the real FullParty to capture arguments
+// fullPartyWithCapture wraps the real FullParty to capture arguments
 type fullPartyWithCapture struct {
 	party.FullParty
 	capturedTask party.SigningTask
