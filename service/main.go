@@ -77,6 +77,10 @@ func runMain(p runParams) {
 		p.logger.Fatal("failed to load secrets file", zap.Error(err))
 	}
 
+	if !st.HasEthKeyMappings() {
+		p.logger.Warn("no Ethereum key mappings found in secrets file! Leader mechanism will not work without them.")
+	}
+
 	supportedProtocols := st.ExistingSecretsForSigning()
 
 	p.logger.Info(

@@ -100,6 +100,11 @@ type IdentitiesKeep struct {
 	partyidToIndex map[string]int
 	peerCerts      []*x509.Certificate
 	partyIds       []*common.PartyID
+	hasEthMapping  bool
+}
+
+func (ids *IdentitiesKeep) HasEthKeyMappings() bool {
+	return ids.hasEthMapping
 }
 
 var errUnknownPartyID = fmt.Errorf("unknown partyID")

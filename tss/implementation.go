@@ -153,32 +153,45 @@ func (t *Engine) BeginAsyncThresholdSigningProtocol(req *signer.SignRequest) err
 	d := party.Digest{}
 	copy(d[:], req.Digest)
 
-	excluded := []*common.PartyID{}
-
-	var flags byte
-	if len(req.Committee) != 0 {
-		flags |= leaderRequestedFlag
-		members, err := t.translateEthCommitteeMembers(req.Committee)
-		if err != nil {
-			return err
-		}
-
-		excluded = t.findExcludeesFromCommittee(members)
-	}
-
-	auxiliaryData := ([]byte)(nil)
-	if flags != 0 {
-		auxiliaryData = []byte{flags}
-	}
-
 	signTask := party.SigningTask{
-		Digest: d,
-		// indicating the reviving guardian will be given a chance to join the protocol.
-		Faulties:      excluded,
-		AuxiliaryData: auxiliaryData, // used to differentiate between different signing requests with the same digest.
-		ProtocolType:  protocol,
+		Digest:       d,
+		ProtocolType: protocol,
 	}
+
+	if err := t.attemptSetCommittee(req, &signTask); err != nil {
+		return err
+	}
+
 	return t.beginTSSSign(signTask)
+}
+
+// attemptSetCommittee will set a specific committee according to the request.
+// if a committee was requested, it'll change auxdata to ensure the trackingID will be
+// different from a request without a specific committee, even if the same digest and protocol were requested.
+func (t *Engine) attemptSetCommittee(req *signer.SignRequest, signTask *party.SigningTask) error {
+	if len(req.Committee) == 0 {
+		return nil
+	}
+	// indicates a specific committee was requested.
+	// changing auxiliary data to ensure the trackingID won't match the trackingID of a request without a specific committee, even if the same digest and protocol were requested.
+	signTask.AuxiliaryData = []byte{specificCommitteeFlag}
+	signTask.Faulties = nil
+
+	if !t.HasEthKeyMappings() {
+		t.logger.Warn("specific committee requested, but no eth key mappings found! proceeding with default committee.")
+
+		return nil
+	}
+
+	members, err := t.translateEthCommitteeMembers(req.Committee)
+	if err != nil {
+		return err
+	}
+
+	// faulties specifies the parties that should be excluded from the signing committee.
+	signTask.Faulties = t.findExcludeesFromCommittee(members)
+
+	return nil
 }
 
 func (t *Engine) beginTSSSign(sigtask party.SigningTask) error {

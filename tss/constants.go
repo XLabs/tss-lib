@@ -80,5 +80,5 @@ const (
 	// Ensures that similar digest are different for different domains.
 	tssContentDomain = "content"
 
-	leaderRequestedFlag = 1 << 0
+	specificCommitteeFlag = 1 << 0
 )

@@ -779,7 +779,9 @@ func TestBeginAsyncThresholdSigningProtocol_CommitteeCheck(t *testing.T) {
 	err := e.BeginAsyncThresholdSigningProtocol(req)
 	a.NoError(err)
 	a.NotNil(mock.capturedTask.AuxiliaryData)
-	a.Equal(byte(leaderRequestedFlag), mock.capturedTask.AuxiliaryData[0])
+	a.Equal(byte(specificCommitteeFlag), mock.capturedTask.AuxiliaryData[0])
+
+	setEthAddresses(engines)
 
 	// 2. Test without Committee (Flag should NOT be set)
 	req.Committee = nil
