@@ -23,6 +23,7 @@ import (
 	common "github.com/xlabs/tss-common"
 	engine "github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
+	"github.com/xlabs/tss-lib/v2/tss/internal/testutils"
 )
 
 // create these from scrath, then store it into a single file.
@@ -288,9 +289,10 @@ func (d dkgTest) createLKG(t *testing.T) SetupConfigs {
 		}
 		sk, cert := createTLSCert(hostname)
 		mainCnf.Peers[i] = Identifier{
-			Hostname: hostname,
-			TlsX509:  cert,
-			Port:     port,
+			Hostname:   hostname,
+			TlsX509:    cert,
+			Port:       port,
+			EthAddress: fmt.Sprintf("0x%040x", big.NewInt(int64(i))), // dummy eth address
 		}
 
 		mainCnf.Secrets[i] = internal.PrivateKeyToPem(sk)
@@ -366,8 +368,13 @@ func (d dkgTest) RunDKG(t *testing.T) {
 		return
 	}
 	// store the guardians into internal/testutils/testdata/dkg5
-	mainFolder := "tss5"
-	resultDir := path.Join("..", "..", "..", "..", "internal", "testutils", "testdata", mainFolder)
+
+	setname := fmt.Sprintf("tss%d", len(d.hostnames))
+	resultDir, err := testutils.GetGuardianStorageDir(setname)
+	if err != nil {
+		t.Fatalf("failed to get guardian storage dir: %v", err)
+	}
+
 	cleanResultFolder(t, resultDir)
 
 	for i := range d.hostnames {

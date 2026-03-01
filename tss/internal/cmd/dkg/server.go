@@ -47,7 +47,10 @@ func main() {
 	logger.Info("Loading KeyGenerator and GuardianStorage for DKG...")
 	cnfgs, prot := loadConfigsFromFlags(logger)
 
-	peersFingerprint := cmd.PeersFingerprint(cnfgs)
+	peersFingerprint, err := cmd.PeersFingerprint(cnfgs)
+	if err != nil {
+		logger.Fatal("failed to get peers fingerprint", zap.Error(err))
+	}
 
 	logger.Info("Config loaded successfully. Starting DKG server with the following parameters:",
 		zap.String("peers-fingerprint", peersFingerprint),

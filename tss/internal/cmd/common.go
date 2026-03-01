@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	common "github.com/xlabs/tss-common"
 	engine "github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
@@ -18,6 +19,9 @@ type Identifier struct {
 	Hostname string
 	TlsX509  engine.PEM // PEM Encoded (see certs.go). Note, you must have the private key of this cert later.
 	Port     int        // if one needs different ports, tell it here.
+
+	// must be an EVM address hex encoded with 0x prefix
+	EthAddress string // optional field. If empty DKG can proceed, but the leader mechanism fields won't be used.
 }
 
 type SetupConfigs struct {
@@ -77,6 +81,15 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 		// convert the byte array to a string representation for use as the party ID
 		pid := hex.EncodeToString(pidbytes[:])
 
+		var ethAdd *ethcommon.Address
+		if peer.EthAddress != "" {
+			if !ethcommon.IsHexAddress(peer.EthAddress) {
+				return nil, nil, fmt.Errorf("peer %d has invalid eth address: %s", i, peer.EthAddress)
+			}
+			tmp := ethcommon.HexToAddress(peer.EthAddress)
+			ethAdd = &tmp
+		}
+
 		keyToEngineIdentity[string(bts)] = &engine.Identity{
 			Pid: &common.PartyID{
 				ID: string(pid),
@@ -88,7 +101,7 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 			Hostname:           peer.Hostname,
 			Port:               peer.Port,
 			Key:                nil, // Filled by the guardian storage on boot.
-			EthAddress:         nil, // not used in dkg, so nil.
+			EthAddress:         ethAdd,
 		}
 
 		keyToID[string(bts)] = &cnfg.Peers[i]
@@ -119,9 +132,9 @@ func SortIdentities(unsortedIdentities map[string]*engine.Identity) []*engine.Id
 	return sortedIDS
 }
 
-func serializeIdentifier(id *Identifier) []byte {
-	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port.
-	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8)
+func serializeIdentifier(id *Identifier) ([]byte, error) {
+	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port + 1 byte for eth presence + (if present) 4 bytes for eth address length + eth address bytes.
+	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8+1+4+ethcommon.AddressLength)
 
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.TlsX509)))
 	buf = append(buf, id.TlsX509...)
@@ -129,17 +142,33 @@ func serializeIdentifier(id *Identifier) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.Hostname)))
 	buf = append(buf, id.Hostname...)
 
-	return binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+	buf = binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+
+	ethAddr := ethcommon.Address{}
+	if id.EthAddress != "" {
+		if !ethcommon.IsHexAddress(id.EthAddress) {
+			return nil, fmt.Errorf("invalid eth address: %s", id.EthAddress)
+		}
+		ethAddr = ethcommon.HexToAddress(id.EthAddress)
+	}
+
+	buf = append(buf, ethAddr.Bytes()...) // indicate presence of eth address
+
+	return buf, nil
 }
 
 // PeersFingerprint computes a fingerprint of the peers in the config.
 // It does this by serializing each peer's identifier, sorting them, and then hashing the
 // concatenated result.
 // This can be used to verify that all parties have the same view of the peers configuration.
-func PeersFingerprint(cnfgs *SetupConfigs) string {
+func PeersFingerprint(cnfgs *SetupConfigs) (string, error) {
 	peersAsBytes := make([][]byte, len(cnfgs.Peers))
 	for i, peer := range cnfgs.Peers {
-		peersAsBytes[i] = serializeIdentifier(&peer)
+		peerBytes, err := serializeIdentifier(&peer)
+		if err != nil {
+			return "", fmt.Errorf("failed to serialize peer %d identifier: %w", i, err)
+		}
+		peersAsBytes[i] = peerBytes
 	}
 
 	// Using stable sort to ensure that the order of peers with the same identifier
@@ -153,5 +182,5 @@ func PeersFingerprint(cnfgs *SetupConfigs) string {
 		h.Write(peerBytes)
 	}
 
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
