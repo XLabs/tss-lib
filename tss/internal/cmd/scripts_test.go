@@ -375,7 +375,6 @@ func (d dkgTest) RunDKG(t *testing.T) {
 		t.Fatalf("failed to get guardian storage dir: %v", err)
 	}
 
-	// resultDir := path.Join("..", "..", "..", "..", "internal", "testutils", "testdata", mainFolder)
 	cleanResultFolder(t, resultDir)
 
 	for i := range d.hostnames {

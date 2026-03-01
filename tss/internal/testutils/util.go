@@ -35,6 +35,7 @@ func GetGuardianStorageDir(guardianTssStorageSet ...string) (string, error) {
 
 	return filepath.Join(filepath.Dir(file), "testdata", setFolder), nil
 }
+
 func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...string) (string, error) {
 	dir, err := GetGuardianStorageDir(guardianTssStorageSet...)
 	if err != nil {
