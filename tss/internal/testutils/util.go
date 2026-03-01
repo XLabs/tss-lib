@@ -3,7 +3,7 @@ package testutils
 import (
 	"errors"
 	"fmt"
-	"path"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -33,7 +33,7 @@ func GetGuardianStorageDir(guardianTssStorageSet ...string) (string, error) {
 		setFolder = guardianTssStorageSet[0]
 	}
 
-	return path.Join(path.Dir(file), "testdata", setFolder), nil
+	return filepath.Join(filepath.Dir(file), "testdata", setFolder), nil
 }
 func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...string) (string, error) {
 	dir, err := GetGuardianStorageDir(guardianTssStorageSet...)
@@ -41,7 +41,7 @@ func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...strin
 		return "", err
 	}
 
-	guardianStorageFname := path.Join(dir, fmt.Sprintf("guardian%d.json", guardianIndex))
+	guardianStorageFname := filepath.Join(dir, fmt.Sprintf("guardian%d.json", guardianIndex))
 	return guardianStorageFname, nil
 }
 
