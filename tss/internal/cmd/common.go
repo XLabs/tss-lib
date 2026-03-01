@@ -132,16 +132,18 @@ func SortIdentities(unsortedIdentities map[string]*engine.Identity) []*engine.Id
 	return sortedIDS
 }
 
-const nonExistentEthAddressMarker = "<nilEthAddr>"
-
 func serializeIdentifier(id *Identifier) []byte {
-	ethAddr := []byte(nonExistentEthAddressMarker)
+	var ethAddr []byte
 	if id.EthAddress != "" {
-		ethAddr = []byte(id.EthAddress)
+		if ethcommon.IsHexAddress(id.EthAddress) {
+			ethAddr = []byte(ethcommon.HexToAddress(id.EthAddress).Hex())
+		} else {
+			ethAddr = []byte(id.EthAddress)
+		}
 	}
 
-	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port + 4 bytes for eth address length + eth address bytes.
-	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8+4+len(ethAddr))
+	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port + 1 byte for eth presence + (if present) 4 bytes for eth address length + eth address bytes.
+	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8+1+4+len(ethAddr))
 
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.TlsX509)))
 	buf = append(buf, id.TlsX509...)
@@ -151,8 +153,13 @@ func serializeIdentifier(id *Identifier) []byte {
 
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
 
-	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ethAddr)))
-	buf = append(buf, ethAddr...)
+	if len(ethAddr) == 0 {
+		buf = append(buf, byte(0)) // indicate non presence of eth address
+	} else {
+		buf = append(buf, byte(1)) // indicate presence of eth address
+		buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ethAddr)))
+		buf = append(buf, ethAddr...)
+	}
 
 	return buf
 }
