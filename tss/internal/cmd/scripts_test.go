@@ -292,7 +292,7 @@ func (d dkgTest) createLKG(t *testing.T) SetupConfigs {
 			Hostname:   hostname,
 			TlsX509:    cert,
 			Port:       port,
-			EthAddress: fmt.Sprintf("0x000000000000000000000000000000000000000%d", i), // dummy eth address
+			EthAddress: fmt.Sprintf("0x%040x", big.NewInt(int64(i))), // dummy eth address
 		}
 
 		mainCnf.Secrets[i] = internal.PrivateKeyToPem(sk)

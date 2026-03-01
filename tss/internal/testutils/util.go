@@ -21,7 +21,7 @@ func MustGetMockGuardianTssStorage() string {
 }
 
 // GetGuardianStorageDir returns a directory to store guardian TSS data.
-// guardianTssStorageSet should be somthing like tss<NumServers> If not provided, it defaults to "tss5".
+// guardianTssStorageSet should be something like tss<NumServers> If not provided, it defaults to "tss5".
 func GetGuardianStorageDir(guardianTssStorageSet ...string) (string, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

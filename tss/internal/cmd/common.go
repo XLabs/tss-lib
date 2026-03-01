@@ -132,9 +132,16 @@ func SortIdentities(unsortedIdentities map[string]*engine.Identity) []*engine.Id
 	return sortedIDS
 }
 
+const nonExistentEthAddressMarker = "<nilEthAddr>"
+
 func serializeIdentifier(id *Identifier) []byte {
-	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port.
-	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8)
+	ethAddr := []byte(nonExistentEthAddressMarker)
+	if id.EthAddress != "" {
+		ethAddr = []byte(id.EthAddress)
+	}
+
+	// 4 bytes for cert length + cert bytes + 4 bytes for hostname length + hostname bytes + 8 bytes for port + 4 bytes for eth address length + eth address bytes.
+	buf := make([]byte, 0, 4+len(id.TlsX509)+4+len(id.Hostname)+8+4+len(ethAddr))
 
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.TlsX509)))
 	buf = append(buf, id.TlsX509...)
@@ -142,7 +149,12 @@ func serializeIdentifier(id *Identifier) []byte {
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(id.Hostname)))
 	buf = append(buf, id.Hostname...)
 
-	return binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+	buf = binary.LittleEndian.AppendUint64(buf, uint64(id.Port))
+
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(ethAddr)))
+	buf = append(buf, ethAddr...)
+
+	return buf
 }
 
 // PeersFingerprint computes a fingerprint of the peers in the config.
