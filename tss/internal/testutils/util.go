@@ -20,7 +20,9 @@ func MustGetMockGuardianTssStorage() string {
 	return str
 }
 
-func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...string) (string, error) {
+// GetGuardianStorageDir returns a directory to store guardian TSS data.
+// guardianTssStorageSet should be somthing like tss<NumServers> If not provided, it defaults to "tss5".
+func GetGuardianStorageDir(guardianTssStorageSet ...string) (string, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return "", errors.New("could not get runtime.Caller(0)")
@@ -30,7 +32,16 @@ func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...strin
 	if len(guardianTssStorageSet) > 0 {
 		setFolder = guardianTssStorageSet[0]
 	}
-	guardianStorageFname := path.Join(path.Dir(file), "testdata", setFolder, fmt.Sprintf("guardian%d.json", guardianIndex))
+
+	return path.Join(path.Dir(file), "testdata", setFolder), nil
+}
+func GetMockGuardianTssStorage(guardianIndex int, guardianTssStorageSet ...string) (string, error) {
+	dir, err := GetGuardianStorageDir(guardianTssStorageSet...)
+	if err != nil {
+		return "", err
+	}
+
+	guardianStorageFname := path.Join(dir, fmt.Sprintf("guardian%d.json", guardianIndex))
 	return guardianStorageFname, nil
 }
 

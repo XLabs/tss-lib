@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	common "github.com/xlabs/tss-common"
 	engine "github.com/xlabs/tss-lib/v2/tss"
 	"github.com/xlabs/tss-lib/v2/tss/internal"
@@ -18,6 +19,9 @@ type Identifier struct {
 	Hostname string
 	TlsX509  engine.PEM // PEM Encoded (see certs.go). Note, you must have the private key of this cert later.
 	Port     int        // if one needs different ports, tell it here.
+
+	// must be an EVM address hex encoded with 0x prefix
+	EthAddress string // optional field. If empty DKG can proceed, but the leader mechanism fields won't be used.
 }
 
 type SetupConfigs struct {
@@ -77,6 +81,15 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 		// convert the byte array to a string representation for use as the party ID
 		pid := hex.EncodeToString(pidbytes[:])
 
+		var ethAdd *ethcommon.Address
+		if peer.EthAddress != "" {
+			if !ethcommon.IsHexAddress(peer.EthAddress) {
+				return nil, nil, fmt.Errorf("invalid eth address: %s", peer.EthAddress)
+			}
+			tmp := ethcommon.HexToAddress(peer.EthAddress)
+			ethAdd = &tmp
+		}
+
 		keyToEngineIdentity[string(bts)] = &engine.Identity{
 			Pid: &common.PartyID{
 				ID: string(pid),
@@ -88,7 +101,7 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 			Hostname:           peer.Hostname,
 			Port:               peer.Port,
 			Key:                nil, // Filled by the guardian storage on boot.
-			EthAddress:         nil, // not used in dkg, so nil.
+			EthAddress:         ethAdd,
 		}
 
 		keyToID[string(bts)] = &cnfg.Peers[i]
