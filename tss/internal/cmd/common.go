@@ -84,7 +84,7 @@ func (cnfg *SetupConfigs) IntoMaps() (keyToEngineIdentity map[string]*engine.Ide
 		var ethAdd *ethcommon.Address
 		if peer.EthAddress != "" {
 			if !ethcommon.IsHexAddress(peer.EthAddress) {
-				return nil, nil, fmt.Errorf("invalid eth address: %s", peer.EthAddress)
+				return nil, nil, fmt.Errorf("peer %d has invalid eth address: %s", i, peer.EthAddress)
 			}
 			tmp := ethcommon.HexToAddress(peer.EthAddress)
 			ethAdd = &tmp
